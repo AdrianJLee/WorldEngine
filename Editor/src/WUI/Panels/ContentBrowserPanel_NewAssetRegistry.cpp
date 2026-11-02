@@ -1,3 +1,4 @@
+#include "World/Environment/PCGBiome.h"
 #include "World/Gameplay/Framework/BehaviorTreeAsset.h"
 
 #include "World/Math/Curve/CubicBezierCurve.h"
@@ -114,6 +115,27 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				return true;
 			});
 		// 曲线资产(.wcurve):工业级曲线资产
+		// PCG Graph (.wpcggraph): 纯净程序化内容规则图资产
+		add("pcggraph", "PCG Graph (PCG 规则图)", ".wpcggraph", 35, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_pcg_rules", ".wpcggraph");
+				PCGGraphAsset asset;
+				asset.Name = target.stem().string();
+				asset.RuleGraph = PCGRuleGraphDesc::CreateBlank();
+				if (!asset.SaveToFile(target.string(), error))
+				{
+					if (error && error->empty()) *error = "could not write " + target.string();
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-pcggraph");
+				std::error_code ec;
+				std::string rel = std::filesystem::relative(target, Paths::ProjectDir(), ec).generic_string();
+				m_Host.OpenPcgEditor(rel.empty() ? target.string() : rel);
+				return true;
+			});
+
 		add("curve", "Curve (曲线资产)", ".wcurve", 29, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{

@@ -121,7 +121,6 @@ namespace
 		{ "World::WeatherSystemComponent",          48 },
 		{ "World::WeatherVolumeComponent",          48 },
 		{ "World::BiomePCGComponent",              48 },
-		{ "World::EQSComponent",                    32 },
 		{ "World::BehaviorTreeComponent",            64 },
 		{ "World::FoliageInteractionComponent",     32 },
 	};

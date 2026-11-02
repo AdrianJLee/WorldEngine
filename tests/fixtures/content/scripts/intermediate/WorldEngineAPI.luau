@@ -1195,8 +1195,6 @@ function ui:isOpen() end
 ---@field EnableCollision boolean
 ---@field EnableLimit boolean
 
--- Component fields are exposed through Entity:GetComponent("EQSComponent"); there is no runtime global named EQSComponent.
----@class EQSComponent
 ---@field OptimalDistance number
 ---@field ThreatEntityHint number
 ---@field GeneratorMode number
@@ -1813,8 +1811,6 @@ function ui:isOpen() end
 ---@field DirectionalLight string Short alias for "DirectionalLightComponent".
 ---@field DistanceJoint2DComponent string Registered component type name "DistanceJoint2DComponent".
 ---@field DistanceJoint2D string Short alias for "DistanceJoint2DComponent".
----@field EQSComponent string Registered component type name "EQSComponent".
----@field EQS string Short alias for "EQSComponent".
 ---@field FoliageComponent string Registered component type name "FoliageComponent".
 ---@field Foliage string Short alias for "FoliageComponent".
 ---@field FoliageInteractionComponent string Registered component type name "FoliageInteractionComponent".

@@ -84,7 +84,6 @@ const TypeSchema& WeSchemaOf_WaterBodyComponent();
 const TypeSchema& WeSchemaOf_WeatherSystemComponent();
 const TypeSchema& WeSchemaOf_WeatherVolumeComponent();
 const TypeSchema& WeSchemaOf_BiomePCGComponent();
-const TypeSchema& WeSchemaOf_EQSComponent();
 const TypeSchema& WeSchemaOf_BehaviorTreeComponent();
 const TypeSchema& WeSchemaOf_FoliageInteractionComponent();
 const TypeSchema& WeSchemaOf_LocalWindComponent();
@@ -16799,45 +16798,45 @@ struct GeneratedAccess<World::BiomePCGComponent>
         World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
         AssetOps<std::remove_reference_t<decltype(self->RuleAsset)>>::SetIdentity(self->RuleAsset, identity);
     }
-    static Value Get_MinElevation(const void* instance)
+    static Value Get_BoundsRadius(const void* instance)
     {
         const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
-        return Value(self->MinElevation);
+        return Value(self->BoundsRadius);
     }
-    static void Set_MinElevation(void* instance, const Value& value)
+    static void Set_BoundsRadius(void* instance, const Value& value)
     {
         World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
-        self->MinElevation = std::get<float>(value);
+        self->BoundsRadius = std::get<float>(value);
     }
-    static Value Get_MaxElevation(const void* instance)
+    static Value Get_BoundsHeight(const void* instance)
     {
         const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
-        return Value(self->MaxElevation);
+        return Value(self->BoundsHeight);
     }
-    static void Set_MaxElevation(void* instance, const Value& value)
+    static void Set_BoundsHeight(void* instance, const Value& value)
     {
         World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
-        self->MaxElevation = std::get<float>(value);
+        self->BoundsHeight = std::get<float>(value);
     }
-    static Value Get_MaxSlope(const void* instance)
+    static Value Get_DensityMultiplier(const void* instance)
     {
         const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
-        return Value(self->MaxSlope);
+        return Value(self->DensityMultiplier);
     }
-    static void Set_MaxSlope(void* instance, const Value& value)
+    static void Set_DensityMultiplier(void* instance, const Value& value)
     {
         World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
-        self->MaxSlope = std::get<float>(value);
+        self->DensityMultiplier = std::get<float>(value);
     }
-    static Value Get_MoistureThreshold(const void* instance)
+    static Value Get_ClearanceMargin(const void* instance)
     {
         const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
-        return Value(self->MoistureThreshold);
+        return Value(self->ClearanceMargin);
     }
-    static void Set_MoistureThreshold(void* instance, const Value& value)
+    static void Set_ClearanceMargin(void* instance, const Value& value)
     {
         World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
-        self->MoistureThreshold = std::get<float>(value);
+        self->ClearanceMargin = std::get<float>(value);
     }
     static Value Get_Seed(const void* instance)
     {
@@ -16849,6 +16848,16 @@ struct GeneratedAccess<World::BiomePCGComponent>
         World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
         self->Seed = std::get<uint32_t>(value);
     }
+    static Value Get_GenerateOnPlay(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(self->GenerateOnPlay);
+    }
+    static void Set_GenerateOnPlay(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        self->GenerateOnPlay = std::get<uint8_t>(value);
+    }
     static Value Get_AutoDeformTerrain(const void* instance)
     {
         const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
@@ -16858,6 +16867,16 @@ struct GeneratedAccess<World::BiomePCGComponent>
     {
         World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
         self->AutoDeformTerrain = std::get<uint8_t>(value);
+    }
+    static Value Get_LivePreview(const void* instance)
+    {
+        const World::BiomePCGComponent* self = static_cast<const World::BiomePCGComponent*>(instance);
+        return Value(self->LivePreview);
+    }
+    static void Set_LivePreview(void* instance, const Value& value)
+    {
+        World::BiomePCGComponent* self = static_cast<World::BiomePCGComponent*>(instance);
+        self->LivePreview = std::get<uint8_t>(value);
     }
     static const FieldSchema& Field_RuleAsset()
     {
@@ -16872,7 +16891,7 @@ struct GeneratedAccess<World::BiomePCGComponent>
             nullptr,
             nullptr,
             "PCGRule",
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Rule graph definition asset.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "PCG 规则图定义资产路径 (*.wpcggraph)。", false, "", {  }, "", std::nullopt },
             Value(),
             CollectionKind::None,
             Kind::None,
@@ -16884,75 +16903,75 @@ struct GeneratedAccess<World::BiomePCGComponent>
         };
         return schema;
     }
-    static const FieldSchema& Field_MinElevation()
+    static const FieldSchema& Field_BoundsRadius()
     {
         static const FieldSchema schema = {
-            FieldId{ 0x24E77149936862D1ull },
-            "MinElevation",
+            FieldId{ 0x9CA5C526C1A130D5ull },
+            "BoundsRadius",
             Kind::Float,
-            &Get_MinElevation,
-            &Set_MinElevation,
+            &Get_BoundsRadius,
+            &Set_BoundsRadius,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5000.000000f), false, false, "Minimum elevation bound in meters.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(2000.000000f), false, false, "空间生成区域的作用半径 (米)。", false, "", {  }, "", std::nullopt },
+            Value(50.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_BoundsHeight()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xD3B7FB01FE8F28D8ull },
+            "BoundsHeight",
+            Kind::Float,
+            &Get_BoundsHeight,
+            &Set_BoundsHeight,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(1000.000000f), false, false, "空间生成区域的垂直半高 (米)。", false, "", {  }, "", std::nullopt },
+            Value(40.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_DensityMultiplier()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x7B82B8619BBA72B5ull },
+            "DensityMultiplier",
+            Kind::Float,
+            &Get_DensityMultiplier,
+            &Set_DensityMultiplier,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.050000f), std::optional<float>(10.000000f), false, false, "空间采样的全局密度倍数。", false, "", {  }, "", std::nullopt },
+            Value(1.0f),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_ClearanceMargin()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xA4A5B048F97661EEull },
+            "ClearanceMargin",
+            Kind::Float,
+            &Get_ClearanceMargin,
+            &Set_ClearanceMargin,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(100.000000f), false, false, "生成区域边缘或道路通道的安全清空留白宽度 (米)。", false, "", {  }, "", std::nullopt },
             Value(0.0f),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_MaxElevation()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xE3464B396EB78D4Full },
-            "MaxElevation",
-            Kind::Float,
-            &Get_MaxElevation,
-            &Set_MaxElevation,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(5000.000000f), false, false, "Maximum elevation bound in meters.", false, "", {  }, "", std::nullopt },
-            Value(1000.0f),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_MaxSlope()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xAE76B71919DB47C7ull },
-            "MaxSlope",
-            Kind::Float,
-            &Get_MaxSlope,
-            &Set_MaxSlope,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(89.000000f), false, false, "Maximum slope angle in degrees where foliage or settlements can spawn.", false, "", {  }, "", std::nullopt },
-            Value(35.0f),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_MoistureThreshold()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xDE5B21E09A087FB7ull },
-            "MoistureThreshold",
-            Kind::Float,
-            &Get_MoistureThreshold,
-            &Set_MoistureThreshold,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Minimum moisture humidity threshold.", false, "", {  }, "", std::nullopt },
-            Value(0.3f),
         };
         return schema;
     }
@@ -16969,8 +16988,26 @@ struct GeneratedAccess<World::BiomePCGComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Procedural pseudorandom seed.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "空间程序化伪随机独立种子。", false, "", {  }, "", std::nullopt },
             Value(1337),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_GenerateOnPlay()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0xFFCDF915077C668Eull },
+            "GenerateOnPlay",
+            Kind::UInt8,
+            &Get_GenerateOnPlay,
+            &Set_GenerateOnPlay,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "是否在 Play 运行时自动执行生成。", false, "", {  }, "", std::nullopt },
+            Value(1),
         };
         return schema;
     }
@@ -16987,7 +17024,25 @@ struct GeneratedAccess<World::BiomePCGComponent>
             nullptr,
             nullptr,
             nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Automatically cut, fill, and slope terrain along spline roads.", false, "", {  }, "", std::nullopt },
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "是否沿场景内的样条道路自动挖填地表。", false, "", {  }, "", std::nullopt },
+            Value(0),
+        };
+        return schema;
+    }
+    static const FieldSchema& Field_LivePreview()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x62B25E9859DB6130ull },
+            "LivePreview",
+            Kind::UInt8,
+            &Get_LivePreview,
+            &Set_LivePreview,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "编辑态参数拖拽时是否实时刷新视口点云预览。", false, "", {  }, "", std::nullopt },
             Value(1),
         };
         return schema;
@@ -17007,305 +17062,18 @@ struct GeneratedAccess<World::BiomePCGComponent>
             TypeCategory::Component,
             {
                 Field_RuleAsset(),
-                Field_MinElevation(),
-                Field_MaxElevation(),
-                Field_MaxSlope(),
-                Field_MoistureThreshold(),
+                Field_BoundsRadius(),
+                Field_BoundsHeight(),
+                Field_DensityMultiplier(),
+                Field_ClearanceMargin(),
                 Field_Seed(),
+                Field_GenerateOnPlay(),
                 Field_AutoDeformTerrain(),
+                Field_LivePreview(),
             },
             &StorageBindingOf(),
-            "Environment",
-            "Procedural Content Generation rules for biomes, vegetation clusters and terrain deformation.",
-            false,
-            false,
-        };
-        return schema;
-    }
-};
-
-template <>
-struct GeneratedAccess<World::EQSComponent>
-{
-    static Value Get_QueryCenter(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->QueryCenter);
-    }
-    static void Set_QueryCenter(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->QueryCenter = std::get<glm::vec3>(value);
-    }
-    static Value Get_QueryRadius(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->QueryRadius);
-    }
-    static void Set_QueryRadius(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->QueryRadius = std::get<float>(value);
-    }
-    static Value Get_GridSpacing(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->GridSpacing);
-    }
-    static void Set_GridSpacing(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->GridSpacing = std::get<float>(value);
-    }
-    static Value Get_BestCoverFound(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->BestCoverFound);
-    }
-    static void Set_BestCoverFound(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->BestCoverFound = std::get<uint8_t>(value);
-    }
-    static Value Get_QueryMode(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->QueryMode);
-    }
-    static void Set_QueryMode(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->QueryMode = std::get<uint8_t>(value);
-    }
-    static Value Get_GeneratorMode(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->GeneratorMode);
-    }
-    static void Set_GeneratorMode(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->GeneratorMode = std::get<uint8_t>(value);
-    }
-    static Value Get_IncludeCrouchCover(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->IncludeCrouchCover);
-    }
-    static void Set_IncludeCrouchCover(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->IncludeCrouchCover = std::get<uint8_t>(value);
-    }
-    static Value Get_ThreatEntityHint(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->ThreatEntityHint);
-    }
-    static void Set_ThreatEntityHint(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->ThreatEntityHint = std::get<uint32_t>(value);
-    }
-    static Value Get_OptimalDistance(const void* instance)
-    {
-        const World::EQSComponent* self = static_cast<const World::EQSComponent*>(instance);
-        return Value(self->OptimalDistance);
-    }
-    static void Set_OptimalDistance(void* instance, const Value& value)
-    {
-        World::EQSComponent* self = static_cast<World::EQSComponent*>(instance);
-        self->OptimalDistance = std::get<float>(value);
-    }
-    static const FieldSchema& Field_QueryCenter()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x63E511B7A7E6BE82ull },
-            "QueryCenter",
-            Kind::Vec3,
-            &Get_QueryCenter,
-            &Set_QueryCenter,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Center coordinates of the tactical query in world space.", false, "", {  }, "", std::nullopt },
-            Value(glm::vec3(0.0f)),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_QueryRadius()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xC2204973EB1F468Dull },
-            "QueryRadius",
-            Kind::Float,
-            &Get_QueryRadius,
-            &Set_QueryRadius,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(200.000000f), false, false, "Query radius in meters.", false, "", {  }, "", std::nullopt },
-            Value(20.0f),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_GridSpacing()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0xBBC2D5C259C7BDBEull },
-            "GridSpacing",
-            Kind::Float,
-            &Get_GridSpacing,
-            &Set_GridSpacing,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.500000f), std::optional<float>(20.000000f), false, false, "Spacing distance between candidate sample points in meters.", false, "", {  }, "", std::nullopt },
-            Value(2.0f),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_BestCoverFound()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x999386D5C13098CEull },
-            "BestCoverFound",
-            Kind::UInt8,
-            &Get_BestCoverFound,
-            &Set_BestCoverFound,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Whether an optimal tactical cover point was found.", false, "", {  }, "", std::nullopt },
-            Value(0),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_QueryMode()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x533A0D7F7DC0E248ull },
-            "QueryMode",
-            Kind::UInt8,
-            &Get_QueryMode,
-            &Set_QueryMode,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(2.000000f), false, false, "Tactical query mode: 0=Cover, 1=Flank, 2=Retreat.", false, "", {  }, "", std::nullopt },
-            Value(0),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_GeneratorMode()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x531FF0A065B0C785ull },
-            "GeneratorMode",
-            Kind::UInt8,
-            &Get_GeneratorMode,
-            &Set_GeneratorMode,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(2.000000f), false, false, "Candidate generator mode: 0=ProjectedGrid, 1=ConcentricRings, 2=HybridObstacleEdge.", false, "", {  }, "", std::nullopt },
-            Value(0),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_IncludeCrouchCover()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x649AF7E6FB7ED9DCull },
-            "IncludeCrouchCover",
-            Kind::UInt8,
-            &Get_IncludeCrouchCover,
-            &Set_IncludeCrouchCover,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(0.000000f), std::optional<float>(1.000000f), false, false, "Whether half-height crouch cover points are evaluated.", false, "", {  }, "", std::nullopt },
-            Value(1),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_ThreatEntityHint()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x3A8DE94FD3A8042Full },
-            "ThreatEntityHint",
-            Kind::UInt32,
-            &Get_ThreatEntityHint,
-            &Set_ThreatEntityHint,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "Optional target threat entity low ID.", false, "", {  }, "", std::nullopt },
-            Value(0),
-        };
-        return schema;
-    }
-    static const FieldSchema& Field_OptimalDistance()
-    {
-        static const FieldSchema schema = {
-            FieldId{ 0x3988DFFD54E22BDAull },
-            "OptimalDistance",
-            Kind::Float,
-            &Get_OptimalDistance,
-            &Set_OptimalDistance,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            FieldMetadata{ "", "", std::optional<float>(1.000000f), std::optional<float>(100.000000f), false, false, "Preferred tactical distance in meters.", false, "", {  }, "", std::nullopt },
-            Value(8.0f),
-        };
-        return schema;
-    }
-    static const StorageBinding& StorageBindingOf()
-    {
-        static const StorageBinding binding = MakeComponentStorage<World::EQSComponent>();
-        return binding;
-    }
-    static const TypeSchema& WeSchema()
-    {
-        static const TypeSchema schema = {
-            TypeId{ "World::EQSComponent" },
-            "EQSComponent",
-            WE_SCHEMA_ABI_VERSION,
-            sizeof(World::EQSComponent),
-            TypeCategory::Component,
-            {
-                Field_QueryCenter(),
-                Field_QueryRadius(),
-                Field_GridSpacing(),
-                Field_BestCoverFound(),
-                Field_QueryMode(),
-                Field_GeneratorMode(),
-                Field_IncludeCrouchCover(),
-                Field_ThreatEntityHint(),
-                Field_OptimalDistance(),
-            },
-            &StorageBindingOf(),
-            "AI",
-            "Environment Query System for finding tactical cover points and line-of-sight concealment.",
+            "PCG",
+            "纯净通用空间程序化内容生成组件，负责定义生成空间体积包围、随机种子、密度与规则图资产引用。",
             false,
             false,
         };
@@ -18692,7 +18460,6 @@ const TypeSchema& WeSchemaOf_WaterBodyComponent() { return GeneratedAccess<World
 const TypeSchema& WeSchemaOf_WeatherSystemComponent() { return GeneratedAccess<World::WeatherSystemComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_WeatherVolumeComponent() { return GeneratedAccess<World::WeatherVolumeComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BiomePCGComponent() { return GeneratedAccess<World::BiomePCGComponent>::WeSchema(); }
-const TypeSchema& WeSchemaOf_EQSComponent() { return GeneratedAccess<World::EQSComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_BehaviorTreeComponent() { return GeneratedAccess<World::BehaviorTreeComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_FoliageInteractionComponent() { return GeneratedAccess<World::FoliageInteractionComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_LocalWindComponent() { return GeneratedAccess<World::LocalWindComponent>::WeSchema(); }
@@ -18809,7 +18576,6 @@ const EnumSchema& WeEnumSchemaOf_RootMotionMode() { return GeneratedEnum<World::
 			WeSchemaOf_WeatherSystemComponent(),
 			WeSchemaOf_WeatherVolumeComponent(),
 			WeSchemaOf_BiomePCGComponent(),
-			WeSchemaOf_EQSComponent(),
 			WeSchemaOf_BehaviorTreeComponent(),
 			WeSchemaOf_FoliageInteractionComponent(),
 			WeSchemaOf_LocalWindComponent(),

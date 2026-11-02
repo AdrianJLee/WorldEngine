@@ -1322,6 +1322,27 @@ FoliagePanel* EditorShell::GetFoliagePanel() {
 		return nullptr;
 	}
 
+void EditorShell::OpenPcgEditor(const std::string& logicalPath) {
+	ActivatePanel("pcg_editor");
+	if (auto* panel = GetPcgEditorPanel()) {
+		if (!logicalPath.empty()) {
+			panel->LoadGraphAsset(logicalPath);
+		}
+	}
+}
+
+void EditorShell::OpenPcgEditorForEntity(Entity entity, const std::string& logicalPath) {
+	ActivatePanel("pcg_editor");
+	if (auto* panel = GetPcgEditorPanel()) {
+		if (entity.IsValid()) {
+			panel->BindEntity(static_cast<entt::entity>(entity));
+		}
+		if (!logicalPath.empty()) {
+			panel->LoadGraphAsset(logicalPath);
+		}
+	}
+}
+
 PCGEditorPanel* EditorShell::GetPcgEditorPanel() {
 	auto it = m_PanelRegistry.find("pcg_editor");
 	if (it != m_PanelRegistry.end())

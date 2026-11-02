@@ -1,11 +1,18 @@
 #include "wldpch.h"
 #include "World/Environment/PCGBiome.h"
 #include "World/Foliage/Foliage.h"
+#include "World/Utils/Paths.h"
+#include "World/Core/Log.h"
 
+#include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <fstream>
+#include <sstream>
+#include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace World
 {
@@ -14,6 +21,50 @@ namespace World
 		constexpr float kPi = 3.14159265358979323846f;
 	}
 
+	// -------------------------------------------------------------------------
+	// PCGAttributeSet
+	// -------------------------------------------------------------------------
+	void PCGAttributeSet::SetFloat(const std::string& name, float value)
+	{
+		m_Floats[name] = value;
+	}
+
+	float PCGAttributeSet::GetFloat(const std::string& name, float defaultValue) const
+	{
+		auto it = m_Floats.find(name);
+		return (it != m_Floats.end()) ? it->second : defaultValue;
+	}
+
+	bool PCGAttributeSet::HasFloat(const std::string& name) const
+	{
+		return m_Floats.find(name) != m_Floats.end();
+	}
+
+	void PCGAttributeSet::SetString(const std::string& name, const std::string& value)
+	{
+		m_Strings[name] = value;
+	}
+
+	std::string PCGAttributeSet::GetString(const std::string& name, const std::string& defaultValue) const
+	{
+		auto it = m_Strings.find(name);
+		return (it != m_Strings.end()) ? it->second : defaultValue;
+	}
+
+	bool PCGAttributeSet::HasString(const std::string& name) const
+	{
+		return m_Strings.find(name) != m_Strings.end();
+	}
+
+	void PCGAttributeSet::Clear()
+	{
+		m_Floats.clear();
+		m_Strings.clear();
+	}
+
+	// -------------------------------------------------------------------------
+	// PCGFilterRange
+	// -------------------------------------------------------------------------
 	float PCGFilterRange::EvaluateWeight(float value) const
 	{
 		if (value >= Min && value <= Max)
@@ -36,180 +87,316 @@ namespace World
 		}
 	}
 
-	PCGRuleGraphDesc PCGRuleGraphDesc::CreateAdaptiveDefault(const BiomePCGComponent& comp, float terrainMinY, float terrainMaxY)
+	// -------------------------------------------------------------------------
+	// PCGRuleGraphDesc: 纯净空白设计 (零写死预设)
+	// -------------------------------------------------------------------------
+	PCGRuleGraphDesc PCGRuleGraphDesc::CreateBlank()
 	{
-		(void)terrainMinY;
-		(void)terrainMaxY;
 		PCGRuleGraphDesc desc;
 		desc.SampleSpacing = 2.5f;
 		desc.JitterFactor = 0.85f;
-		desc.UseNormalizedElevation = true;
-		desc.RockSlopeThresholdDeg = comp.MaxSlope;
-		desc.AridMoistureThreshold = std::max(0.25f, comp.MoistureThreshold);
-		desc.SnowLineElevation = 150.0f;
-		desc.SnowLineNormalized = 0.78f;
-
-		// 1. Meadow
-		PCGBiomeLayerDesc meadow;
-		meadow.LayerName = "Meadow";
-		meadow.Category = BiomeType::Meadow;
-		meadow.ElevationBand = { 0.0f, 0.70f, 0.08f };
-		meadow.SlopeDegrees = { 0.0f, 25.0f, 5.0f };
-		meadow.MoistureBand = { 0.30f, 0.65f, 0.08f };
-		meadow.Priority = 1.0f;
-		{
-			PCGSpawnEntry grass;
-			grass.Name = "Wild Grass";
-			grass.MeshAsset = AssetRef::FromPath("models/foliage/grass_cluster.wmodel");
-			grass.MaterialAsset = AssetRef::FromPath("textures/foliage/grass_tuft.png");
-			grass.SelectionWeight = 1.0f;
-			grass.ScaleRange = { 0.85f, 1.25f };
-			grass.Stiffness = 0.25f;
-			grass.EnablePhysicalInteraction = true;
-			meadow.Entries.push_back(grass);
-
-			PCGSpawnEntry flower;
-			flower.Name = "Wild Flowers";
-			flower.MeshAsset = AssetRef::FromPath("models/foliage/grass_cluster.wmodel");
-			flower.MaterialAsset = AssetRef::FromPath("textures/foliage/wild_flower.png");
-			flower.SelectionWeight = 0.8f;
-			flower.ScaleRange = { 0.85f, 1.15f };
-			flower.Stiffness = 0.30f;
-			flower.EnablePhysicalInteraction = true;
-			meadow.Entries.push_back(flower);
-		}
-		desc.Layers.push_back(meadow);
-
-		// 2. Forest
-		PCGBiomeLayerDesc forest;
-		forest.LayerName = "Forest";
-		forest.Category = BiomeType::Forest;
-		forest.ElevationBand = { 0.05f, 0.72f, 0.08f };
-		forest.SlopeDegrees = { 0.0f, 32.0f, 5.0f };
-		forest.MoistureBand = { 0.50f, 1.0f, 0.08f };
-		forest.Priority = 1.2f;
-		{
-			PCGSpawnEntry shrub;
-			shrub.Name = "Forest Shrub";
-			shrub.MeshAsset = AssetRef::FromPath("models/foliage/bush_cluster.wmodel");
-			shrub.MaterialAsset = AssetRef::FromPath("textures/foliage/bush_leaves.png");
-			shrub.SelectionWeight = 1.0f;
-			shrub.ScaleRange = { 0.9f, 1.35f };
-			shrub.Stiffness = 0.55f;
-			shrub.EnablePhysicalInteraction = true;
-			forest.Entries.push_back(shrub);
-		}
-		desc.Layers.push_back(forest);
-
-		// 3. Rocky Mountain
-		PCGBiomeLayerDesc rocky;
-		rocky.LayerName = "RockyMountain";
-		rocky.Category = BiomeType::RockyMountain;
-		rocky.ElevationBand = { 0.20f, 1.0f, 0.08f };
-		rocky.SlopeDegrees = { desc.RockSlopeThresholdDeg, 78.0f, 5.0f };
-		rocky.MoistureBand = { 0.0f, 1.0f, 0.08f };
-		rocky.Priority = 1.5f;
-		{
-			PCGSpawnEntry rock;
-			rock.Name = "Scatter Rocks";
-			rock.MeshAsset = AssetRef::FromPath("models/foliage/scatter_pebble.wmodel");
-			rock.MaterialAsset = AssetRef::FromPath("textures/terrain/rock_albedo.png");
-			rock.SelectionWeight = 1.0f;
-			rock.ScaleRange = { 0.7f, 1.4f };
-			rock.Stiffness = 10.0f;
-			rock.EnablePhysicalInteraction = false;
-			rocky.Entries.push_back(rock);
-		}
-		desc.Layers.push_back(rocky);
-
-		// 4. Desert
-		PCGBiomeLayerDesc desert;
-		desert.LayerName = "Desert";
-		desert.Category = BiomeType::Desert;
-		desert.ElevationBand = { 0.0f, 0.80f, 0.08f };
-		desert.SlopeDegrees = { 0.0f, 35.0f, 5.0f };
-		desert.MoistureBand = { 0.0f, desc.AridMoistureThreshold, 0.05f };
-		desert.Priority = 1.4f;
-		{
-			PCGSpawnEntry rock;
-			rock.Name = "Arid Rocks";
-			rock.MeshAsset = AssetRef::FromPath("models/foliage/scatter_pebble.wmodel");
-			rock.MaterialAsset = AssetRef::FromPath("textures/terrain/rock_albedo.png");
-			rock.SelectionWeight = 1.0f;
-			rock.ScaleRange = { 0.75f, 1.25f };
-			rock.Stiffness = 10.0f;
-			rock.EnablePhysicalInteraction = false;
-			desert.Entries.push_back(rock);
-		}
-		desc.Layers.push_back(desert);
-
-		// 5. Snow Peak
-		PCGBiomeLayerDesc snow;
-		snow.LayerName = "SnowPeak";
-		snow.Category = BiomeType::SnowPeak;
-		snow.ElevationBand = { desc.SnowLineNormalized, 1.0f, 0.05f };
-		snow.SlopeDegrees = { 0.0f, 65.0f, 5.0f };
-		snow.MoistureBand = { 0.0f, 1.0f, 0.08f };
-		snow.Priority = 2.0f;
-		{
-			PCGSpawnEntry snowRock;
-			snowRock.Name = "Glacial Pebble";
-			snowRock.MeshAsset = AssetRef::FromPath("models/foliage/scatter_pebble.wmodel");
-			snowRock.MaterialAsset = AssetRef::FromPath("textures/terrain/rock_albedo.png");
-			snowRock.SelectionWeight = 1.0f;
-			snowRock.ScaleRange = { 0.8f, 1.5f };
-			snowRock.Stiffness = 10.0f;
-			snowRock.EnablePhysicalInteraction = false;
-			snow.Entries.push_back(snowRock);
-		}
-		desc.Layers.push_back(snow);
-
+		desc.IsCustom = true;
+		desc.Layers.clear(); // 纯净 0 个图层
 		return desc;
 	}
 
-	BiomeType PCGBiomeGenerator::ClassifyBiome(float elevation, float slopeDeg, float moisture)
+	std::string PCGRuleGraphDesc::ToYamlString() const
 	{
-		if (elevation > 150.0f)
-			return BiomeType::SnowPeak;
+		YAML::Emitter out;
+		out << YAML::BeginMap;
+		out << YAML::Key << "SampleSpacing" << YAML::Value << SampleSpacing;
+		out << YAML::Key << "JitterFactor" << YAML::Value << JitterFactor;
+		out << YAML::Key << "IsCustom" << YAML::Value << IsCustom;
 
-		if (slopeDeg > 40.0f)
-			return BiomeType::RockyMountain;
+		out << YAML::Key << "Layers" << YAML::Value << YAML::BeginSeq;
+		for (const auto& layer : Layers)
+		{
+			out << YAML::BeginMap;
+			out << YAML::Key << "LayerName" << YAML::Value << layer.LayerName;
+			out << YAML::Key << "Enabled" << YAML::Value << layer.Enabled;
+			out << YAML::Key << "Priority" << YAML::Value << layer.Priority;
+			out << YAML::Key << "ColorTag" << YAML::Value << YAML::Flow << YAML::BeginSeq
+				<< layer.ColorTag.r << layer.ColorTag.g << layer.ColorTag.b << layer.ColorTag.a << YAML::EndSeq;
 
-		if (moisture < 0.25f)
-			return BiomeType::Desert;
+			out << YAML::Key << "ElevationBand" << YAML::Value << YAML::BeginMap;
+			out << YAML::Key << "Min" << YAML::Value << layer.ElevationBand.Min;
+			out << YAML::Key << "Max" << YAML::Value << layer.ElevationBand.Max;
+			out << YAML::Key << "Falloff" << YAML::Value << layer.ElevationBand.Falloff;
+			out << YAML::EndMap;
 
-		if (moisture >= 0.5f && elevation < 100.0f)
-			return BiomeType::Forest;
+			out << YAML::Key << "SlopeDegrees" << YAML::Value << YAML::BeginMap;
+			out << YAML::Key << "Min" << YAML::Value << layer.SlopeDegrees.Min;
+			out << YAML::Key << "Max" << YAML::Value << layer.SlopeDegrees.Max;
+			out << YAML::Key << "Falloff" << YAML::Value << layer.SlopeDegrees.Falloff;
+			out << YAML::EndMap;
 
-		return BiomeType::Meadow;
+			out << YAML::Key << "DensityMask" << YAML::Value << YAML::BeginMap;
+			out << YAML::Key << "Min" << YAML::Value << layer.DensityMask.Min;
+			out << YAML::Key << "Max" << YAML::Value << layer.DensityMask.Max;
+			out << YAML::Key << "Falloff" << YAML::Value << layer.DensityMask.Falloff;
+			out << YAML::EndMap;
+
+			out << YAML::Key << "Entries" << YAML::Value << YAML::BeginSeq;
+			for (const auto& ent : layer.Entries)
+			{
+				out << YAML::BeginMap;
+				out << YAML::Key << "Name" << YAML::Value << ent.Name;
+				out << YAML::Key << "MeshAsset" << YAML::Value << (ent.MeshAsset.HasPath() ? StringPool::Get().PathOf(ent.MeshAsset.Path) : "");
+				out << YAML::Key << "MaterialAsset" << YAML::Value << (ent.MaterialAsset.HasPath() ? StringPool::Get().PathOf(ent.MaterialAsset.Path) : "");
+				out << YAML::Key << "SelectionWeight" << YAML::Value << ent.SelectionWeight;
+				out << YAML::Key << "ScaleMin" << YAML::Value << ent.ScaleRange.x;
+				out << YAML::Key << "ScaleMax" << YAML::Value << ent.ScaleRange.y;
+				out << YAML::Key << "AlignToNormal" << YAML::Value << ent.AlignToNormal;
+				out << YAML::Key << "FootprintRadius" << YAML::Value << ent.FootprintRadius;
+				out << YAML::Key << "Stiffness" << YAML::Value << ent.Stiffness;
+				out << YAML::Key << "EnablePhysicalInteraction" << YAML::Value << ent.EnablePhysicalInteraction;
+				out << YAML::EndMap;
+			}
+			out << YAML::EndSeq;
+
+			out << YAML::EndMap;
+		}
+		out << YAML::EndSeq;
+
+		out << YAML::EndMap;
+		return out.c_str();
 	}
 
-	BiomeType PCGBiomeGenerator::ClassifyBiomeAdaptive(
-		float elevation,
-		float normalizedElev,
-		float slopeDeg,
-		float moisture,
-		const BiomePCGComponent& comp)
+	bool PCGRuleGraphDesc::FromYamlString(const std::string& yamlStr, std::string* error)
 	{
-		if ((elevation > 150.0f || normalizedElev >= 0.65f) && slopeDeg <= 60.0f)
-			return BiomeType::SnowPeak;
+		try
+		{
+			YAML::Node root = YAML::Load(yamlStr);
+			if (!root.IsMap())
+			{
+				if (error) *error = "Root YAML node is not a map";
+				return false;
+			}
+			if (root["SampleSpacing"]) SampleSpacing = root["SampleSpacing"].as<float>();
+			if (root["JitterFactor"]) JitterFactor = root["JitterFactor"].as<float>();
+			if (root["IsCustom"]) IsCustom = root["IsCustom"].as<bool>();
 
-		if (slopeDeg > comp.MaxSlope)
-			return BiomeType::RockyMountain;
+			if (root["Layers"] && root["Layers"].IsSequence())
+			{
+				Layers.clear();
+				for (const auto& lNode : root["Layers"])
+				{
+					PCGBiomeLayerDesc layer;
+					if (lNode["LayerName"]) layer.LayerName = lNode["LayerName"].as<std::string>();
+					if (lNode["Enabled"]) layer.Enabled = lNode["Enabled"].as<bool>();
+					if (lNode["Priority"]) layer.Priority = lNode["Priority"].as<float>();
+					if (lNode["ColorTag"] && lNode["ColorTag"].IsSequence() && lNode["ColorTag"].size() >= 4)
+					{
+						layer.ColorTag = glm::vec4(
+							lNode["ColorTag"][0].as<float>(),
+							lNode["ColorTag"][1].as<float>(),
+							lNode["ColorTag"][2].as<float>(),
+							lNode["ColorTag"][3].as<float>());
+					}
 
-		if (moisture < std::max(0.25f, comp.MoistureThreshold))
-			return BiomeType::Desert;
+					if (lNode["ElevationBand"])
+					{
+						auto eb = lNode["ElevationBand"];
+						if (eb["Min"]) layer.ElevationBand.Min = eb["Min"].as<float>();
+						if (eb["Max"]) layer.ElevationBand.Max = eb["Max"].as<float>();
+						if (eb["Falloff"]) layer.ElevationBand.Falloff = eb["Falloff"].as<float>();
+					}
+					if (lNode["SlopeDegrees"])
+					{
+						auto sb = lNode["SlopeDegrees"];
+						if (sb["Min"]) layer.SlopeDegrees.Min = sb["Min"].as<float>();
+						if (sb["Max"]) layer.SlopeDegrees.Max = sb["Max"].as<float>();
+						if (sb["Falloff"]) layer.SlopeDegrees.Falloff = sb["Falloff"].as<float>();
+					}
+					if (lNode["DensityMask"] || lNode["MoistureBand"])
+					{
+						auto mb = lNode["DensityMask"] ? lNode["DensityMask"] : lNode["MoistureBand"];
+						if (mb["Min"]) layer.DensityMask.Min = mb["Min"].as<float>();
+						if (mb["Max"]) layer.DensityMask.Max = mb["Max"].as<float>();
+						if (mb["Falloff"]) layer.DensityMask.Falloff = mb["Falloff"].as<float>();
+					}
 
-		if (moisture >= 0.5f && normalizedElev < 0.72f)
-			return BiomeType::Forest;
-
-		return BiomeType::Meadow;
+					if (lNode["Entries"] && lNode["Entries"].IsSequence())
+					{
+						for (const auto& eNode : lNode["Entries"])
+						{
+							PCGSpawnEntry entry;
+							if (eNode["Name"]) entry.Name = eNode["Name"].as<std::string>();
+							if (eNode["MeshAsset"])
+							{
+								std::string mp = eNode["MeshAsset"].as<std::string>();
+								if (!mp.empty()) entry.MeshAsset = AssetRef::FromPath(mp);
+							}
+							if (eNode["MaterialAsset"])
+							{
+								std::string matp = eNode["MaterialAsset"].as<std::string>();
+								if (!matp.empty()) entry.MaterialAsset = AssetRef::FromPath(matp);
+							}
+							if (eNode["SelectionWeight"]) entry.SelectionWeight = eNode["SelectionWeight"].as<float>();
+							float sMin = 0.85f, sMax = 1.25f;
+							if (eNode["ScaleMin"]) sMin = eNode["ScaleMin"].as<float>();
+							if (eNode["ScaleMax"]) sMax = eNode["ScaleMax"].as<float>();
+							entry.ScaleRange = glm::vec2(sMin, sMax);
+							if (eNode["AlignToNormal"]) entry.AlignToNormal = eNode["AlignToNormal"].as<float>();
+							if (eNode["FootprintRadius"]) entry.FootprintRadius = eNode["FootprintRadius"].as<float>();
+							if (eNode["Stiffness"]) entry.Stiffness = eNode["Stiffness"].as<float>();
+							if (eNode["EnablePhysicalInteraction"]) entry.EnablePhysicalInteraction = eNode["EnablePhysicalInteraction"].as<bool>();
+							layer.Entries.push_back(entry);
+						}
+					}
+					Layers.push_back(layer);
+				}
+			}
+			return true;
+		}
+		catch (const std::exception& e)
+		{
+			if (error) *error = e.what();
+			return false;
+		}
 	}
 
+	bool PCGRuleGraphDesc::SaveToFile(const std::string& physicalPath, std::string* error) const
+	{
+		std::filesystem::path p(physicalPath);
+		std::error_code ec;
+		std::filesystem::create_directories(p.parent_path(), ec);
 
+		std::ofstream ofs(physicalPath);
+		if (!ofs.is_open())
+		{
+			if (error) *error = "Failed to open file for write: " + physicalPath;
+			return false;
+		}
+		ofs << ToYamlString();
+		return true;
+	}
+
+	bool PCGRuleGraphDesc::LoadFromFile(const std::string& physicalPath, std::string* error)
+	{
+		std::ifstream ifs(physicalPath);
+		if (!ifs.is_open())
+		{
+			if (error) *error = "Failed to open file for read: " + physicalPath;
+			return false;
+		}
+		std::stringstream ss;
+		ss << ifs.rdbuf();
+		return FromYamlString(ss.str(), error);
+	}
+
+	// -------------------------------------------------------------------------
+	// PCGGraphAsset
+	// -------------------------------------------------------------------------
+	std::unordered_map<std::string, std::shared_ptr<PCGGraphAsset>> PCGGraphAsset::s_AssetCache;
+
+	std::string PCGGraphAsset::ToYamlString() const
+	{
+		YAML::Emitter out;
+		out << YAML::BeginMap;
+		out << YAML::Key << "FormatVersion" << YAML::Value << Version;
+		out << YAML::Key << "AssetType" << YAML::Value << "PCGGraph";
+		out << YAML::Key << "Name" << YAML::Value << Name;
+
+		YAML::Node graphNode = YAML::Load(RuleGraph.ToYamlString());
+		out << YAML::Key << "RuleGraph" << YAML::Value << graphNode;
+
+		out << YAML::EndMap;
+		return out.c_str();
+	}
+
+	bool PCGGraphAsset::FromYamlString(const std::string& yamlStr, std::string* error)
+	{
+		try
+		{
+			YAML::Node root = YAML::Load(yamlStr);
+			if (!root.IsMap())
+			{
+				if (error) *error = "Root node is not a map";
+				return false;
+			}
+			if (root["FormatVersion"]) Version = root["FormatVersion"].as<uint32_t>();
+			if (root["Name"]) Name = root["Name"].as<std::string>();
+			if (root["RuleGraph"])
+			{
+				YAML::Emitter emitter;
+				emitter << root["RuleGraph"];
+				return RuleGraph.FromYamlString(emitter.c_str(), error);
+			}
+			return true;
+		}
+		catch (const std::exception& e)
+		{
+			if (error) *error = e.what();
+			return false;
+		}
+	}
+
+	bool PCGGraphAsset::SaveToFile(const std::string& physicalPath, std::string* error) const
+	{
+		std::filesystem::path p(physicalPath);
+		std::error_code ec;
+		std::filesystem::create_directories(p.parent_path(), ec);
+
+		std::ofstream ofs(physicalPath);
+		if (!ofs.is_open())
+		{
+			if (error) *error = "Failed to open file for write: " + physicalPath;
+			return false;
+		}
+		ofs << ToYamlString();
+		return true;
+	}
+
+	bool PCGGraphAsset::LoadFromFile(const std::string& physicalPath, std::string* error)
+	{
+		std::ifstream ifs(physicalPath);
+		if (!ifs.is_open())
+		{
+			if (error) *error = "Failed to open file for read: " + physicalPath;
+			return false;
+		}
+		std::stringstream ss;
+		ss << ifs.rdbuf();
+		return FromYamlString(ss.str(), error);
+	}
+
+	std::shared_ptr<PCGGraphAsset> PCGGraphAsset::GetOrLoad(const std::string& logicalOrPhysicalPath)
+	{
+		if (logicalOrPhysicalPath.empty()) return nullptr;
+
+		auto it = s_AssetCache.find(logicalOrPhysicalPath);
+		if (it != s_AssetCache.end()) return it->second;
+
+		std::filesystem::path resolved = logicalOrPhysicalPath;
+		if (!std::filesystem::exists(resolved))
+			resolved = Paths::AssetRoot() / logicalOrPhysicalPath;
+		if (!std::filesystem::exists(resolved))
+			resolved = Paths::ProjectDir() / logicalOrPhysicalPath;
+
+		if (std::filesystem::exists(resolved))
+		{
+			auto asset = std::make_shared<PCGGraphAsset>();
+			if (asset->LoadFromFile(resolved.string()))
+			{
+				s_AssetCache[logicalOrPhysicalPath] = asset;
+				return asset;
+			}
+		}
+		return nullptr;
+	}
+
+	void PCGGraphAsset::ClearCache()
+	{
+		s_AssetCache.clear();
+	}
+
+	// -------------------------------------------------------------------------
+	// PCGBiomeGenerator
+	// -------------------------------------------------------------------------
 	namespace
 	{
-		PCGRuleGraphDesc s_ActiveRuleGraph;
+		PCGRuleGraphDesc s_ActiveRuleGraph = PCGRuleGraphDesc::CreateBlank();
 		bool s_RuleGraphInitialized = false;
 		std::vector<PCGSpawnPoint> s_SharedPreviewPoints;
 		bool s_SharedPreviewActive = false;
@@ -219,8 +406,7 @@ namespace World
 	{
 		if (!s_RuleGraphInitialized)
 		{
-			BiomePCGComponent defaultComp;
-			s_ActiveRuleGraph = PCGRuleGraphDesc::CreateAdaptiveDefault(defaultComp);
+			s_ActiveRuleGraph = PCGRuleGraphDesc::CreateBlank();
 			s_RuleGraphInitialized = true;
 		}
 		return s_ActiveRuleGraph;
@@ -233,7 +419,8 @@ namespace World
 
 	void PCGBiomeGenerator::ResetRuleGraphToDefault(const BiomePCGComponent& comp)
 	{
-		s_ActiveRuleGraph = PCGRuleGraphDesc::CreateAdaptiveDefault(comp);
+		(void)comp;
+		s_ActiveRuleGraph = PCGRuleGraphDesc::CreateBlank();
 		s_RuleGraphInitialized = true;
 	}
 
@@ -251,29 +438,88 @@ namespace World
 	{
 		s_SharedPreviewActive = active;
 	}
+
 	void PCGBiomeGenerator::GenerateBiomePoints(
 		const TerrainData& terrain,
 		const BiomePCGComponent& comp,
 		std::vector<PCGSpawnPoint>& outPoints,
 		const glm::mat4& terrainWorld,
 		const std::vector<Spline3D>* roadSplines,
-		float roadClearWidth)
+		float roadClearWidth,
+		const PCGRuleGraphDesc* customGraph)
 	{
+		PCGPointData pointData;
+		GeneratePointData(terrain, comp, pointData, terrainWorld, roadSplines, roadClearWidth, customGraph);
 		outPoints.clear();
+		outPoints.reserve(pointData.Points.size());
+		for (const auto& pt : pointData.Points)
+		{
+			PCGSpawnPoint sp;
+			sp.Position = pt.Position;
+			sp.Normal = pt.Normal;
+			sp.LayerId = pt.LayerIndex;
+			sp.Weight = pt.Density;
+			sp.ColorTag = pt.ColorTag;
+			sp.MeshPath = pt.MeshPath;
+			sp.MaterialPath = pt.MaterialPath;
+			sp.Scale = pt.Scale.x;
+			outPoints.push_back(sp);
+		}
+	}
+
+	void PCGBiomeGenerator::GeneratePointData(
+		const TerrainData& terrain,
+		const BiomePCGComponent& comp,
+		PCGPointData& outData,
+		const glm::mat4& terrainWorld,
+		const std::vector<Spline3D>* roadSplines,
+		float roadClearWidth,
+		const PCGRuleGraphDesc* customGraph)
+	{
+		outData.Clear();
+		outData.WorldTransform = terrainWorld;
+
 		const float w = terrain.GetWorldWidth();
 		const float h = terrain.GetWorldHeight();
 		if (w <= 0.0f || h <= 0.0f)
 			return;
 
-		// 自然步长 (2.5m 形成细腻繁茂覆盖，杜绝 8m 巨大方格阵)
-		const float spacing = std::max(0.5f, GetActiveRuleGraph().SampleSpacing);
+		PCGRuleGraphDesc resolvedGraph;
+		if (customGraph)
+		{
+			resolvedGraph = *customGraph;
+		}
+		else if (comp.RuleAsset.HasPath())
+		{
+			std::string pathStr = StringPool::Get().PathOf(comp.RuleAsset.Path);
+			auto asset = PCGGraphAsset::GetOrLoad(pathStr);
+			if (asset)
+			{
+				resolvedGraph = asset->RuleGraph;
+			}
+			else
+			{
+				resolvedGraph = GetActiveRuleGraph();
+			}
+		}
+		else
+		{
+			resolvedGraph = GetActiveRuleGraph();
+		}
 
+		// 根据全局密度倍数计算采样步长
+		const float densityMult = std::clamp(comp.DensityMultiplier, 0.05f, 10.0f);
+		const float baseSpacing = std::max(0.5f, resolvedGraph.SampleSpacing);
+		const float spacing = std::max(0.2f, baseSpacing / std::sqrt(densityMult));
+
+		// 样条避让通道计算
 		struct RoadSegment2D { glm::vec2 p0; glm::vec2 p1; };
 		std::vector<RoadSegment2D> roadSegments;
-		const float halfRoadWidth = roadClearWidth * 0.5f;
-		const float roadWidthSq = halfRoadWidth * halfRoadWidth;
+		const float totalClearWidth = roadClearWidth + comp.ClearanceMargin;
+		const float halfClearWidth = totalClearWidth * 0.5f;
+		const float clearWidthSq = halfClearWidth * halfClearWidth;
 
-		if (roadSplines && !roadSplines->empty() && roadClearWidth > 0.0f)
+		if (roadSplines && !roadSplines->empty() && totalClearWidth > 0.0f)
 		{
 			for (const auto& spline : *roadSplines)
 			{
@@ -294,10 +540,10 @@ namespace World
 				}
 			}
 		}
+
 		const uint32_t stepsX = std::max(1u, static_cast<uint32_t>(w / spacing));
 		const uint32_t stepsZ = std::max(1u, static_cast<uint32_t>(h / spacing));
 
-		// 先扫描地形采样网格求出实际高度范围 [minH, maxH]
 		float minH = 1e9f;
 		float maxH = -1e9f;
 		const uint32_t tw = terrain.GetWidth();
@@ -320,49 +566,35 @@ namespace World
 			maxH = 100.0f;
 		}
 
-		const float hRange = std::max(0.001f, maxH - minH);
-
+		uint32_t pointIndexCounter = 0;
 		for (uint32_t z = 0; z < stepsZ; ++z)
 		{
 			for (uint32_t x = 0; x < stepsX; ++x)
 			{
-				// 伪随机空间抖动 (Jittered Poisson-like Sampling)，彻底打破机械棋盘格
+				// 伪随机空间抖动
 				float hash1 = std::sin(static_cast<float>(x) * 12.9898f + static_cast<float>(z) * 78.233f + static_cast<float>(comp.Seed)) * 43758.5453f;
 				hash1 = hash1 - std::floor(hash1);
 				float hash2 = std::sin(static_cast<float>(x) * 39.346f + static_cast<float>(z) * 11.135f + static_cast<float>(comp.Seed)) * 43758.5453f;
 				hash2 = hash2 - std::floor(hash2);
 
-				const float jitterX = (hash1 - 0.5f) * spacing * 0.85f;
-				const float jitterZ = (hash2 - 0.5f) * spacing * 0.85f;
+				const float jitterX = (hash1 - 0.5f) * spacing * resolvedGraph.JitterFactor;
+				const float jitterZ = (hash2 - 0.5f) * spacing * resolvedGraph.JitterFactor;
 
 				const float lx = std::clamp(static_cast<float>(x) * spacing + jitterX, 0.0f, w);
 				const float lz = std::clamp(static_cast<float>(z) * spacing + jitterZ, 0.0f, h);
 
 				const float elev = terrain.SampleHeight(lx, lz);
-				if (elev < comp.MinElevation || elev > comp.MaxElevation)
-					continue;
-
 				const glm::vec3 localNormal = terrain.SampleNormal(lx, lz);
 				const float slopeDeg = std::acos(std::clamp(localNormal.y, 0.0f, 1.0f)) * (180.0f / kPi);
-				// 绝壁 (>78°) 剔除
-				if (slopeDeg > 78.0f)
-					continue;
 
-				// 多八度分形湿度计算 (Fractal Moisture Noise)
+				// 分形噪声密度
 				const float n1 = std::sin(lx * 0.035f + static_cast<float>(comp.Seed)) * std::cos(lz * 0.035f);
 				const float n2 = std::sin(lx * 0.085f + static_cast<float>(comp.Seed * 3)) * std::cos(lz * 0.085f) * 0.4f;
-				const float moisture = std::clamp(0.5f + 0.5f * (n1 + n2) / 1.4f, 0.0f, 1.0f);
-
-				// 当低于湿度阈值时，按 45% 概率保留为 Desert (荒漠碎石/耐旱植被)，否则剔除
-				if (moisture < comp.MoistureThreshold)
-				{
-					if (hash2 >= 0.45f)
-						continue;
-				}
-
-				const float normalizedElev = std::clamp((elev - minH) / hRange, 0.0f, 1.0f);
+				const float densityVal = std::clamp(0.5f + 0.5f * (n1 + n2) / 1.4f, 0.0f, 1.0f);
 
 				glm::vec3 worldPos = glm::vec3(terrainWorld * glm::vec4(lx, elev, lz, 1.0f));
+
+				// 样条避让检测
 				if (!roadSegments.empty())
 				{
 					bool inRoad = false;
@@ -376,7 +608,7 @@ namespace World
 							u = std::clamp(glm::dot(pXZ - seg.p0, ab) / lenSq, 0.0f, 1.0f);
 						const glm::vec2 closest = seg.p0 + u * ab;
 						const glm::vec2 diff = pXZ - closest;
-						if (glm::dot(diff, diff) <= roadWidthSq)
+						if (glm::dot(diff, diff) <= clearWidthSq)
 						{
 							inRoad = true;
 							break;
@@ -386,41 +618,110 @@ namespace World
 						continue;
 				}
 
-				PCGSpawnPoint pt;
-				pt.Position = worldPos;
-				pt.Normal = glm::normalize(glm::mat3(terrainWorld) * localNormal);
-				const auto& ruleGraph = GetActiveRuleGraph();
-				if (ruleGraph.IsCustom && !ruleGraph.Layers.empty())
+				// 图层匹配评估
+				uint32_t chosenLayerIdx = 0;
+				glm::vec4 pointColor = glm::vec4(0.95f, 0.85f, 0.35f, 0.90f); // 默认纯净金黄点
+				std::string assignedMesh;
+				std::string assignedMat;
+				float randScale = 0.85f + 0.4f * hash2;
+				float alignNorm = 0.25f;
+
+				if (!resolvedGraph.Layers.empty())
 				{
-					float bestLayerScore = -1.0f;
-					BiomeType bestBiome = BiomeType::Meadow;
-					for (const auto& layer : ruleGraph.Layers)
+					float bestScore = -1.0f;
+					int bestIdx = -1;
+					for (size_t li = 0; li < resolvedGraph.Layers.size(); ++li)
 					{
-						float elevVal = ruleGraph.UseNormalizedElevation ? normalizedElev : elev;
-						float wElev = layer.ElevationBand.EvaluateWeight(elevVal);
+						const auto& layer = resolvedGraph.Layers[li];
+						if (!layer.Enabled) continue;
+						float wElev = layer.ElevationBand.EvaluateWeight(elev);
 						float wSlope = layer.SlopeDegrees.EvaluateWeight(slopeDeg);
-						float wMoist = layer.MoistureBand.EvaluateWeight(moisture);
-						float score = wElev * wSlope * wMoist * layer.Priority;
-						if (score > bestLayerScore && score > 0.01f)
+						float wDensity = layer.DensityMask.EvaluateWeight(densityVal);
+						float score = wElev * wSlope * wDensity * layer.Priority;
+						if (score > bestScore && score > 0.01f)
 						{
-							bestLayerScore = score;
-							bestBiome = layer.Category;
+							bestScore = score;
+							bestIdx = static_cast<int>(li);
 						}
 					}
-					if (bestLayerScore > 0.01f)
-						pt.Biome = bestBiome;
-					else
-						pt.Biome = ClassifyBiomeAdaptive(elev, normalizedElev, slopeDeg, moisture, comp);
+
+					// 若配置了图层但该点没有任何图层匹配，则不生成
+					if (bestIdx < 0)
+						continue;
+
+					chosenLayerIdx = static_cast<uint32_t>(bestIdx);
+					const auto& winLayer = resolvedGraph.Layers[bestIdx];
+					pointColor = winLayer.ColorTag;
+
+					// 物种资产轮盘挑选 (纯数据驱动，完全遵循用户配置的 Entries)
+					if (!winLayer.Entries.empty())
+					{
+						float totalWeight = 0.0f;
+						for (const auto& e : winLayer.Entries) totalWeight += std::max(0.01f, e.SelectionWeight);
+						float pick = hash2 * totalWeight;
+						float acc = 0.0f;
+						const PCGSpawnEntry* pickedEntry = &winLayer.Entries[0];
+						for (const auto& e : winLayer.Entries)
+						{
+							acc += std::max(0.01f, e.SelectionWeight);
+							if (pick <= acc)
+							{
+								pickedEntry = &e;
+								break;
+							}
+						}
+						if (pickedEntry->MeshAsset.HasPath())
+							assignedMesh = StringPool::Get().PathOf(pickedEntry->MeshAsset.Path);
+						if (pickedEntry->MaterialAsset.HasPath())
+							assignedMat = StringPool::Get().PathOf(pickedEntry->MaterialAsset.Path);
+
+						randScale = pickedEntry->ScaleRange.x + (pickedEntry->ScaleRange.y - pickedEntry->ScaleRange.x) * hash1;
+						alignNorm = pickedEntry->AlignToNormal;
+					}
+				}
+
+				const glm::vec3 worldNormal = glm::normalize(glm::mat3(terrainWorld) * localNormal);
+
+				PCGPoint pt;
+				pt.Position = worldPos;
+				pt.Normal = worldNormal;
+				pt.Density = densityVal;
+				pt.Steepness = slopeDeg;
+				pt.Seed = hash1;
+				pt.PointId = pointIndexCounter++;
+				pt.LayerIndex = chosenLayerIdx;
+				pt.ColorTag = pointColor;
+				pt.MeshPath = assignedMesh;
+				pt.MaterialPath = assignedMat;
+				pt.Scale = glm::vec3(randScale);
+				pt.BoundsMin = glm::vec3(-0.5f * randScale);
+				pt.BoundsMax = glm::vec3(0.5f * randScale);
+
+				float yaw = hash1 * 6.2831853f;
+				glm::vec3 up(0.0f, 1.0f, 0.0f);
+				glm::vec3 plantNormal = glm::normalize(glm::mix(up, worldNormal, alignNorm));
+				glm::quat qYaw = glm::angleAxis(yaw, plantNormal);
+				if (glm::length(plantNormal - up) > 1e-4f && glm::length(plantNormal + up) > 1e-4f)
+				{
+					glm::vec3 axis = glm::normalize(glm::cross(up, plantNormal));
+					float angle = std::acos(std::clamp(glm::dot(up, plantNormal), -1.0f, 1.0f));
+					pt.Rotation = glm::angleAxis(angle, axis) * qYaw;
 				}
 				else
 				{
-					pt.Biome = ClassifyBiomeAdaptive(elev, normalizedElev, slopeDeg, moisture, comp);
+					pt.Rotation = qYaw;
 				}
-				pt.Weight = moisture;
 
-				outPoints.push_back(pt);
+				outData.Points.push_back(pt);
 			}
 		}
+
+		outData.GlobalAttributes.SetFloat("TerrainWorldWidth", w);
+		outData.GlobalAttributes.SetFloat("TerrainWorldHeight", h);
+		outData.GlobalAttributes.SetFloat("SampleSpacing", spacing);
+		outData.GlobalAttributes.SetFloat("MinElevation", minH);
+		outData.GlobalAttributes.SetFloat("MaxElevation", maxH);
+		outData.GlobalAttributes.SetFloat("GeneratedPointCount", static_cast<float>(outData.Points.size()));
 	}
 
 	void PCGBiomeGenerator::DeformTerrainAlongSpline(
@@ -435,7 +736,6 @@ namespace World
 		if (totalLen <= 1.0f || roadWidth <= 0.5f)
 			return;
 
-		// 样条高密度采样步长 (0.5m)
 		const float sampleStep = 0.5f;
 		const uint32_t numSamples = std::max(2u, static_cast<uint32_t>(std::ceil(totalLen / sampleStep)) + 1u);
 		const glm::mat4 invTerrain = glm::inverse(terrainWorld);
@@ -484,7 +784,6 @@ namespace World
 			{
 				const float px = static_cast<float>(gx) * cellSize;
 
-				// 求点 (px, pz) 到样条折线段序列的最近水平 (XZ) 投影点与距离
 				float minDistXZ = 1e9f;
 				glm::vec3 closestQ(0.0f);
 
@@ -521,12 +820,10 @@ namespace World
 
 				if (minDistXZ <= halfWidth)
 				{
-					// 路基核心区：高度绝对平整连续
 					terrain.SetHeight(static_cast<uint32_t>(gx), static_cast<uint32_t>(gz), targetY);
 				}
 				else
 				{
-					// 边坡过渡区：五次多项式平滑放坡
 					const float t = (minDistXZ - halfWidth) / std::max(0.001f, slopeTransition);
 					const float s = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
 					const float origH = terrain.GetHeight(static_cast<uint32_t>(gx), static_cast<uint32_t>(gz));
@@ -548,78 +845,62 @@ namespace World
 		if (points.empty())
 			return 0;
 
-		// 幂等清空：若已有实例且大批量重刷 (>16个)，先清空旧实例 (保留类型定义)，防止无限叠加堆叠
 		if (foliageData.GetTotalInstanceCount() > 0 && points.size() > 16)
 		{
 			if (preserveHandPainted)
-			{
 				foliageData.ClearPCGInstances();
-			}
 			else
-			{
 				foliageData.Clear();
+		}
+
+		// 确保点云与规则图中引用的自定义 Mesh 资产在 FoliageData 中登记为专属 FoliageType
+		std::unordered_map<std::string, size_t> meshToTypeIndex;
+		for (size_t ti = 0; ti < foliageData.GetTypeCount(); ++ti)
+		{
+			const auto& ft = foliageData.GetType(ti);
+			if (ft.MeshAsset.HasPath())
+				meshToTypeIndex[StringPool::Get().PathOf(ft.MeshAsset.Path)] = ti;
+		}
+
+		const auto& activeGraph = GetActiveRuleGraph();
+		for (const auto& layer : activeGraph.Layers)
+		{
+			for (const auto& ent : layer.Entries)
+			{
+				if (ent.MeshAsset.HasPath())
+				{
+					const std::string mp = StringPool::Get().PathOf(ent.MeshAsset.Path);
+					if (meshToTypeIndex.find(mp) == meshToTypeIndex.end())
+					{
+						FoliageType newType;
+						newType.Name = ent.Name;
+						newType.MeshAsset = ent.MeshAsset;
+						newType.MaterialAsset = ent.MaterialAsset;
+						newType.ScaleMinMax = ent.ScaleRange;
+						newType.AlignToNormal = (ent.AlignToNormal > 0.4f);
+						newType.BendingStiffness = ent.Stiffness;
+						newType.EnablePhysicalInteraction = ent.EnablePhysicalInteraction;
+						newType.PaintingActive = true;
+						size_t idx = foliageData.AddType(newType);
+						meshToTypeIndex[mp] = idx;
+					}
+				}
 			}
 		}
 
-		if (foliageData.GetTypeCount() == 0)
+		for (const auto& pt : points)
 		{
-			FoliageType grass;
-			grass.Name = "0: 翠绿草丛 (Wild Grass)";
-			grass.MeshAsset = AssetRef::FromPath("models/foliage/grass_cluster.wmodel");
-			grass.MaterialAsset = AssetRef::FromPath("textures/foliage/grass_tuft.png");
-			grass.Density = 1.0f;
-			grass.BendingStiffness = 0.25f;
-			grass.BendingRecovery = 4.5f;
-			grass.EnablePhysicalInteraction = true;
-			foliageData.AddType(grass);
-
-			FoliageType flower;
-			flower.Name = "1: 雏菊野花 (Wild Flowers)";
-			flower.MeshAsset = AssetRef::FromPath("models/foliage/grass_cluster.wmodel");
-			flower.MaterialAsset = AssetRef::FromPath("textures/foliage/wild_flower.png");
-			flower.Density = 0.8f;
-			flower.BendingStiffness = 0.30f;
-			flower.BendingRecovery = 4.0f;
-			flower.EnablePhysicalInteraction = true;
-			foliageData.AddType(flower);
-
-			FoliageType shrub;
-			shrub.Name = "2: 矮生灌木 (Forest Shrub)";
-			shrub.MeshAsset = AssetRef::FromPath("models/foliage/bush_cluster.wmodel");
-			shrub.MaterialAsset = AssetRef::FromPath("textures/foliage/bush_leaves.png");
-			shrub.Density = 0.5f;
-			shrub.BendingStiffness = 0.55f;
-			shrub.BendingRecovery = 6.0f;
-			shrub.EnablePhysicalInteraction = true;
-			foliageData.AddType(shrub);
-
-			FoliageType rock;
-			rock.Name = "3: 地表碎石 (Scatter Rocks)";
-			rock.MeshAsset = AssetRef::FromPath("models/foliage/scatter_pebble.wmodel");
-			rock.MaterialAsset = AssetRef::FromPath("textures/terrain/rock_albedo.png");
-			rock.Density = 0.6f;
-			rock.BendingStiffness = 10.0f;
-			rock.BendingRecovery = 10.0f;
-			rock.EnablePhysicalInteraction = false;
-			foliageData.AddType(rock);
-		}
-		else if (foliageData.GetTypeCount() >= 4)
-		{
-			foliageData.GetType(0).BendingStiffness = 0.25f;
-			foliageData.GetType(0).BendingRecovery = 4.5f;
-			foliageData.GetType(0).EnablePhysicalInteraction = true;
-
-			foliageData.GetType(1).BendingStiffness = 0.30f;
-			foliageData.GetType(1).BendingRecovery = 4.0f;
-			foliageData.GetType(1).EnablePhysicalInteraction = true;
-
-			foliageData.GetType(2).BendingStiffness = 0.55f;
-			foliageData.GetType(2).BendingRecovery = 6.0f;
-			foliageData.GetType(2).EnablePhysicalInteraction = true;
-
-			foliageData.GetType(3).BendingStiffness = 10.0f;
-			foliageData.GetType(3).BendingRecovery = 10.0f;
-			foliageData.GetType(3).EnablePhysicalInteraction = false;
+			if (!pt.MeshPath.empty() && meshToTypeIndex.find(pt.MeshPath) == meshToTypeIndex.end())
+			{
+				FoliageType newType;
+				newType.Name = "PCG Auto Type";
+				newType.MeshAsset = AssetRef::FromPath(pt.MeshPath);
+				if (!pt.MaterialPath.empty())
+					newType.MaterialAsset = AssetRef::FromPath(pt.MaterialPath);
+				newType.PaintingActive = true;
+				size_t idx = foliageData.AddType(newType);
+				meshToTypeIndex[pt.MeshPath] = idx;
+			}
 		}
 
 		const size_t typeCount = foliageData.GetTypeCount();
@@ -630,41 +911,21 @@ namespace World
 		std::mt19937 rng(1337);
 		std::uniform_real_distribution<float> angleDist(0.0f, 6.2831853f);
 		std::uniform_real_distribution<float> scaleDist(0.85f, 1.25f);
-		std::uniform_real_distribution<float> rollDist(0.0f, 1.0f);
 
 		for (const auto& pt : points)
 		{
 			size_t chosenType = 0;
-			float r = rollDist(rng);
-			switch (pt.Biome)
+			if (!pt.MeshPath.empty() && meshToTypeIndex.find(pt.MeshPath) != meshToTypeIndex.end())
 			{
-			case BiomeType::Forest:
-				chosenType = (r < 0.65f) ? 0 : 2; // 65% 草丛, 35% 灌木
-				break;
-			case BiomeType::Meadow:
-				chosenType = (r < 0.55f) ? 0 : 1; // 55% 草丛, 45% 野花
-				break;
-			case BiomeType::RockyMountain:
-				chosenType = (r < 0.70f) ? 3 : 2; // 70% 碎石, 30% 灌木
-				break;
-			case BiomeType::Desert:
-				chosenType = (r < 0.80f) ? 3 : 2; // 80% 碎石, 20% 灌木
-				break;
-			case BiomeType::SnowPeak:
-				chosenType = 3; // 碎石
-				break;
-			default:
-				chosenType = 0;
-				break;
+				chosenType = meshToTypeIndex[pt.MeshPath];
 			}
-
-			if (chosenType >= typeCount)
-				chosenType = 0;
-
-			const float s = scale * scaleDist(rng);
+			else
+			{
+				chosenType = (pt.LayerId < typeCount) ? pt.LayerId : 0;
+			}
+			const float s = scale * (pt.Scale > 0.05f ? pt.Scale : scaleDist(rng));
 			const float yaw = angleDist(rng);
 
-			// 向光性：植物主干主要垂直向上生长，仅带 30% 坡度法线倾角，杜绝悬崖侧壁横向生硬穿刺
 			glm::vec3 plantNormal = glm::normalize(glm::mix(glm::vec3(0.0f, 1.0f, 0.0f), pt.Normal, 0.30f));
 			glm::mat4 model(1.0f);
 			model = glm::translate(model, pt.Position);

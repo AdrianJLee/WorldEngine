@@ -163,6 +163,8 @@ namespace World
 		virtual void OpenPhysicsMaterialEditor(const std::string& logicalPath) { (void)logicalPath; }
 		virtual void OpenParticleEditor(const std::string& logicalPath) { (void)logicalPath; }
 		virtual void OpenCurveEditor(const std::string& logicalPath) { (void)logicalPath; }
+		virtual void OpenPcgEditor(const std::string& logicalPath = "") { (void)logicalPath; }
+		virtual void OpenPcgEditorForEntity(Entity entity, const std::string& logicalPath = "") { (void)entity; (void)logicalPath; }
 		virtual void OpenAssetPicker(std::string_view title, AssetCategory category, std::function<void(const std::string&)> onSelect) { (void)title; (void)category; (void)onSelect; }
 		virtual void OpenAsset(const std::string& path) { (void)path; }
 		virtual bool RevealAssetInContentBrowser(const std::string& path) { (void)path; return false; }

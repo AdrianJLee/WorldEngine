@@ -2646,6 +2646,8 @@ static uint32_t s_LODGenEntityId = 0;
 		const Wui::WuiRect& visibleRect,
 		std::vector<std::string>* changedFields)
 	{
+		(void)schema;
+		(void)visibleRect;
 		const Wui::WuiTheme& theme = host.Theme();
 		auto* comp = static_cast<BiomePCGComponent*>(instance);
 		if (!comp)
@@ -2656,86 +2658,213 @@ static uint32_t s_LODGenEntityId = 0;
 		const float contentW = rect.W - pad * 2.0f;
 		float curY = rect.Y + 4.0f;
 
-		// 1. 头部徽章 (Header Badge)
-		const Wui::WuiRect badgeRect { startX, curY, 200.0f, 18.0f };
+		// 1. 头部徽章
+		const Wui::WuiRect badgeRect { startX, curY, 210.0f, 18.0f };
 		const Wui::WuiColor badgeBg { 0.35f, 0.30f, 0.08f, 0.35f };
 		const Wui::WuiColor badgeBorder { 0.95f, 0.80f, 0.20f, 0.90f };
 		Wui::Badge(ctx, badgeRect, "BIOME PCG GENERATOR", badgeBg, badgeBorder, theme, 10.5f, true, 3.0f);
-		curY += 26.0f;
+		curY += 24.0f;
 
-		// 2. 规则卡片：标高与坡度范围
-		Wui::Label(ctx, { startX, curY + 2.0f }, "生态标高范围 (Elevation Range m):", theme.Text, theme.FontSizeSmall);
+		// 2. 直达 PCG 工作台主入口大按钮
+		const Wui::WuiRect openBtnRect { startX, curY, contentW, 26.0f };
+		auto openTheme = theme;
+		openTheme.ButtonBg = Wui::WuiColor{ 0.35f, 0.28f, 0.08f, 0.85f };
+		openTheme.Text = Wui::WuiColor{ 0.95f, 0.85f, 0.30f, 1.0f };
+		openTheme.Border = Wui::WuiColor{ 0.95f, 0.78f, 0.20f, 0.90f };
+		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_open_workbench"), openBtnRect,
+			"▶ 打开 PCG 生态生成器工作台 (Open PCG Editor)", openTheme))
+		{
+			host.OpenPcgEditorForEntity(entity, comp->RuleAsset.HasPath() ? StringPool::Get().PathOf(comp->RuleAsset.Path) : "");
+		}
+		Wui::Tooltip(ctx, openBtnRect, "打开具备纯净规则管线、空间散布烘焙、道路放坡与脚本算子的多功能 PCG 工作台面板");
+		curY += 32.0f;
+
+		// 3. 规则图资产下拉选择 (SearchableCombo 下拉选) 与 独立落盘管理
+		Wui::Label(ctx, { startX, curY + 2.0f }, "PCG 规则图资产 (.wpcggraph):", theme.Accent, theme.FontSizeSmall);
 		curY += 20.0f;
-		const float subW = (contentW - 8.0f) * 0.5f;
 
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.pcg.min_elev"),
-			{ startX, curY, subW, 22.0f }, comp->MinElevation, 1.0f, 0.0f, 5000.0f, theme))
+		std::string rulePath = comp->RuleAsset.HasPath() ? StringPool::Get().PathOf(comp->RuleAsset.Path) : "";
+		static std::vector<std::string> s_CachedPcgGraphs;
+		static uint32_t s_PcgGraphFrameCounter = 0;
+		s_PcgGraphFrameCounter++;
+		if (s_CachedPcgGraphs.empty() || (s_PcgGraphFrameCounter % 180 == 0))
 		{
-			comp->MinElevation = std::clamp(comp->MinElevation, 0.0f, 5000.0f);
-			if (changedFields) changedFields->push_back("MinElevation");
+			// timer reset
+			s_CachedPcgGraphs.clear();
+			s_CachedPcgGraphs.push_back("(纯净空白规则图 / Blank Graph)");
+			s_CachedPcgGraphs.push_back("assets/pcg/custom_rules.wpcggraph");
+			std::error_code ec;
+			std::filesystem::path prjRoot = Paths::ProjectDir();
+			if (std::filesystem::exists(prjRoot, ec))
+			{
+				for (const auto& entry : std::filesystem::recursive_directory_iterator(prjRoot, std::filesystem::directory_options::skip_permission_denied, ec))
+				{
+					if (ec || !entry.is_regular_file(ec)) continue;
+					std::string ext = entry.path().extension().string();
+					std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+					if (ext == ".wpcggraph" || ext == ".wpcg")
+					{
+						std::string relP = std::filesystem::relative(entry.path(), prjRoot, ec).generic_string();
+						bool exists = false;
+						for (const auto& opt : s_CachedPcgGraphs) { if (opt == relP) { exists = true; break; } }
+						if (!exists) s_CachedPcgGraphs.push_back(relP);
+					}
+				}
+			}
+		}
+		std::vector<std::string> ruleGraphOptions = s_CachedPcgGraphs;
+
+		int curRuleIdx = 0;
+		for (size_t ri = 0; ri < ruleGraphOptions.size(); ++ri)
+		{
+			if (ruleGraphOptions[ri] == rulePath)
+			{
+				curRuleIdx = static_cast<int>(ri);
+				break;
+			}
+		}
+		if (curRuleIdx == 0 && !rulePath.empty() && rulePath != ruleGraphOptions[0])
+		{
+			ruleGraphOptions.push_back(rulePath);
+			curRuleIdx = static_cast<int>(ruleGraphOptions.size() - 1);
+		}
+
+		// 下拉选 Combo 控件
+		const Wui::WuiRect ruleComboRect { startX, curY, contentW - 175.0f, 22.0f };
+		if (Wui::SearchableCombo(ctx, Wui::HashId("inspect.pcg.rule_combo"), ruleComboRect, "", ruleGraphOptions, curRuleIdx, theme))
+		{
+			if (curRuleIdx <= 0)
+			{
+				comp->RuleAsset = AssetRef{};
+			}
+			else
+			{
+				comp->RuleAsset = AssetRef::FromPath(ruleGraphOptions[curRuleIdx]);
+			}
+			if (changedFields) changedFields->push_back("RuleAsset");
 			host.MarkDocumentDirty();
 		}
-		Wui::Tooltip(ctx, { startX, curY, subW, 22.0f }, "最低生态散布标高 (米)");
 
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.pcg.max_elev"),
-			{ startX + subW + 8.0f, curY, subW, 22.0f }, comp->MaxElevation, 1.0f, 0.0f, 5000.0f, theme))
+		// 弹窗浏览选择资产按钮
+		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_pick_asset"), { startX + contentW - 170.0f, curY, 80.0f, 22.0f }, "选择资产...", theme))
 		{
-			comp->MaxElevation = std::clamp(comp->MaxElevation, comp->MinElevation, 5000.0f);
-			if (changedFields) changedFields->push_back("MaxElevation");
+			host.OpenAssetPicker("选择 PCG 规则图资产 (PCG Graph)", AssetCategory::Unknown, [comp, changedFields, &host](const std::string& picked) {
+				comp->RuleAsset = picked.empty() ? AssetRef{} : AssetRef::FromPath(picked);
+				if (changedFields) changedFields->push_back("RuleAsset");
+				host.MarkDocumentDirty();
+			});
+		}
+
+		// 新建图资产按钮
+		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_new_asset"), { startX + contentW - 85.0f, curY, 85.0f, 22.0f }, "+ 新建资产", theme))
+		{
+			const std::string newPath = "assets/pcg/custom_rules.wpcggraph";
+			std::filesystem::path fullPath = Paths::ProjectDir() / newPath;
+			std::filesystem::create_directories(fullPath.parent_path());
+			PCGGraphAsset newAsset;
+			newAsset.Name = "CustomRules";
+			newAsset.RuleGraph = PCGRuleGraphDesc::CreateBlank();
+			newAsset.SaveToFile(fullPath.string());
+			comp->RuleAsset = AssetRef::FromPath(newPath);
+			if (changedFields) changedFields->push_back("RuleAsset");
+			s_CachedPcgGraphs.clear();
 			host.MarkDocumentDirty();
 		}
-		Wui::Tooltip(ctx, { startX + subW + 8.0f, curY, subW, 22.0f }, "最高生态散布标高 (米)");
-		curY += 26.0f;
+		curY += 28.0f;
 
-		// 最大坡度与湿度阈值
-		Wui::Label(ctx, { startX, curY + 2.0f }, "极限坡度 (Slope) 与湿度生成阈值 (Moisture):", theme.Text, theme.FontSizeSmall);
+		// 4. 空间生成范围与采样密度 (Card)
+		const float halfW = (contentW - theme.PadSmall) * 0.5f;
+		Wui::Label(ctx, { startX, curY + 2.0f }, "空间生成范围与采样密度:", theme.Text, theme.FontSizeSmall);
 		curY += 20.0f;
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.pcg.max_slope"),
-			{ startX, curY, subW, 22.0f }, comp->MaxSlope, 0.5f, 0.0f, 89.0f, theme))
-		{
-			comp->MaxSlope = std::clamp(comp->MaxSlope, 0.0f, 89.0f);
-			if (changedFields) changedFields->push_back("MaxSlope");
-			host.MarkDocumentDirty();
-		}
-		Wui::Tooltip(ctx, { startX, curY, subW, 22.0f }, "植被与生物群落允许生长的最大地表坡度 (度)");
 
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.pcg.moisture"),
-			{ startX + subW + 8.0f, curY, subW, 22.0f }, comp->MoistureThreshold, 0.02f, 0.0f, 1.0f, theme))
+		Wui::Label(ctx, { startX, curY + 2.0f }, "作用半径 (Radius m):", theme.TextMuted, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.pcg.radius"),
+			{ startX + 130.0f, curY, halfW - 130.0f, 22.0f }, comp->BoundsRadius, 1.0f, 1.0f, 2000.0f, theme))
 		{
-			comp->MoistureThreshold = std::clamp(comp->MoistureThreshold, 0.0f, 1.0f);
-			if (changedFields) changedFields->push_back("MoistureThreshold");
+			comp->BoundsRadius = std::clamp(comp->BoundsRadius, 1.0f, 2000.0f);
+			if (changedFields) changedFields->push_back("BoundsRadius");
 			host.MarkDocumentDirty();
 		}
-		Wui::Tooltip(ctx, { startX + subW + 8.0f, curY, subW, 22.0f }, "湿度生成阈值 (低于该值判定为荒漠/贫瘠)");
+
+		Wui::Label(ctx, { startX + halfW + theme.PadSmall, curY + 2.0f }, "立体半高 (Height m):", theme.TextMuted, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.pcg.height"),
+			{ startX + halfW + theme.PadSmall + 130.0f, curY, halfW - 130.0f, 22.0f }, comp->BoundsHeight, 1.0f, 1.0f, 1000.0f, theme))
+		{
+			comp->BoundsHeight = std::clamp(comp->BoundsHeight, 1.0f, 1000.0f);
+			if (changedFields) changedFields->push_back("BoundsHeight");
+			host.MarkDocumentDirty();
+		}
 		curY += 26.0f;
 
-		// 伪随机种子
-		Wui::Label(ctx, { startX, curY + 2.0f }, "伪随机种子 (Seed):", theme.Text, theme.FontSizeSmall);
+		Wui::Label(ctx, { startX, curY + 2.0f }, "密度乘数 (Density):", theme.TextMuted, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.pcg.density"),
+			{ startX + 130.0f, curY, halfW - 130.0f, 22.0f }, comp->DensityMultiplier, 0.05f, 0.05f, 10.0f, theme))
+		{
+			comp->DensityMultiplier = std::clamp(comp->DensityMultiplier, 0.05f, 10.0f);
+			if (changedFields) changedFields->push_back("DensityMultiplier");
+			host.MarkDocumentDirty();
+		}
+
+		Wui::Label(ctx, { startX + halfW + theme.PadSmall, curY + 2.0f }, "道路隔离净空 (m):", theme.TextMuted, theme.FontSizeSmall);
+		if (Wui::DragFloat(ctx, Wui::HashId("inspect.pcg.clearance"),
+			{ startX + halfW + theme.PadSmall + 130.0f, curY, halfW - 130.0f, 22.0f }, comp->ClearanceMargin, 0.5f, 0.0f, 50.0f, theme))
+		{
+			comp->ClearanceMargin = std::clamp(comp->ClearanceMargin, 0.0f, 50.0f);
+			if (changedFields) changedFields->push_back("ClearanceMargin");
+			host.MarkDocumentDirty();
+		}
+		curY += 28.0f;
+
+		// 5. 确定性随机种子与策略开关
+		Wui::Label(ctx, { startX, curY + 2.0f }, "确定性随机种子 (Seed):", theme.TextMuted, theme.FontSizeSmall);
 		int64_t seedVal = static_cast<int64_t>(comp->Seed);
 		if (Wui::DragInt(ctx, Wui::HashId("inspect.pcg.seed"),
-			{ startX + 130.0f, curY, contentW - 130.0f, 22.0f }, seedVal, 0, 9999999, theme))
+			{ startX + 140.0f, curY, contentW - 225.0f, 22.0f }, seedVal, 0, 9999999, theme))
 		{
 			comp->Seed = static_cast<uint32_t>(seedVal);
 			if (changedFields) changedFields->push_back("Seed");
 			host.MarkDocumentDirty();
 		}
+		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_rand_seed"), { startX + contentW - 80.0f, curY, 80.0f, 22.0f }, "随机种子", theme))
+		{
+			comp->Seed = static_cast<uint32_t>(rand() % 900000 + 10000);
+			if (changedFields) changedFields->push_back("Seed");
+			host.MarkDocumentDirty();
+		}
 		curY += 26.0f;
 
-		// 自动道路放坡开关
+		bool genOnPlay = comp->GenerateOnPlay != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.pcg.gen_on_play"),
+			{ startX, curY, halfW, 20.0f }, "Play 态自动生成", genOnPlay, theme))
+		{
+			comp->GenerateOnPlay = genOnPlay ? 1 : 0;
+			if (changedFields) changedFields->push_back("GenerateOnPlay");
+			host.MarkDocumentDirty();
+		}
+
+		bool livePreview = comp->LivePreview != 0;
+		if (Wui::Checkbox(ctx, Wui::HashId("inspect.pcg.live_preview"),
+			{ startX + halfW + theme.PadSmall, curY, halfW, 20.0f }, "视口实时空间线框", livePreview, theme))
+		{
+			comp->LivePreview = livePreview ? 1 : 0;
+			if (changedFields) changedFields->push_back("LivePreview");
+			host.MarkDocumentDirty();
+		}
+		curY += 24.0f;
+
 		bool autoDeform = comp->AutoDeformTerrain != 0;
 		if (Wui::Checkbox(ctx, Wui::HashId("inspect.pcg.autodeform"),
-			{ startX, curY, contentW, 20.0f }, "样条道路自动挖填放坡平整 (Auto Deform Along Splines)", autoDeform, theme))
+			{ startX, curY, contentW, 20.0f }, "样条道路自动挖填平整 (Auto Deform Along Splines)", autoDeform, theme))
 		{
 			comp->AutoDeformTerrain = autoDeform ? 1 : 0;
 			if (changedFields) changedFields->push_back("AutoDeformTerrain");
 			host.MarkDocumentDirty();
 		}
-		curY += 26.0f;
+		curY += 28.0f;
 
-		// 3. 交互按钮
-		// 按钮 A: 生成生态散布点
+		// 6. 交互操作按钮组
 		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_generate"),
-			{ startX, curY, contentW, 24.0f }, "生成生态散布点 (Generate Biome Scatter)", theme))
+			{ startX, curY, halfW, 26.0f }, "▶ 1. 解算点云并实时预览", theme))
 		{
 			Scene* scene = entity.GetScene();
 			if (scene)
@@ -2752,45 +2881,69 @@ static uint32_t s_LODGenEntityId = 0;
 					terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
 					if (terrainData) break;
 				}
-				if (!terrainData)
-				{
-					terrainData = std::make_shared<TerrainData>(128, 128, 2.0f, 30.0f);
-				}
+				if (!terrainData) terrainData = std::make_shared<TerrainData>(128, 128, 2.0f, 30.0f);
 
 				g_PCGPreviewState.TargetEntity = static_cast<entt::entity>(entity);
 				PCGBiomeGenerator::GenerateBiomePoints(*terrainData, *comp, g_PCGPreviewState.Points, terrainWorld);
 				g_PCGPreviewState.Active = true;
-
-				for (int b = 0; b < 5; ++b) g_PCGPreviewState.DominantBiomeCounts[b] = 0;
-				for (const auto& pt : g_PCGPreviewState.Points)
-				{
-					int idx = static_cast<int>(pt.Biome);
-					if (idx >= 0 && idx < 5)
-						g_PCGPreviewState.DominantBiomeCounts[idx]++;
-				}
-				int maxCount = -1;
-				int maxIdx = 1;
-				for (int b = 0; b < 5; ++b)
-				{
-					if (static_cast<int>(g_PCGPreviewState.DominantBiomeCounts[b]) > maxCount)
-					{
-						maxCount = static_cast<int>(g_PCGPreviewState.DominantBiomeCounts[b]);
-						maxIdx = b;
-					}
-				}
-				const char* biomeNames[5] = { "Forest (森林)", "Meadow (草甸)", "RockyMountain (岩山)", "Desert (荒漠)", "SnowPeak (雪峰)" };
-				g_PCGPreviewState.DominantBiomeName = biomeNames[maxIdx];
-
-				const float area = terrainData->GetWorldWidth() * terrainData->GetWorldHeight();
-				g_PCGPreviewState.Density = (area > 1.0f) ? (static_cast<float>(g_PCGPreviewState.Points.size()) / area) : 0.0f;
 			}
 			host.MarkDocumentDirty();
 		}
-		curY += 28.0f;
 
-		// 按钮 B: 样条道路自动挖填放坡
+		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_bake_instances"),
+			{ startX + halfW + theme.PadSmall, curY, halfW, 26.0f }, "2. 物化烘焙至场景植被", theme))
+		{
+			Scene* scene = entity.GetScene();
+			if (scene)
+			{
+				std::shared_ptr<TerrainData> terrainData;
+				glm::mat4 terrainWorld(1.0f);
+				for (auto [h, tc] : scene->GetRegistry().view<TerrainComponent>().each())
+				{
+					Entity te(scene, h);
+					if (te.HasComponent<TransformComponent>())
+						terrainWorld = te.GetComponent<TransformComponent>().GetLocalMatrix();
+					if (te.HasComponent<WorldTransformComponent>())
+						terrainWorld = te.GetComponent<WorldTransformComponent>().Matrix;
+					terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
+					if (terrainData) break;
+				}
+				if (!terrainData) terrainData = std::make_shared<TerrainData>(128, 128, 2.0f, 30.0f);
+
+				if (g_PCGPreviewState.Points.empty())
+				{
+					g_PCGPreviewState.TargetEntity = static_cast<entt::entity>(entity);
+					PCGBiomeGenerator::GenerateBiomePoints(*terrainData, *comp, g_PCGPreviewState.Points, terrainWorld);
+					g_PCGPreviewState.Active = true;
+				}
+
+				std::shared_ptr<FoliageData> foliageData;
+				for (auto [h, folComp] : scene->GetRegistry().view<FoliageComponent>().each())
+				{
+					foliageData = FoliageRenderer::GetOrCreateFoliageData(folComp.FoliageAsset);
+					if (foliageData) break;
+				}
+
+				if (!foliageData)
+				{
+					auto& folComp = entity.HasComponent<FoliageComponent>() ? entity.GetComponent<FoliageComponent>() : entity.AddComponent<FoliageComponent>();
+					folComp.FoliageAsset = AssetRef::FromPath("foliage/default.wfoliage");
+					folComp.EnableWind = 1;
+					foliageData = FoliageRenderer::GetOrCreateFoliageData(folComp.FoliageAsset);
+				}
+
+				if (foliageData)
+				{
+					PCGBiomeGenerator::PopulateFoliageFromBiomePoints(g_PCGPreviewState.Points, *foliageData);
+				}
+			}
+			host.MarkDocumentDirty();
+		}
+		curY += 30.0f;
+
+		// 样条放坡平整按钮
 		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_deform_spline"),
-			{ startX, curY, contentW, 24.0f }, "样条道路自动挖填放坡 (Deform Terrain Along Spline)", theme))
+			{ startX, curY, contentW, 24.0f }, "沿样条道路执行地形自动平整放坡", theme))
 		{
 			Scene* scene = entity.GetScene();
 			if (scene)
@@ -2810,149 +2963,61 @@ static uint32_t s_LODGenEntityId = 0;
 
 				if (terrainData)
 				{
-					std::shared_ptr<FoliageData> foliageData;
-					if (comp->AutoDeformTerrain != 0)
-					{
-						for (auto [h, folComp] : scene->GetRegistry().view<FoliageComponent>().each())
-						{
-							foliageData = FoliageRenderer::GetOrCreateFoliageData(folComp.FoliageAsset);
-							if (foliageData) break;
-						}
-					}
-
 					for (auto [sh, splineComp] : scene->GetRegistry().view<SplineComponent>().each())
 					{
 						Spline3D spline;
 						std::vector<glm::vec3> knots;
-						glm::mat4 splineWorldMat(1.0f);
-						if (const auto* parentXf = scene->GetRegistry().try_get<TransformComponent>(sh))
-							splineWorldMat = parentXf->GetLocalMatrix();
-						if (const auto* parentWxf = scene->GetRegistry().try_get<WorldTransformComponent>(sh))
-							splineWorldMat = parentWxf->Matrix;
-
 						const auto& children = Hierarchy::ChildrenOf(scene->GetRegistry(), sh);
 						for (entt::entity ch : children)
 						{
-							if (const auto* xf = scene->GetRegistry().try_get<TransformComponent>(ch))
-								knots.push_back(glm::vec3(splineWorldMat * glm::vec4(xf->Location, 1.0f)));
+							if (const auto* kxf = scene->GetRegistry().try_get<TransformComponent>(ch))
+								knots.push_back(kxf->Location);
 						}
 						if (knots.size() >= 2)
 						{
-							for (const auto& k : knots)
-								spline.AddPoint(k);
+							for (const auto& k : knots) spline.AddPoint(k);
 							spline.SetClosedLoop(splineComp.ClosedLoop != 0);
 							spline.UpdateTangents();
-							PCGBiomeGenerator::DeformTerrainAlongSpline(
-								*terrainData, spline, splineComp.RoadWidth, 0.5f, 4.0f, terrainWorld);
-
-							if (foliageData && comp->AutoDeformTerrain != 0)
-							{
-								PCGBiomeGenerator::ClearFoliageAlongSpline(*foliageData, spline, splineComp.RoadWidth + 1.5f);
-							}
+							PCGBiomeGenerator::DeformTerrainAlongSpline(*terrainData, spline, 6.0f, 0.5f, 4.0f, terrainWorld);
 						}
 					}
-					TerrainRenderer::ClearCache();
 				}
 			}
 			host.MarkDocumentDirty();
 		}
 		curY += 28.0f;
 
-		// 按钮 C: 一键烘焙散布到植被系统 (Bake to Foliage Data)
-		if (Wui::Button(ctx, Wui::HashId("inspect.pcg.btn_bake_foliage"),
-			{ startX, curY, contentW, 24.0f }, "✦ 烘焙散布到场景植被 (Bake Scatter to Foliage System)", theme))
-		{
-			Scene* scene = entity.GetScene();
-			if (scene)
-			{
-				std::shared_ptr<TerrainData> terrainData;
-				glm::mat4 terrainWorld(1.0f);
-				for (auto [h, tc] : scene->GetRegistry().view<TerrainComponent>().each())
-				{
-					Entity te(scene, h);
-					if (te.HasComponent<TransformComponent>())
-						terrainWorld = te.GetComponent<TransformComponent>().GetLocalMatrix();
-					if (te.HasComponent<WorldTransformComponent>())
-						terrainWorld = te.GetComponent<WorldTransformComponent>().Matrix;
-					terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
-					if (terrainData) break;
-				}
-				if (!terrainData)
-				{
-					terrainData = std::make_shared<TerrainData>(128, 128, 2.0f, 30.0f);
-				}
-
-			if (g_PCGPreviewState.Points.empty())
-			{
-				g_PCGPreviewState.TargetEntity = static_cast<entt::entity>(entity);
-				PCGBiomeGenerator::GenerateBiomePoints(*terrainData, *comp, g_PCGPreviewState.Points, terrainWorld);
-				g_PCGPreviewState.Active = true;
-			}
-
-				std::shared_ptr<FoliageData> foliageData;
-				for (auto [h, folComp] : scene->GetRegistry().view<FoliageComponent>().each())
-				{
-					foliageData = FoliageRenderer::GetOrCreateFoliageData(folComp.FoliageAsset);
-					if (foliageData) break;
-				}
-
-				if (!foliageData)
-				{
-					// If no FoliageComponent, add to current entity or ground
-					auto& folComp = entity.HasComponent<FoliageComponent>() ? entity.GetComponent<FoliageComponent>() : entity.AddComponent<FoliageComponent>();
-					folComp.FoliageAsset = AssetRef::FromPath("foliage/default.wfoliage");
-					folComp.EnableWind = 1;
-					foliageData = FoliageRenderer::GetOrCreateFoliageData(folComp.FoliageAsset);
-				}
-
-				if (foliageData)
-				{
-					const uint32_t count = PCGBiomeGenerator::PopulateFoliageFromBiomePoints(g_PCGPreviewState.Points, *foliageData);
-					(void)count;
-				}
-			}
-			host.MarkDocumentDirty();
-		}
-		curY += 28.0f;
-
-		// 4. 状态摘要卡片 (Status Summary Card)
-		const Wui::WuiRect cardRect { startX, curY, contentW, 64.0f };
+		// 7. 状态摘要卡片 (Status Summary Card)
+		const Wui::WuiRect cardRect { startX, curY, contentW, 58.0f };
 		Wui::PanelBackground(ctx, cardRect, Wui::WuiColor{ 0.08f, 0.12f, 0.16f, 0.85f }, 4.0f);
 		Wui::HighlightOutline(ctx, cardRect, Wui::WuiColor{ 0.85f, 0.70f, 0.20f, 0.45f }, 4.0f, 1.0f);
 
 		char line1[128], line2[128];
 		if (g_PCGPreviewState.Active && g_PCGPreviewState.TargetEntity == static_cast<entt::entity>(entity))
 		{
-			std::snprintf(line1, sizeof(line1), "散布密度: %.3f 点/m²  |  采样总点数: %zu 点",
-				g_PCGPreviewState.Density, g_PCGPreviewState.Points.size());
-			std::snprintf(line2, sizeof(line2), "生态分布: F:%zu M:%zu R:%zu D:%zu S:%zu | 主导: %s",
-				g_PCGPreviewState.DominantBiomeCounts[0],
-				g_PCGPreviewState.DominantBiomeCounts[1],
-				g_PCGPreviewState.DominantBiomeCounts[2],
-				g_PCGPreviewState.DominantBiomeCounts[3],
-				g_PCGPreviewState.DominantBiomeCounts[4],
-				g_PCGPreviewState.DominantBiomeName.c_str());
+			std::snprintf(line1, sizeof(line1), "采样点云状态: 已生成 %zu 处采样点", g_PCGPreviewState.Points.size());
+			std::snprintf(line2, sizeof(line2), "空间半径: %.1fm  |  高度: %.1fm  |  种子: %u",
+				comp->BoundsRadius, comp->BoundsHeight, comp->Seed);
 		}
 		else
 		{
-			std::snprintf(line1, sizeof(line1), "散布预览: 待生成 (点击上方按钮生成散布点)");
-			std::snprintf(line2, sizeof(line2), "预估主导生态: Meadow (草甸)  |  种子: %u", comp->Seed);
+			std::snprintf(line1, sizeof(line1), "采样点云状态: 待解算 (点击上方按钮进行预览)");
+			std::snprintf(line2, sizeof(line2), "当前空间半径: %.1fm  |  高度: %.1fm  |  种子: %u",
+				comp->BoundsRadius, comp->BoundsHeight, comp->Seed);
 		}
 		Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, line1, theme.Text, theme.FontSizeSmall);
-		Wui::Label(ctx, { startX + 8.0f, curY + 32.0f }, line2, theme.TextMuted, theme.FontSizeSmall);
-		curY += 72.0f;
+		Wui::Label(ctx, { startX + 8.0f, curY + 30.0f }, line2, theme.TextMuted, theme.FontSizeSmall);
+		curY += 66.0f;
 
 		return curY - rect.Y;
 	}
 
-
-	void LoadEQSPreset(uint8_t mode, EQSComponent* comp, EQSPreviewState& state)
+void LoadEQSPreset(uint8_t mode, EQSPreviewState& state)
 	{
 		state.QueryMode = mode;
 		state.PipelineTests.clear();
 		if (mode == 1) // Flank
 		{
-			if (comp) { comp->QueryMode = 1; comp->GeneratorMode = 1; }
 			state.GeneratorMode = 1;
 			state.OcclusionWeight = 1.5f;
 			state.WallProximityWeight = 0.5f;
@@ -2964,7 +3029,6 @@ static uint32_t s_LODGenEntityId = 0;
 		}
 		else if (mode == 2) // Retreat
 		{
-			if (comp) { comp->QueryMode = 2; comp->GeneratorMode = 0; }
 			state.GeneratorMode = 0;
 			state.OcclusionWeight = 2.0f;
 			state.WallProximityWeight = 0.2f;
@@ -2975,7 +3039,6 @@ static uint32_t s_LODGenEntityId = 0;
 		}
 		else if (mode == 3) // Sniper
 		{
-			if (comp) { comp->QueryMode = 0; comp->GeneratorMode = 0; }
 			state.GeneratorMode = 0;
 			state.OcclusionWeight = 2.0f;
 			state.WallProximityWeight = 0.8f;
@@ -2988,7 +3051,6 @@ static uint32_t s_LODGenEntityId = 0;
 		}
 		else // 0: Cover
 		{
-			if (comp) { comp->QueryMode = 0; comp->GeneratorMode = 0; }
 			state.GeneratorMode = 0;
 			state.OcclusionWeight = 1.8f;
 			state.WallProximityWeight = 1.2f;
@@ -3005,33 +3067,19 @@ static uint32_t s_LODGenEntityId = 0;
 	bool ExecuteEQSPipeline(
 		Scene* scene,
 		Entity entity,
-		EQSComponent* comp,
 		EQSPreviewState& state)
 	{
-		EQSComponent localComp;
-		if (!comp)
-		{
-			localComp.QueryRadius = state.QueryRadius > 0.0f ? state.QueryRadius : 20.0f;
-			localComp.GridSpacing = state.GridSpacing > 0.0f ? state.GridSpacing : 2.0f;
-			localComp.GeneratorMode = state.GeneratorMode;
-			localComp.ThreatEntityHint = state.ThreatEntityHint;
-			comp = &localComp;
-		}
-		else
-		{
-			state.QueryRadius = comp->QueryRadius;
-			state.GridSpacing = comp->GridSpacing;
-			state.ThreatEntityHint = comp->ThreatEntityHint;
-		}
+		const float queryRadius = state.QueryRadius > 0.0f ? state.QueryRadius : 20.0f;
+		const float gridSpacing = state.GridSpacing > 0.0f ? state.GridSpacing : 2.0f;
+		const uint32_t threatEntityHint = state.ThreatEntityHint;
 
 		const glm::vec3 querierPos = entity.IsValid() && entity.HasComponent<TransformComponent>()
 			? entity.GetComponent<TransformComponent>().Location
-			: (glm::length(state.QuerierPos) > 0.001f ? state.QuerierPos : comp->QueryCenter);
-		comp->QueryCenter = querierPos;
+			: (glm::length(state.QuerierPos) > 0.001f ? state.QuerierPos : glm::vec3(0.0f));
 
 		uint32_t resolvedThreatRaw = 0;
 		glm::vec3 threatPos(0.0f);
-		if (!scene || !EQSCoverSystem::ResolveSceneThreatPosition(*scene, static_cast<uint32_t>(entity), comp->ThreatEntityHint, querierPos, threatPos, &resolvedThreatRaw))
+		if (!scene || !EQSCoverSystem::ResolveSceneThreatPosition(*scene, static_cast<uint32_t>(entity), threatEntityHint, querierPos, threatPos, &resolvedThreatRaw))
 		{
 			threatPos = (state.TargetEntity == static_cast<entt::entity>(entity) && state.Evaluated)
 				? state.ThreatPos : (querierPos + glm::vec3(15.0f, 2.0f, 15.0f));
@@ -3062,7 +3110,7 @@ static uint32_t s_LODGenEntityId = 0;
 
 		if (state.PipelineTests.empty())
 		{
-			LoadEQSPreset(comp->QueryMode, comp, state);
+			LoadEQSPreset(state.QueryMode, state);
 		}
 
 		// 同步战术权重
@@ -3079,9 +3127,9 @@ static uint32_t s_LODGenEntityId = 0;
 		ctx.QuerierPos = querierPos;
 		ctx.QuerierEntityRaw = static_cast<uint32_t>(entity);
 		ctx.ThreatPos = threatPos;
-		ctx.ThreatEntityHint = comp->ThreatEntityHint;
-		ctx.QueryRadius = std::max(1.0f, comp->QueryRadius);
-		ctx.GridSpacing = std::clamp(comp->GridSpacing, 0.2f, 10.0f);
+		ctx.ThreatEntityHint = threatEntityHint;
+		ctx.QueryRadius = std::max(1.0f, queryRadius);
+		ctx.GridSpacing = std::clamp(gridSpacing, 0.2f, 10.0f);
 		ctx.ScenePtr = scene;
 		ctx.Terrain = terrainData.get();
 		ctx.TerrainWorldTransform = terrainWorld;
@@ -3089,16 +3137,16 @@ static uint32_t s_LODGenEntityId = 0;
 
 		// 动态装配生成器
 		std::shared_ptr<EQS::IEQSGenerator> generator;
-		if (comp->GeneratorMode == 1)
+		if (state.GeneratorMode == 1)
 		{
 			generator = std::make_shared<EQS::EQSGenerator_Circle>(0.0f, ctx.QueryRadius, ctx.GridSpacing, true);
 		}
-		else if (comp->GeneratorMode == 2)
+		else if (state.GeneratorMode == 2)
 		{
 			const float wallOff = (state.WallOffset > 0.05f) ? state.WallOffset : 0.75f;
 			generator = std::make_shared<EQS::EQSGenerator_AroundObstacles>(wallOff, true, true);
 		}
-		else if (comp->GeneratorMode == 3)
+		else if (state.GeneratorMode == 3)
 		{
 			generator = std::make_shared<EQS::EQSGenerator_Cone>(state.ConeAngle, ctx.QueryRadius, 2.0f, ctx.GridSpacing, 15.0f, true);
 		}
@@ -3171,7 +3219,7 @@ static uint32_t s_LODGenEntityId = 0;
 				test->GaussianSigma = t.GaussianSigma;
 
 				if (t.Context == 1)
-					test->Context = std::make_shared<EQS::EQSContext_Target>(comp->ThreatEntityHint, threatPos);
+					test->Context = std::make_shared<EQS::EQSContext_Target>(threatEntityHint, threatPos);
 				else if (t.Context == 2)
 					test->Context = std::make_shared<EQS::EQSContext_AllThreats>(threatPos);
 				else if (t.Context == 3)
@@ -3220,8 +3268,7 @@ static uint32_t s_LODGenEntityId = 0;
 		state.BestCoverPos = bestPos;
 		state.BestScore = bestScore;
 		state.Evaluated = found;
-		comp->BestCoverFound = found ? 1 : 0;
-
+		
 		std::stable_sort(state.Candidates.begin(), state.Candidates.end(),
 			[](const EQSCandidatePreview& a, const EQSCandidatePreview& b) {
 				return a.TotalScore > b.TotalScore;
@@ -3260,277 +3307,6 @@ static uint32_t s_LODGenEntityId = 0;
 		state.LastStatus = statusBuf;
 
 		return found;
-	}
-
-
-
-	static float DrawEQSInspector(
-		PanelHost& host,
-		Wui::WuiContext& ctx,
-		const Wui::WuiRect& rect,
-		Entity entity,
-		void* instance,
-		const Schema::TypeSchema& schema,
-		const Wui::WuiRect& visibleRect,
-		std::vector<std::string>* changedFields)
-	{
-		const Wui::WuiTheme& theme = host.Theme();
-		auto* comp = static_cast<EQSComponent*>(instance);
-		if (!comp)
-			return 0.0f;
-
-		const float pad = theme.Pad;
-		const float startX = rect.X + pad;
-		const float contentW = rect.W - pad * 2.0f;
-		float curY = rect.Y + 4.0f;
-
-		// 1. 头部徽章
-		const Wui::WuiRect badgeRect { startX, curY, 220.0f, 18.0f };
-		const Wui::WuiColor badgeBg { 0.12f, 0.35f, 0.45f, 0.35f };
-		const Wui::WuiColor badgeBorder { 0.20f, 0.80f, 0.95f, 0.90f };
-		Wui::Badge(ctx, badgeRect, "EQS TACTICAL COMPONENT", badgeBg, badgeBorder, theme, 10.0f, true, 3.0f);
-		curY += 24.0f;
-
-		const float fieldLabelW = 120.0f;
-		const float fieldControlW = contentW - fieldLabelW;
-
-		// 2. 查询搜索半径 (QueryRadius) (DragFloat, 1.0 ~ 100.0)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "查询搜索半径 (Radius):", theme.Text, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.radius"),
-			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->QueryRadius, 0.5f, 1.0f, 100.0f, theme))
-		{
-			comp->QueryRadius = std::clamp(comp->QueryRadius, 1.0f, 100.0f);
-			g_EQSPreviewState.QueryRadius = comp->QueryRadius;
-			if (changedFields) changedFields->push_back("QueryRadius");
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
-
-		// 3. 候选网格格距 (GridSpacing) (DragFloat, 0.5 ~ 10.0)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "候选网格格距 (Spacing):", theme.Text, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.spacing"),
-			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->GridSpacing, 0.1f, 0.5f, 10.0f, theme))
-		{
-			comp->GridSpacing = std::clamp(comp->GridSpacing, 0.5f, 10.0f);
-			g_EQSPreviewState.GridSpacing = comp->GridSpacing;
-			if (changedFields) changedFields->push_back("GridSpacing");
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
-
-		// 4. 锁定威胁目标 (Threat Target) (默认智能优先锁定场景敌人如 #7 Hostile Sniper Threat)
-		Scene* scene = entity.GetScene();
-		auto isThreatTargetName = [](const std::string& name) -> bool {
-			if (name.empty()) return false;
-			std::string lower = name;
-			std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			return lower.find("threat") != std::string::npos ||
-			       lower.find("sniper") != std::string::npos ||
-			       lower.find("enemy") != std::string::npos ||
-			       lower.find("hostile") != std::string::npos;
-		};
-
-		if (scene && comp->ThreatEntityHint == 0)
-		{
-			const glm::vec3 querierPos = entity.HasComponent<TransformComponent>() ?
-				entity.GetComponent<TransformComponent>().Location : glm::vec3(0.0f);
-			float closestDistSq = 1e18f;
-			entt::entity bestThreatEnt = entt::null;
-
-			for (auto [h, tc] : scene->GetRegistry().view<TransformComponent>().each())
-			{
-				if (h == static_cast<entt::entity>(entity)) continue;
-				std::string tagStr;
-				if (const auto* tag = scene->GetRegistry().try_get<TagComponent>(h))
-				{
-					tagStr = std::string(StringPool::Get().NameOf(tag->Tag));
-				}
-				if (isThreatTargetName(tagStr))
-				{
-					const glm::vec3 diff = tc.Location - querierPos;
-					const float dSq = glm::dot(diff, diff);
-					if (dSq < closestDistSq)
-					{
-						closestDistSq = dSq;
-						bestThreatEnt = h;
-					}
-				}
-			}
-
-			if (bestThreatEnt != entt::null)
-			{
-				comp->ThreatEntityHint = static_cast<uint32_t>(bestThreatEnt);
-				g_EQSPreviewState.ThreatEntityHint = comp->ThreatEntityHint;
-				if (entity.HasComponent<BehaviorTreeComponent>())
-				{
-					entity.GetComponent<BehaviorTreeComponent>().TargetEntity = comp->ThreatEntityHint;
-				}
-				if (changedFields) changedFields->push_back("ThreatEntityHint");
-				host.MarkDocumentDirty();
-			}
-		}
-
-		struct ThreatCandidate { std::string Label; uint32_t RawId; };
-		std::vector<ThreatCandidate> hostileCandidates;
-		std::vector<ThreatCandidate> otherCandidates;
-
-		if (scene)
-		{
-			for (auto [h, tc] : scene->GetRegistry().view<TransformComponent>().each())
-			{
-				if (h == static_cast<entt::entity>(entity)) continue;
-				const uint32_t rawId = static_cast<uint32_t>(h);
-				std::string tagStr;
-				if (const auto* tag = scene->GetRegistry().try_get<TagComponent>(h))
-				{
-					tagStr = std::string(StringPool::Get().NameOf(tag->Tag));
-				}
-				std::string name = tagStr.empty() ? ("实体 " + std::to_string(rawId)) : (tagStr + " [#" + std::to_string(rawId) + "]");
-
-				if (isThreatTargetName(tagStr))
-				{
-					hostileCandidates.push_back({ "[敌对威胁] " + name, rawId });
-				}
-				else
-				{
-					otherCandidates.push_back({ name, rawId });
-				}
-			}
-		}
-
-		std::vector<std::string> threatEntityLabels;
-		std::vector<uint32_t> threatEntityRaws;
-		threatEntityLabels.push_back("0: 自动检索最近敌对威胁 (Auto Nearest)");
-		threatEntityRaws.push_back(0);
-
-		for (const auto& cand : hostileCandidates)
-		{
-			threatEntityLabels.push_back(cand.Label);
-			threatEntityRaws.push_back(cand.RawId);
-		}
-		for (const auto& cand : otherCandidates)
-		{
-			threatEntityLabels.push_back(cand.Label);
-			threatEntityRaws.push_back(cand.RawId);
-		}
-
-		int selectedThreatIdx = 0;
-		if (comp->ThreatEntityHint != 0)
-		{
-			for (size_t i = 1; i < threatEntityRaws.size(); ++i)
-			{
-				const uint32_t rawId = threatEntityRaws[i];
-				if (comp->ThreatEntityHint == rawId || (rawId % 1000) == (comp->ThreatEntityHint % 1000))
-				{
-					selectedThreatIdx = static_cast<int>(i);
-					break;
-				}
-			}
-		}
-
-		Wui::Label(ctx, { startX, curY + 2.0f }, "锁定威胁源 (Threat Target):", theme.Text, theme.FontSizeSmall);
-		if (Wui::Combo(ctx, Wui::HashId("inspect.eqs.threat_combo"),
-			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, "", threatEntityLabels, selectedThreatIdx, theme))
-		{
-			if (selectedThreatIdx >= 0 && selectedThreatIdx < static_cast<int>(threatEntityRaws.size()))
-			{
-				comp->ThreatEntityHint = threatEntityRaws[selectedThreatIdx];
-				g_EQSPreviewState.ThreatEntityHint = comp->ThreatEntityHint;
-				if (entity.HasComponent<BehaviorTreeComponent>())
-				{
-					entity.GetComponent<BehaviorTreeComponent>().TargetEntity = comp->ThreatEntityHint;
-				}
-				if (changedFields) changedFields->push_back("ThreatEntityHint");
-				host.MarkDocumentDirty();
-			}
-		}
-		curY += 26.0f;
-
-		// 5. 战术模式 (Query Mode) (Cover 掩体 / Flank 包抄 / Retreat 撤退，Segmented 选择)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "战术模式 (Query Mode):", theme.Text, theme.FontSizeSmall);
-		int currentMode = std::clamp(static_cast<int>(comp->QueryMode), 0, 2);
-		const std::vector<std::string> modeOptions = { "Cover 掩体", "Flank 包抄", "Retreat 撤退" };
-		if (Wui::Segmented(ctx, Wui::HashId("inspect.eqs.mode_seg"),
-			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, modeOptions, currentMode, theme))
-		{
-			comp->QueryMode = static_cast<uint8_t>(currentMode);
-			LoadEQSPreset(comp->QueryMode, comp, g_EQSPreviewState);
-			if (changedFields) { changedFields->push_back("QueryMode"); }
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
-
-		// 5b. 候选生成模式 (Generator Mode)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "候选生成器 (Generator):", theme.Text, theme.FontSizeSmall);
-		const std::vector<std::string> genOptions = { "0: 投影网格 (Projected Grid)", "1: 同心圆环 (Concentric Rings)", "2: 障碍物边缘 (Around Obstacles)" };
-		int currentGen = std::clamp(static_cast<int>(comp->GeneratorMode), 0, 2);
-		if (Wui::Combo(ctx, Wui::HashId("inspect.eqs.gen_combo"),
-			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, "生成模式", genOptions, currentGen, theme))
-		{
-			comp->GeneratorMode = static_cast<uint8_t>(currentGen);
-			g_EQSPreviewState.GeneratorMode = comp->GeneratorMode;
-			if (changedFields) { changedFields->push_back("GeneratorMode"); }
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
-
-		// 5c. 理想战术交战距离 (OptimalDistance)
-		Wui::Label(ctx, { startX, curY + 2.0f }, "理想距离 (Optimal m):", theme.Text, theme.FontSizeSmall);
-		if (Wui::DragFloat(ctx, Wui::HashId("inspect.eqs.optimal_dist"),
-			{ startX + fieldLabelW, curY, fieldControlW, 22.0f }, comp->OptimalDistance, 0.5f, 1.0f, 50.0f, theme))
-		{
-			comp->OptimalDistance = std::clamp(comp->OptimalDistance, 1.0f, 50.0f);
-			g_EQSPreviewState.OptimalDistance = comp->OptimalDistance;
-			if (changedFields) { changedFields->push_back("OptimalDistance"); }
-			host.MarkDocumentDirty();
-		}
-		curY += 26.0f;
-
-		// 5d. 半高掩体下蹲评估 (IncludeCrouchCover)
-		bool crouchCover = (comp->IncludeCrouchCover != 0);
-		if (Wui::Checkbox(ctx, Wui::HashId("inspect.eqs.crouch_cover"),
-			{ startX, curY, contentW, 22.0f }, "启用半高掩体下蹲评估 (Include Crouch Cover)", crouchCover, theme))
-		{
-			comp->IncludeCrouchCover = crouchCover ? 1 : 0;
-			if (changedFields) { changedFields->push_back("IncludeCrouchCover"); }
-			host.MarkDocumentDirty();
-		}
-		curY += 28.0f;
-
-		// 6. [执行战术查询] 简洁按钮
-		if (Wui::Button(ctx, Wui::HashId("inspect.eqs.btn_run_query"),
-			{ startX, curY, contentW, 24.0f }, "✦ 执行战术查询 (Run Tactical Query)", theme))
-		{
-			ExecuteEQSPipeline(scene, entity, comp, g_EQSPreviewState);
-			host.MarkDocumentDirty();
-		}
-		curY += 28.0f;
-
-		// 7. 简洁紧凑的状态反馈卡片：显示最优目标坐标与得分，以及一行说明
-		const Wui::WuiRect cardRect { startX, curY, contentW, 58.0f };
-		Wui::PanelBackground(ctx, cardRect, Wui::WuiColor{ 0.08f, 0.12f, 0.16f, 0.90f }, 4.0f);
-		Wui::HighlightOutline(ctx, cardRect, Wui::WuiColor{ 0.20f, 0.80f, 0.95f, 0.60f }, 4.0f, 1.0f);
-
-		char statusLine[160];
-		if (comp->BestCoverFound != 0 || (g_EQSPreviewState.Evaluated && g_EQSPreviewState.TargetEntity == static_cast<entt::entity>(entity)))
-		{
-			const glm::vec3 bpos = g_EQSPreviewState.BestCoverPos;
-			std::snprintf(statusLine, sizeof(statusLine), "最优目标: (%.2f, %.2f, %.2f) | 综合得分: %.2f (采样: %zu)",
-				bpos.x, bpos.y, bpos.z, g_EQSPreviewState.BestScore, g_EQSPreviewState.TotalSampleCount);
-			Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, statusLine, theme.Success, theme.FontSizeSmall);
-		}
-		else
-		{
-			std::snprintf(statusLine, sizeof(statusLine), "状态: 待评估 (点击上方按钮执行空间推理)");
-			Wui::Label(ctx, { startX + 8.0f, curY + 6.0f }, statusLine, theme.TextMuted, theme.FontSizeSmall);
-		}
-
-		Wui::Label(ctx, { startX + 8.0f, curY + 30.0f },
-			"提示: 深度空间推理流水线与权重请在行为树编辑器 (Behavior Tree) 中配置",
-			theme.Accent, theme.FontSizeSmall);
-		curY += 66.0f;
-
-		return curY - rect.Y;
 	}
 
 
@@ -3636,7 +3412,7 @@ static uint32_t s_LODGenEntityId = 0;
 
 		// 按钮 B: 向场景视口植被注入物理受力风场
 		if (Wui::Button(ctx, Wui::HashId("inspect.foliage.btn_inject_wind"),
-			{ startX, curY, contentW, 24.0f }, "⚡ 向视口植被注入物理冲击 (Inject Impulse to Foliage)", theme))
+			{ startX, curY, contentW, 24.0f }, "* 向视口植被注入物理冲击 (Inject Impulse to Foliage)", theme))
 		{
 			const glm::vec3 entPos = entity.HasComponent<TransformComponent>()
 				? entity.GetComponent<TransformComponent>().Location : glm::vec3(0.0f);
@@ -3787,8 +3563,6 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 			height = DrawMeshletInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::BiomePCGComponent")
 			height = DrawBiomePCGInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
-		else if (schema.Id.Name == "World::EQSComponent")
-			height = DrawEQSInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 		else if (schema.Id.Name == "World::FoliageInteractionComponent")
 			height = DrawFoliageInteractionInspector(m_Host, ctx, rect, entity, instance, schema, visibleRect, &changedFields);
 
@@ -4302,7 +4076,7 @@ float PropertiesPanel::DrawPhysicsMaterialInspector(Wui::WuiContext& ctx, const 
 			const float btnW = 160.0f;
 			const Wui::WuiRect editBtnRect { rect.X + 8.0f, y, btnW, 22.0f };
 			Wui::Tooltip(ctx, editBtnRect, "在物理材质编辑器中打开此资产进行微调");
-			if (Wui::Button(ctx, Wui::HashId("pmat.inspector.open"), editBtnRect, "✏ 打开物理材质编辑器", theme))
+			if (Wui::Button(ctx, Wui::HashId("pmat.inspector.open"), editBtnRect, "[编辑] 打开物理材质编辑器", theme))
 			{
 				m_Host.OpenPhysicsMaterialEditor(currentPath);
 			}
@@ -4480,14 +4254,14 @@ float PropertiesPanel::DrawSpriteInspector(Wui::WuiContext& ctx, const Wui::WuiR
 	const Wui::WuiRect btnFlipX { rect.X + 12.0f, y, 110.0f, btnH };
 	const Wui::WuiRect btnFlipY { rect.X + 128.0f, y, 110.0f, btnH };
 
-	std::string flipXText = sprite->FlipX ? "✔ 水平翻转 (X)" : "水平翻转 (X)";
+	std::string flipXText = sprite->FlipX ? "[OK] 水平翻转 (X)" : "水平翻转 (X)";
 	if (Wui::Button(ctx, Wui::HashId("prop.sprite.flip_x"), btnFlipX, flipXText, theme))
 	{
 		sprite->FlipX = !sprite->FlipX;
 		if (changedFields) changedFields->push_back("FlipX");
 	}
 
-	std::string flipYText = sprite->FlipY ? "✔ 垂直翻转 (Y)" : "垂直翻转 (Y)";
+	std::string flipYText = sprite->FlipY ? "[OK] 垂直翻转 (Y)" : "垂直翻转 (Y)";
 	if (Wui::Button(ctx, Wui::HashId("prop.sprite.flip_y"), btnFlipY, flipYText, theme))
 	{
 		sprite->FlipY = !sprite->FlipY;
@@ -4597,14 +4371,14 @@ float PropertiesPanel::DrawCapsuleCollider2DInspector(Wui::WuiContext& ctx, cons
 	const Wui::WuiRect btnVert { rect.X + 12.0f, y, btnW, btnH };
 	const Wui::WuiRect btnHoriz{ rect.X + 118.0f, y, btnW, btnH };
 
-	std::string vertText = cap->Direction == 0 ? "✔ 垂直 (Vertical)" : "垂直 (Vertical)";
+	std::string vertText = cap->Direction == 0 ? "[OK] 垂直 (Vertical)" : "垂直 (Vertical)";
 	if (Wui::Button(ctx, Wui::HashId("prop.cap2d.vert"), btnVert, vertText, theme))
 	{
 		cap->Direction = 0;
 		if (changedFields) changedFields->push_back("Direction");
 	}
 
-	std::string horizText = cap->Direction == 1 ? "✔ 水平 (Horizontal)" : "水平 (Horizontal)";
+	std::string horizText = cap->Direction == 1 ? "[OK] 水平 (Horizontal)" : "水平 (Horizontal)";
 	if (Wui::Button(ctx, Wui::HashId("prop.cap2d.horiz"), btnHoriz, horizText, theme))
 	{
 		cap->Direction = 1;
@@ -4614,7 +4388,7 @@ float PropertiesPanel::DrawCapsuleCollider2DInspector(Wui::WuiContext& ctx, cons
 
 	const bool editingCollider = m_Host.IsEditingCollider();
 	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
-	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑碰撞体 (Edit Collider)";
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "[编辑] 视口编辑碰撞体 (Edit Collider)";
 	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑碰撞体尺寸与偏移 (prop.cap2d.edit)");
 	if (Wui::Button(ctx, Wui::HashId("prop.cap2d.edit"), btnEditCol, editColText, theme))
 	{
@@ -4635,7 +4409,7 @@ float PropertiesPanel::DrawBoxCollider2DInspector(Wui::WuiContext& ctx, const Wu
 
 	const bool editingCollider = m_Host.IsEditingCollider();
 	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
-	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑碰撞体 (Edit Collider)";
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "[编辑] 视口编辑碰撞体 (Edit Collider)";
 	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑碰撞体尺寸与偏移 (prop.box2d.edit)");
 	if (Wui::Button(ctx, Wui::HashId("prop.box2d.edit"), btnEditCol, editColText, theme))
 	{
@@ -4656,7 +4430,7 @@ float PropertiesPanel::DrawCircleCollider2DInspector(Wui::WuiContext& ctx, const
 
 	const bool editingCollider = m_Host.IsEditingCollider();
 	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
-	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑碰撞体 (Edit Collider)";
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "[编辑] 视口编辑碰撞体 (Edit Collider)";
 	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑碰撞体尺寸与偏移 (prop.circle2d.edit)");
 	if (Wui::Button(ctx, Wui::HashId("prop.circle2d.edit"), btnEditCol, editColText, theme))
 	{
@@ -4686,7 +4460,7 @@ float PropertiesPanel::DrawSpriteAnimatorInspector(Wui::WuiContext& ctx, const W
 	const Wui::WuiRect btnPlay { rect.X + 12.0f, y, btnW, btnH };
 	const Wui::WuiRect btnReset{ rect.X + 98.0f, y, btnW, btnH };
 
-	std::string playText = anim->Playing ? "❚❚ 暂停" : "▶ 播放";
+	std::string playText = anim->Playing ? "|| 暂停" : "▶ 播放";
 	if (Wui::Button(ctx, Wui::HashId("prop.anim.play"), btnPlay, playText, theme))
 	{
 		anim->Playing = !anim->Playing;
@@ -4710,21 +4484,21 @@ float PropertiesPanel::DrawSpriteAnimatorInspector(Wui::WuiContext& ctx, const W
 	const Wui::WuiRect btnOnce { rect.X + 88.0f, y, 70.0f, btnH };
 	const Wui::WuiRect btnPing { rect.X + 164.0f, y, 80.0f, btnH };
 
-	std::string loopStr = anim->LoopMode == 0 ? "✔ 循环" : "循环";
+	std::string loopStr = anim->LoopMode == 0 ? "[OK] 循环" : "循环";
 	if (Wui::Button(ctx, Wui::HashId("prop.anim.mode_loop"), btnLoop, loopStr, theme))
 	{
 		anim->LoopMode = 0;
 		if (changedFields) changedFields->push_back("LoopMode");
 	}
 
-	std::string onceStr = anim->LoopMode == 1 ? "✔ 单次" : "单次";
+	std::string onceStr = anim->LoopMode == 1 ? "[OK] 单次" : "单次";
 	if (Wui::Button(ctx, Wui::HashId("prop.anim.mode_once"), btnOnce, onceStr, theme))
 	{
 		anim->LoopMode = 1;
 		if (changedFields) changedFields->push_back("LoopMode");
 	}
 
-	std::string pingStr = anim->LoopMode == 2 ? "✔ 往返" : "往返";
+	std::string pingStr = anim->LoopMode == 2 ? "[OK] 往返" : "往返";
 	if (Wui::Button(ctx, Wui::HashId("prop.anim.mode_ping"), btnPing, pingStr, theme))
 	{
 		anim->LoopMode = 2;
@@ -4733,7 +4507,7 @@ float PropertiesPanel::DrawSpriteAnimatorInspector(Wui::WuiContext& ctx, const W
 	y += 28.0f;
 
 	std::string statusMsg = anim->Playing ? ("● 播放中 | 进度: " + std::to_string(anim->CurrentTime).substr(0, 4) + "s | 帧 " + std::to_string(anim->CurrentFrame))
-		: (anim->Finished ? "■ 播放已结束" : "❚❚ 已暂停");
+		: (anim->Finished ? "■ 播放已结束" : "|| 已暂停");
 	Wui::Label(ctx, { rect.X + 14.0f, y + 2.0f }, statusMsg, anim->Playing ? theme.Accent : theme.TextMuted, 10.5f);
 	y += 20.0f;
 
@@ -4763,7 +4537,7 @@ float PropertiesPanel::DrawFreeformLight2DInspector(Wui::WuiContext& ctx, const 
 	const Wui::WuiRect btnDiamond   { rect.X + 216.0f, y, btnW, btnH };
 
 	Wui::Tooltip(ctx, btnTrapezoid, "梯形光区预设: -1,-0.7;1,-0.7;0.6,0.8;-0.6,0.8 (prop.freeform.preset_trapezoid)");
-	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_trapezoid"), btnTrapezoid, "📐 梯形光区", theme))
+	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_trapezoid"), btnTrapezoid, "[尺寸] 梯形光区", theme))
 	{
 		light->Points = StringPool::Get().InternName("-1,-0.7;1,-0.7;0.6,0.8;-0.6,0.8");
 		m_Host.MarkDocumentDirty();
@@ -4771,7 +4545,7 @@ float PropertiesPanel::DrawFreeformLight2DInspector(Wui::WuiContext& ctx, const 
 	}
 
 	Wui::Tooltip(ctx, btnCone, "射灯光锥预设: 0,-1;1.2,1;-1.2,1 (prop.freeform.preset_cone)");
-	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_cone"), btnCone, "📐 射灯光锥", theme))
+	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_cone"), btnCone, "[尺寸] 射灯光锥", theme))
 	{
 		light->Points = StringPool::Get().InternName("0,-1;1.2,1;-1.2,1");
 		m_Host.MarkDocumentDirty();
@@ -4779,7 +4553,7 @@ float PropertiesPanel::DrawFreeformLight2DInspector(Wui::WuiContext& ctx, const 
 	}
 
 	Wui::Tooltip(ctx, btnDiamond, "菱形天窗预设: 0,-1;1,0;0,1;-1,0 (prop.freeform.preset_diamond)");
-	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_diamond"), btnDiamond, "📐 菱形天窗", theme))
+	if (Wui::Button(ctx, Wui::HashId("prop.freeform.preset_diamond"), btnDiamond, "[尺寸] 菱形天窗", theme))
 	{
 		light->Points = StringPool::Get().InternName("0,-1;1,0;0,1;-1,0");
 		m_Host.MarkDocumentDirty();
@@ -4876,7 +4650,7 @@ float PropertiesPanel::DrawTilemapInspector(Wui::WuiContext& ctx, const Wui::Wui
 
 	const Wui::WuiRect btnOpen { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
 	Wui::Tooltip(ctx, btnOpen, tmPath.empty() ? "请先绑定 .wtilemap 瓦片地图资产" : ("在瓦片地图工作台中打开: " + tmPath + " (prop.tilemap.open)"));
-	if (Wui::Button(ctx, Wui::HashId("prop.tilemap.open"), btnOpen, "🗺 打开瓦片地图编辑器", theme))
+	if (Wui::Button(ctx, Wui::HashId("prop.tilemap.open"), btnOpen, "[地图] 打开瓦片地图编辑器", theme))
 	{
 		if (!tmPath.empty())
 			m_Host.OpenTilemapEditor(tmPath);
@@ -5042,7 +4816,7 @@ float PropertiesPanel::DrawPolygonCollider2DInspector(Wui::WuiContext& ctx, cons
 
 	const bool editingCollider = m_Host.IsEditingCollider();
 	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
-	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑多边形 (Edit Polygon)";
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "[编辑] 视口编辑多边形 (Edit Polygon)";
 	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑多边形顶点 (prop.poly2d.edit)");
 	if (Wui::Button(ctx, Wui::HashId("prop.poly2d.edit"), btnEditCol, editColText, theme))
 	{
@@ -5102,7 +4876,7 @@ float PropertiesPanel::DrawChainCollider2DInspector(Wui::WuiContext& ctx, const 
 
 	const bool editingCollider = m_Host.IsEditingCollider();
 	const Wui::WuiRect btnEditCol { rect.X + 12.0f, y, std::min(220.0f, rect.W - 24.0f), 24.0f };
-	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "✎ 视口编辑折线链 (Edit Chain)";
+	std::string editColText = editingCollider ? "✓ 退出碰撞体编辑 (Done)" : "[编辑] 视口编辑折线链 (Edit Chain)";
 	Wui::Tooltip(ctx, btnEditCol, "在场景视口中直接拖动控制手柄交互式编辑折线链顶点 (prop.chain2d.edit)");
 	if (Wui::Button(ctx, Wui::HashId("prop.chain2d.edit"), btnEditCol, editColText, theme))
 	{
@@ -5211,7 +4985,7 @@ float PropertiesPanel::DrawCompositeCollider2DInspector(Wui::WuiContext& ctx, co
 	}
 	else
 	{
-		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 6.0f }, "ℹ 暂未聚合到子碰撞体", theme.Warning, 11.5f);
+		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 6.0f }, "[注] 暂未聚合到子碰撞体", theme.Warning, 11.5f);
 		Wui::Label(ctx, { cardRect.X + 10.0f, cardRect.Y + 24.0f }, "提示: 在此实体或其子级添加 Box/Polygon 碰撞体以自动合并", theme.TextMuted, 10.5f);
 	}
 	y += cardH + 8.0f;
@@ -5451,7 +5225,7 @@ float PropertiesPanel::DrawShadowCaster2DInspector(Wui::WuiContext& ctx, const W
 	const Wui::WuiRect btnShapeBox  { rect.X + 12.0f, y, 108.0f, btnH };
 	const Wui::WuiRect btnShapePoly { rect.X + 126.0f, y, 124.0f, btnH };
 
-	const std::string boxText = (caster->ShapeType == 0) ? "✔ 矩形 Box" : "矩形 Box";
+	const std::string boxText = (caster->ShapeType == 0) ? "[OK] 矩形 Box" : "矩形 Box";
 	Wui::Tooltip(ctx, btnShapeBox, "使用 Size 宽高定义的矩形遮光轮廓 (ShapeType=0)");
 	if (Wui::Button(ctx, Wui::HashId("prop.shadow2d.shape_box"), btnShapeBox, boxText, theme))
 	{
@@ -5460,7 +5234,7 @@ float PropertiesPanel::DrawShadowCaster2DInspector(Wui::WuiContext& ctx, const W
 		if (changedFields) changedFields->push_back("ShapeType");
 	}
 
-	const std::string polyText = (caster->ShapeType == 1) ? "✔ 多边形 Polygon" : "多边形 Polygon";
+	const std::string polyText = (caster->ShapeType == 1) ? "[OK] 多边形 Polygon" : "多边形 Polygon";
 	Wui::Tooltip(ctx, btnShapePoly, "使用 Points 顶点列表定义的多边形遮光轮廓 (ShapeType=1)");
 	if (Wui::Button(ctx, Wui::HashId("prop.shadow2d.shape_poly"), btnShapePoly, polyText, theme))
 	{
@@ -6337,7 +6111,7 @@ curY += 30.0f;
 	const float halfBtnW = (contentW - 6.0f) * 0.5f;
 	Wui::WuiTheme abortTheme = theme;
 	abortTheme.ButtonBg = Wui::WuiColor { 0.55f, 0.20f, 0.15f, 0.90f };
-	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_abort_test"), { startX, curY, halfBtnW, 24.0f }, "✦ 触发打断 (Abort)", abortTheme))
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_abort_test"), { startX, curY, halfBtnW, 24.0f }, "触发打断 (Abort)", abortTheme))
 	{
 		bt->AbortRequested = 1;
 		m_Host.Notify("已向 AI 实体下发响应式打断信号 (AbortRequested = 1)");
@@ -6346,7 +6120,7 @@ curY += 30.0f;
 
 	Wui::WuiTheme resetTheme = theme;
 	resetTheme.ButtonBg = Wui::WuiColor { 0.25f, 0.35f, 0.45f, 0.90f };
-	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_reset_test"), { startX + halfBtnW + 6.0f, curY, halfBtnW, 24.0f }, "✦ 重置状态 (Reset)", resetTheme))
+	if (Wui::Button(ctx, Wui::HashId("inspect.bt.btn_reset_test"), { startX + halfBtnW + 6.0f, curY, halfBtnW, 24.0f }, "重置状态 (Reset)", resetTheme))
 	{
 		bt->ClearPath();
 		bt->Status = BehaviorStatus::Inactive;

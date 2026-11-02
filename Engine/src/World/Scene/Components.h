@@ -3137,94 +3137,54 @@ namespace World
 
 	struct BiomePCGComponent
 	{
-		AssetRef RuleAsset;                               // 16B (offset 0)
-		float MinElevation { 0.0f };                      // 4B  (offset 16)
-		float MaxElevation { 1000.0f };                   // 4B  (offset 20)
-		float MaxSlope { 35.0f };                         // 4B  (offset 24)
-		float MoistureThreshold { 0.3f };                 // 4B  (offset 28)
-		uint32_t Seed { 1337 };                           // 4B  (offset 32)
-		uint8_t AutoDeformTerrain { 1 };                  // 1B  (offset 36)
-		uint8_t _Padding[11] { 0 };                       // 11B (offset 37..47)
+		AssetRef RuleAsset;                               // 16B: 关联的 PCG 规则图资产路径 (.wpcggraph)
+		float BoundsRadius { 50.0f };                     // 4B: 空间生成范围作用半径 (m)
+		float BoundsHeight { 40.0f };                     // 4B: 空间垂直高度半高 (m)
+		float DensityMultiplier { 1.0f };                 // 4B: 空间采样密度倍数 (0.05..10.0)
+		float ClearanceMargin { 0.0f };                   // 4B: 边缘与走廊安全留白宽度 (m)
+		uint32_t Seed { 1337 };                           // 4B: 伪随机独立种子
+		uint8_t GenerateOnPlay { 1 };                     // 1B: 运行时是否自动执行生成
+		uint8_t AutoDeformTerrain { 0 };                  // 1B: 是否联动样条道路自动挖填放坡
+		uint8_t LivePreview { 1 };                        // 1B: 编辑态参数变动是否即时反馈视口点云
+		uint8_t _Padding[9] { 0 };                        // 9B: 对齐填充至 48 字节
 
 		BiomePCGComponent() = default;
 
 		WE_SCHEMA_BODY(World, BiomePCGComponent, Component)
-			WE_SCHEMA_META(Category("Environment"),
-				Doc("Procedural Content Generation rules for biomes, vegetation clusters and terrain deformation."))
+			WE_SCHEMA_META(Category("PCG"),
+				Doc("纯净通用空间程序化内容生成组件，负责定义生成空间体积包围、随机种子、密度与规则图资产引用。"))
 			WE_FIELD(RuleAsset, Asset, Of("PCGRule"),
-				Doc("Rule graph definition asset."));
-			WE_FIELD(MinElevation, Float, Range(0.0f, 5000.0f), Default(0.0f),
-				Doc("Minimum elevation bound in meters."));
-			WE_FIELD(MaxElevation, Float, Range(0.0f, 5000.0f), Default(1000.0f),
-				Doc("Maximum elevation bound in meters."));
-			WE_FIELD(MaxSlope, Float, Range(0.0f, 89.0f), Default(35.0f),
-				Doc("Maximum slope angle in degrees where foliage or settlements can spawn."));
-			WE_FIELD(MoistureThreshold, Float, Range(0.0f, 1.0f), Default(0.3f),
-				Doc("Minimum moisture humidity threshold."));
+				Doc("PCG 规则图定义资产路径 (*.wpcggraph)。"));
+			WE_FIELD(BoundsRadius, Float, Range(1.0f, 2000.0f), Default(50.0f),
+				Doc("空间生成区域的作用半径 (米)。"));
+			WE_FIELD(BoundsHeight, Float, Range(1.0f, 1000.0f), Default(40.0f),
+				Doc("空间生成区域的垂直半高 (米)。"));
+			WE_FIELD(DensityMultiplier, Float, Range(0.05f, 10.0f), Default(1.0f),
+				Doc("空间采样的全局密度倍数。"));
+			WE_FIELD(ClearanceMargin, Float, Range(0.0f, 100.0f), Default(0.0f),
+				Doc("生成区域边缘或道路通道的安全清空留白宽度 (米)。"));
 			WE_FIELD(Seed, UInt32, Default(1337),
-				Doc("Procedural pseudorandom seed."));
-			WE_FIELD(AutoDeformTerrain, UInt8, Default(1),
-				Doc("Automatically cut, fill, and slope terrain along spline roads."));
+				Doc("空间程序化伪随机独立种子。"));
+			WE_FIELD(GenerateOnPlay, UInt8, Default(1),
+				Doc("是否在 Play 运行时自动执行生成。"));
+			WE_FIELD(AutoDeformTerrain, UInt8, Default(0),
+				Doc("是否沿场景内的样条道路自动挖填地表。"));
+			WE_FIELD(LivePreview, UInt8, Default(1),
+				Doc("编辑态参数拖拽时是否实时刷新视口点云预览。"));
 		WE_SCHEMA_END
 	};
 	static_assert(sizeof(BiomePCGComponent) == 48, "BiomePCGComponent must be exactly 48 bytes");
 	static_assert(std::is_trivially_copyable_v<BiomePCGComponent>, "BiomePCGComponent must be trivially copyable");
 	static_assert(offsetof(BiomePCGComponent, RuleAsset) == 0, "RuleAsset offset mismatch");
-	static_assert(offsetof(BiomePCGComponent, MinElevation) == 16, "MinElevation offset mismatch");
-	static_assert(offsetof(BiomePCGComponent, MaxElevation) == 20, "MaxElevation offset mismatch");
-	static_assert(offsetof(BiomePCGComponent, MaxSlope) == 24, "MaxSlope offset mismatch");
-	static_assert(offsetof(BiomePCGComponent, MoistureThreshold) == 28, "MoistureThreshold offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, BoundsRadius) == 16, "BoundsRadius offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, BoundsHeight) == 20, "BoundsHeight offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, DensityMultiplier) == 24, "DensityMultiplier offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, ClearanceMargin) == 28, "ClearanceMargin offset mismatch");
 	static_assert(offsetof(BiomePCGComponent, Seed) == 32, "Seed offset mismatch");
-	static_assert(offsetof(BiomePCGComponent, AutoDeformTerrain) == 36, "AutoDeformTerrain offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, GenerateOnPlay) == 36, "GenerateOnPlay offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, AutoDeformTerrain) == 37, "AutoDeformTerrain offset mismatch");
+	static_assert(offsetof(BiomePCGComponent, LivePreview) == 38, "LivePreview offset mismatch");
 
-	struct EQSComponent
-	{
-		glm::vec3 QueryCenter { 0.0f };                   // 12B (offset 0)
-		float QueryRadius { 20.0f };                      // 4B  (offset 12)
-		float GridSpacing { 2.0f };                       // 4B  (offset 16)
-		uint8_t BestCoverFound { 0 };                     // 1B  (offset 20)
-		uint8_t QueryMode { 0 };                          // 1B  (offset 21): 0=Cover, 1=Flank, 2=Retreat
-		uint8_t GeneratorMode { 0 };                      // 1B  (offset 22): 0=ProjectedGrid, 1=ConcentricRings, 2=HybridObstacleEdge
-		uint8_t IncludeCrouchCover { 1 };                 // 1B  (offset 23): 1=Enable half-cover crouch evaluation
-		uint32_t ThreatEntityHint { 0 };                  // 4B  (offset 24): Optional target threat entity low ID
-		float OptimalDistance { 8.0f };                   // 4B  (offset 28): Preferred tactical distance in meters
-
-		EQSComponent() = default;
-
-		WE_SCHEMA_BODY(World, EQSComponent, Component)
-			WE_SCHEMA_META(Category("AI"),
-				Doc("Environment Query System for finding tactical cover points and line-of-sight concealment."))
-			WE_FIELD(QueryCenter, Vec3,
-				Doc("Center coordinates of the tactical query in world space."));
-			WE_FIELD(QueryRadius, Float, Range(1.0f, 200.0f), Default(20.0f),
-				Doc("Query radius in meters."));
-			WE_FIELD(GridSpacing, Float, Range(0.5f, 20.0f), Default(2.0f),
-				Doc("Spacing distance between candidate sample points in meters."));
-			WE_FIELD(BestCoverFound, UInt8, Default(0),
-				Doc("Whether an optimal tactical cover point was found."));
-			WE_FIELD(QueryMode, UInt8, Range(0, 2), Default(0),
-				Doc("Tactical query mode: 0=Cover, 1=Flank, 2=Retreat."));
-			WE_FIELD(GeneratorMode, UInt8, Range(0, 2), Default(0),
-				Doc("Candidate generator mode: 0=ProjectedGrid, 1=ConcentricRings, 2=HybridObstacleEdge."));
-			WE_FIELD(IncludeCrouchCover, UInt8, Range(0, 1), Default(1),
-				Doc("Whether half-height crouch cover points are evaluated."));
-			WE_FIELD(ThreatEntityHint, UInt32, Default(0),
-				Doc("Optional target threat entity low ID."));
-			WE_FIELD(OptimalDistance, Float, Range(1.0f, 100.0f), Default(8.0f),
-				Doc("Preferred tactical distance in meters."));
-		WE_SCHEMA_END
-	};
-	static_assert(sizeof(EQSComponent) == 32, "EQSComponent must be exactly 32 bytes");
-	static_assert(std::is_trivially_copyable_v<EQSComponent>, "EQSComponent must be trivially copyable");
-	static_assert(offsetof(EQSComponent, QueryCenter) == 0, "QueryCenter offset mismatch");
-	static_assert(offsetof(EQSComponent, QueryRadius) == 12, "QueryRadius offset mismatch");
-	static_assert(offsetof(EQSComponent, GridSpacing) == 16, "GridSpacing offset mismatch");
-	static_assert(offsetof(EQSComponent, BestCoverFound) == 20, "BestCoverFound offset mismatch");
-	static_assert(offsetof(EQSComponent, QueryMode) == 21, "QueryMode offset mismatch");
-	static_assert(offsetof(EQSComponent, GeneratorMode) == 22, "GeneratorMode offset mismatch");
-	static_assert(offsetof(EQSComponent, IncludeCrouchCover) == 23, "IncludeCrouchCover offset mismatch");
-	static_assert(offsetof(EQSComponent, ThreatEntityHint) == 24, "ThreatEntityHint offset mismatch");
-	static_assert(offsetof(EQSComponent, OptimalDistance) == 28, "OptimalDistance offset mismatch");
 
 	enum class BehaviorStatus : uint8_t
 	{

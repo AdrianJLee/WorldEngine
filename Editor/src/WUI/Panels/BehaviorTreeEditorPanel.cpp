@@ -1662,7 +1662,7 @@ namespace World
 				}
 
 				Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "架构约定:", theme.Accent, theme.FontSizeSmall);
-				Wui::Label(ctx, { startX + labelW, cardY + 2.0f }, "由行为树通过异步 EnvQueryManager 全权调度，实体无需挂载 EQSComponent", theme.TextMuted, theme.FontSizeSmall);
+				Wui::Label(ctx, { startX + labelW, cardY + 2.0f }, "由行为树通过异步 EnvQueryManager 全权调度", theme.TextMuted, theme.FontSizeSmall);
 				cardY += 24.0f;
 
 				// 核心工作台模式: 0: 关联独立资产 (.weqs), 1: 空间决策准则 (Tactical Rules)
@@ -1749,7 +1749,7 @@ namespace World
 
 						if (g_EQSPreviewState.PipelineTests.empty())
 						{
-							LoadEQSPreset(0, nullptr, g_EQSPreviewState);
+							LoadEQSPreset(0, g_EQSPreviewState);
 						}
 						for (const auto& t : g_EQSPreviewState.PipelineTests)
 						{
@@ -1816,7 +1816,7 @@ namespace World
 				{
 					if (g_EQSPreviewState.PipelineTests.empty())
 					{
-						LoadEQSPreset(0, nullptr, g_EQSPreviewState);
+						LoadEQSPreset(0, g_EQSPreviewState);
 					}
 
 					Wui::Label(ctx, { startX + 8.0f, cardY + 2.0f }, "测试项栈 (Tests):", theme.Accent, theme.FontSizeSmall);
@@ -1905,7 +1905,7 @@ namespace World
 
 				if (g_EQSPreviewState.PipelineTests.empty())
 				{
-					LoadEQSPreset(0, nullptr, g_EQSPreviewState);
+					LoadEQSPreset(0, g_EQSPreviewState);
 				}
 				std::string testsSummary;
 				for (size_t t = 0; t < g_EQSPreviewState.PipelineTests.size(); ++t)
@@ -1948,7 +1948,7 @@ namespace World
 					}
 					if (g_EQSPreviewState.PipelineTests.empty())
 					{
-						LoadEQSPreset(0, nullptr, g_EQSPreviewState);
+						LoadEQSPreset(0, g_EQSPreviewState);
 					}
 					for (auto& t : g_EQSPreviewState.PipelineTests)
 					{
@@ -1960,10 +1960,7 @@ namespace World
 
 					Scene* scenePtr = host.GetActiveScene().get();
 					Entity simEnt = host.GetSelectedEntity();
-					EQSComponent* compPtr = (simEnt.IsValid() && simEnt.HasComponent<EQSComponent>())
-						? &simEnt.GetComponent<EQSComponent>() : nullptr;
-
-					ExecuteEQSPipeline(scenePtr, simEnt, compPtr, g_EQSPreviewState);
+					ExecuteEQSPipeline(scenePtr, simEnt, g_EQSPreviewState);
 
 					if (simEnt.IsValid() && simEnt.HasComponent<BehaviorTreeComponent>())
 					{
@@ -2753,7 +2750,7 @@ void BehaviorTreeEditorPanel::RenderLiveDebugger(Wui::WuiContext& ctx, const Wui
 		// 2. 战术评估规则库 (Tactical Criteria Stack)
 		if (g_EQSPreviewState.PipelineTests.empty())
 		{
-			LoadEQSPreset(0, nullptr, g_EQSPreviewState);
+			LoadEQSPreset(0, g_EQSPreviewState);
 		}
 
 		const size_t numRules = g_EQSPreviewState.PipelineTests.size();
@@ -3009,10 +3006,7 @@ void BehaviorTreeEditorPanel::RenderLiveDebugger(Wui::WuiContext& ctx, const Wui
 		{
 			Scene* scenePtr = host.GetActiveScene().get();
 			Entity simEnt = host.GetSelectedEntity();
-			EQSComponent* compPtr = (simEnt.IsValid() && simEnt.HasComponent<EQSComponent>())
-				? &simEnt.GetComponent<EQSComponent>() : nullptr;
-
-			ExecuteEQSPipeline(scenePtr, simEnt, compPtr, g_EQSPreviewState);
+			ExecuteEQSPipeline(scenePtr, simEnt, g_EQSPreviewState);
 			m_StatusFeedback = g_EQSPreviewState.LastStatus;
 			host.MarkDocumentDirty();
 		}

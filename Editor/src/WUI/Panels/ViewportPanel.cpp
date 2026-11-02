@@ -1412,6 +1412,12 @@ namespace World
 					m_Host.ActivatePanel("physicspainter");
 				});
 
+			modeItem("viewport.mode.pcg", Wui::Tr("viewport.mode.pcg_name", "PCG 生态生成器工作台"),
+				false, "打开 PCG 生态生成器工作台 (PCG Graph Workbench)",
+				[this] {
+					m_Host.OpenPcgEditor();
+				});
+
 			ctx.ClosePopupsOnOutsideClick({ modePopup }, panel);
 			if (ctx.IsKeyPressed(KeyCodes::Escape))
 				ctx.ClosePopup(modePopup);
@@ -3109,7 +3115,7 @@ namespace World
 								return true;
 						}
 
-						const int numSteps = std::clamp(static_cast<int>(std::ceil(dist / 0.80f)), isSurface ? 8 : 12, 48);
+						const int numSteps = std::clamp(static_cast<int>(std::ceil(dist / 2.0f)), isSurface ? 4 : 6, 16);
 						const float normDist = dist;
 						for (int s = 1; s <= numSteps; ++s)
 						{
@@ -4882,16 +4888,17 @@ namespace World
 					}
 
 					
-					// ---- 辅助遮挡圆环绘制 (逐段遮挡测试，杜绝穿透) ----
+					// ---- 辅助遮挡圆环绘制 (顶点测试+二分边缘，极速60FPS且杜绝穿透) ----
 					auto drawOccludedCircle = [&](const glm::vec3& center, float radius, int planeAxis,
 						const Wui::WuiColor& col, float th, entt::entity ign)
 					{
 						constexpr int kSegments = 32;
 						constexpr float kTwoPi = 6.28318530718f;
-						glm::vec3 prevPoint;
+						glm::vec3 pts[kSegments + 1];
+						bool vis[kSegments + 1];
 						for (int i = 0; i <= kSegments; ++i)
 						{
-							const float angle = static_cast<float>(i) * (kTwoPi / static_cast<float>(kSegments));
+							const float angle = static_cast<float>(i % kSegments) * (kTwoPi / static_cast<float>(kSegments));
 							const float ca = std::cos(angle) * radius;
 							const float sa = std::sin(angle) * radius;
 							glm::vec3 curPoint = center;
@@ -4901,9 +4908,47 @@ namespace World
 								curPoint += glm::vec3(ca, 0.0f, sa);
 							else // XY
 								curPoint += glm::vec3(ca, sa, 0.0f);
-							if (i > 0)
-								PushOccludedWorldSegment(prevPoint, curPoint, col, th, ign);
-							prevPoint = curPoint;
+							pts[i] = curPoint;
+							vis[i] = !isOccluded(curPoint, false, 0.0f, ign);
+						}
+
+						for (int i = 0; i < kSegments; ++i)
+						{
+							const bool v0 = vis[i];
+							const bool v1 = vis[i + 1];
+							if (v0 && v1)
+							{
+								PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect,
+									overlayCamera.ViewProjection * glm::vec4(pts[i], 1.0f),
+									overlayCamera.ViewProjection * glm::vec4(pts[i + 1], 1.0f),
+									col, th);
+							}
+							else if (v0 && !v1)
+							{
+								glm::vec3 pVis = pts[i], pOcc = pts[i + 1];
+								for (int b = 0; b < 2; ++b)
+								{
+									glm::vec3 pMid = (pVis + pOcc) * 0.5f;
+									if (!isOccluded(pMid, false, 0.0f, ign)) pVis = pMid; else pOcc = pMid;
+								}
+								PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect,
+									overlayCamera.ViewProjection * glm::vec4(pts[i], 1.0f),
+									overlayCamera.ViewProjection * glm::vec4(pVis, 1.0f),
+									col, th);
+							}
+							else if (!v0 && v1)
+							{
+								glm::vec3 pOcc = pts[i], pVis = pts[i + 1];
+								for (int b = 0; b < 2; ++b)
+								{
+									glm::vec3 pMid = (pVis + pOcc) * 0.5f;
+									if (!isOccluded(pMid, false, 0.0f, ign)) pVis = pMid; else pOcc = pMid;
+								}
+								PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect,
+									overlayCamera.ViewProjection * glm::vec4(pVis, 1.0f),
+									overlayCamera.ViewProjection * glm::vec4(pts[i + 1], 1.0f),
+									col, th);
+							}
 						}
 					};
 
@@ -4915,65 +4960,90 @@ namespace World
 						const auto& xf = selected.GetComponent<TransformComponent>();
 						const glm::vec3 entCenter = xf.Location;
 
-						// 1. 绘制 PCG 生成范围圆环（金黄色 0.95f, 0.8f, 0.2f, 0.9f）
+						// 空间变换尺度一致性：半径与体积高度严格遵循 Transform.Scale 与 BoundsExtents
+						const float scaleFactor = std::max({ std::abs(xf.Scale.x), std::abs(xf.Scale.z), 0.1f });
+						const float pcgRadius = std::max(2.0f, pcg.BoundsRadius * scaleFactor);
+						const float heightScale = std::max(std::abs(xf.Scale.y), 0.1f);
+						const float halfH = std::max(2.0f, pcg.BoundsHeight * heightScale);
+
+						// 1. 绘制带深度遮挡剔除的 3D 生成空间体积线框（双圆环 + 4 立柱）
 						const Wui::WuiColor pcgGold { 0.95f, 0.80f, 0.20f, 0.90f };
-						const float pcgRadius = 30.0f;
-						drawOccludedCircle(entCenter, pcgRadius, 1, pcgGold, 2.0f, selectedHandle);
-						drawOccludedCircle(entCenter, pcgRadius * 0.5f, 1, Wui::WuiColor{ 0.95f, 0.80f, 0.20f, 0.40f }, 1.2f, selectedHandle);
+						const Wui::WuiColor pcgDimGold { 0.95f, 0.80f, 0.20f, 0.40f };
 
-						// 2. 在地形地表绘制不同生态群落的分类采样预览点（森林绿、草甸青、岩山灰、荒漠黄、雪山白）
-				const bool hasSharedPoints = PCGBiomeGenerator::IsSharedPreviewActive() && !PCGBiomeGenerator::GetSharedPreviewPoints().empty();
-				const auto& previewPoints = hasSharedPoints ? PCGBiomeGenerator::GetSharedPreviewPoints() : g_PCGPreviewState.Points;
-				const bool previewActive = hasSharedPoints || (g_PCGPreviewState.Active && g_PCGPreviewState.TargetEntity == selectedHandle && !g_PCGPreviewState.Points.empty());
+						// 底部圆环与顶部圆环 (执行逐段深度遮挡)
+						drawOccludedCircle(glm::vec3(entCenter.x, entCenter.y - halfH, entCenter.z), pcgRadius, 1, pcgGold, 2.0f, selectedHandle);
+						drawOccludedCircle(glm::vec3(entCenter.x, entCenter.y + halfH, entCenter.z), pcgRadius, 1, pcgGold, 2.0f, selectedHandle);
+						drawOccludedCircle(entCenter, pcgRadius * 0.5f, 1, pcgDimGold, 1.2f, selectedHandle);
 
-				if (previewActive && !previewPoints.empty())
-				{
-					for (const auto& pt : previewPoints)
-					{
-						Wui::WuiColor col;
-						switch (pt.Biome)
+						// 4 根垂直连接柱 (深度遮挡)
+						for (int colIdx = 0; colIdx < 4; ++colIdx)
 						{
-							case BiomeType::Forest:        col = { 0.15f, 0.85f, 0.25f, 0.90f }; break; // 森林绿
-							case BiomeType::Meadow:        col = { 0.25f, 0.90f, 0.70f, 0.90f }; break; // 草甸青
-							case BiomeType::RockyMountain: col = { 0.75f, 0.75f, 0.80f, 0.85f }; break; // 岩山灰
-							case BiomeType::Desert:        col = { 0.95f, 0.80f, 0.20f, 0.90f }; break; // 荒漠黄
-							case BiomeType::SnowPeak:      col = { 0.95f, 0.98f, 1.00f, 0.95f }; break; // 雪山白
-							default:                       col = { 0.50f, 0.80f, 0.50f, 0.80f }; break;
+							const float angle = static_cast<float>(colIdx) * 1.57079632679f;
+							const float px = entCenter.x + std::cos(angle) * pcgRadius;
+							const float pz = entCenter.z + std::sin(angle) * pcgRadius;
+							PushOccludedWorldSegment(glm::vec3(px, entCenter.y - halfH, pz),
+								glm::vec3(px, entCenter.y + halfH, pz), pcgGold, 1.8f, selectedHandle);
 						}
-						const float crossSz = 0.25f;
-						PushOccludedWorldSegment(pt.Position - glm::vec3(crossSz, 0.0f, 0.0f),
-							pt.Position + glm::vec3(crossSz, 0.0f, 0.0f), col, 1.6f, selectedHandle);
-						PushOccludedWorldSegment(pt.Position - glm::vec3(0.0f, 0.0f, crossSz),
-							pt.Position + glm::vec3(0.0f, 0.0f, crossSz), col, 1.6f, selectedHandle);
-					}
-				}
+
+						// 2. 在地表绘制纯净空间点云 (依据图层 ColorTag 渲染，零写死假生态)
+						const bool hasSharedPoints = PCGBiomeGenerator::IsSharedPreviewActive() && !PCGBiomeGenerator::GetSharedPreviewPoints().empty();
+						const auto& previewPoints = hasSharedPoints ? PCGBiomeGenerator::GetSharedPreviewPoints() : g_PCGPreviewState.Points;
+						const bool previewActive = hasSharedPoints || (g_PCGPreviewState.Active && g_PCGPreviewState.TargetEntity == selectedHandle && !g_PCGPreviewState.Points.empty());
+
+						if (previewActive && !previewPoints.empty())
+						{
+							const size_t totalPts = previewPoints.size();
+							const size_t maxVisible = 600;
+							const size_t stride = std::max<size_t>(1, totalPts / maxVisible);
+							const float crossSz = 0.25f * scaleFactor;
+							for (size_t pIdx = 0; pIdx < totalPts; pIdx += stride)
+							{
+								const auto& pt = previewPoints[pIdx];
+								if (glm::distance(cameraPos, pt.Position) > 300.0f)
+									continue;
+
+								const glm::vec4 clip = overlayCamera.ViewProjection * glm::vec4(pt.Position, 1.0f);
+								if (clip.w <= 0.01f || std::abs(clip.x) > clip.w * 1.15f || std::abs(clip.y) > clip.w * 1.15f)
+									continue;
+
+								if (isOccluded(pt.Position, true, 0.04f, selectedHandle))
+									continue;
+
+								const Wui::WuiColor col { pt.ColorTag.r, pt.ColorTag.g, pt.ColorTag.b, pt.ColorTag.a };
+								const glm::vec4 cX0 = overlayCamera.ViewProjection * glm::vec4(pt.Position - glm::vec3(crossSz, 0.0f, 0.0f), 1.0f);
+								const glm::vec4 cX1 = overlayCamera.ViewProjection * glm::vec4(pt.Position + glm::vec3(crossSz, 0.0f, 0.0f), 1.0f);
+								const glm::vec4 cZ0 = overlayCamera.ViewProjection * glm::vec4(pt.Position - glm::vec3(0.0f, 0.0f, crossSz), 1.0f);
+								const glm::vec4 cZ1 = overlayCamera.ViewProjection * glm::vec4(pt.Position + glm::vec3(0.0f, 0.0f, crossSz), 1.0f);
+								PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect, cX0, cX1, col, 1.6f);
+								PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect, cZ0, cZ1, col, 1.6f);
+							}
+						}
 						else
 						{
-							// 动态快速采样预览网格 (10x10)
+							// 动态快速采样预览网格 (10x10)，保持缩放一致性
 							constexpr int kGrid = 10;
-							constexpr float kStep = 5.0f;
+							const float kStep = std::max(2.0f, (pcgRadius * 2.0f) / static_cast<float>(kGrid));
+							const float cs = 0.25f * scaleFactor;
+							const Wui::WuiColor col { 0.95f, 0.85f, 0.35f, 0.80f };
 							for (int z = -kGrid / 2; z <= kGrid / 2; ++z)
 							{
 								for (int x = -kGrid / 2; x <= kGrid / 2; ++x)
 								{
-									const glm::vec3 samplePos = entCenter + glm::vec3(x * kStep, 0.0f, z * kStep);
+									glm::vec3 samplePos = entCenter + glm::vec3(static_cast<float>(x) * kStep, 0.0f, static_cast<float>(z) * kStep);
 									if (glm::distance(samplePos, entCenter) > pcgRadius) continue;
-									const float moisture = 0.5f + 0.5f * std::sin(samplePos.x * 0.02f + static_cast<float>(pcg.Seed)) * std::cos(samplePos.z * 0.02f);
-									if (moisture < pcg.MoistureThreshold) continue;
-									const BiomeType b = PCGBiomeGenerator::ClassifyBiome(samplePos.y, 10.0f, moisture);
-									Wui::WuiColor col;
-									switch (b)
-									{
-										case BiomeType::Forest:        col = { 0.15f, 0.85f, 0.25f, 0.90f }; break;
-										case BiomeType::Meadow:        col = { 0.25f, 0.90f, 0.70f, 0.90f }; break;
-										case BiomeType::RockyMountain: col = { 0.75f, 0.75f, 0.80f, 0.85f }; break;
-										case BiomeType::Desert:        col = { 0.95f, 0.80f, 0.20f, 0.90f }; break;
-										case BiomeType::SnowPeak:      col = { 0.95f, 0.98f, 1.00f, 0.95f }; break;
-										default:                       col = { 0.50f, 0.80f, 0.50f, 0.80f }; break;
-									}
-									const float cs = 0.25f;
-									PushOccludedWorldSegment(samplePos - glm::vec3(cs, 0.0f, 0.0f), samplePos + glm::vec3(cs, 0.0f, 0.0f), col, 1.4f, selectedHandle);
-									PushOccludedWorldSegment(samplePos - glm::vec3(0.0f, 0.0f, cs), samplePos + glm::vec3(0.0f, 0.0f, cs), col, 1.4f, selectedHandle);
+									float gH = entCenter.y;
+									if (sampleTerrainWorldHeight(samplePos.x, samplePos.z, gH))
+										samplePos.y = gH + 0.05f;
+
+									if (isOccluded(samplePos, true, 0.04f, selectedHandle))
+										continue;
+
+									const glm::vec4 cX0 = overlayCamera.ViewProjection * glm::vec4(samplePos - glm::vec3(cs, 0.0f, 0.0f), 1.0f);
+									const glm::vec4 cX1 = overlayCamera.ViewProjection * glm::vec4(samplePos + glm::vec3(cs, 0.0f, 0.0f), 1.0f);
+									const glm::vec4 cZ0 = overlayCamera.ViewProjection * glm::vec4(samplePos - glm::vec3(0.0f, 0.0f, cs), 1.0f);
+									const glm::vec4 cZ1 = overlayCamera.ViewProjection * glm::vec4(samplePos + glm::vec3(0.0f, 0.0f, cs), 1.0f);
+									PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect, cX0, cX1, col, 1.4f);
+									PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect, cZ0, cZ1, col, 1.4f);
 								}
 							}
 						}
@@ -5003,9 +5073,10 @@ namespace World
 									{
 										const float halfW = splineComp.RoadWidth * 0.5f;
 										const float slopeMargin = 3.0f; // 过渡放坡宽度
-										const float step = 1.0f;
+										const float step = 2.0f; // 2.0m 采样步长保证极速且平滑
 										const int numSamples = static_cast<int>(totalLen / step);
-										glm::vec3 prevLeftSlope, prevRightSlope;
+										glm::vec3 prevLeftSlope(0.0f), prevRightSlope(0.0f);
+										bool prevLeftVis = false, prevRightVis = false;
 										for (int i = 0; i <= numSamples; ++i)
 										{
 											const float d = std::min(static_cast<float>(i) * step, totalLen);
@@ -5014,13 +5085,26 @@ namespace World
 											const glm::vec3 side = glm::normalize(glm::cross(tan, glm::vec3(0, 1, 0)));
 											const glm::vec3 curLeftSlope = pos - side * (halfW + slopeMargin);
 											const glm::vec3 curRightSlope = pos + side * (halfW + slopeMargin);
+											const bool curLeftVis = !isOccluded(curLeftSlope, true, 0.05f, selectedHandle);
+											const bool curRightVis = !isOccluded(curRightSlope, true, 0.05f, selectedHandle);
+
 											if (i > 0)
 											{
-												PushOccludedWorldSegment(prevLeftSlope, curLeftSlope, roadSlopeCol, 1.5f, selectedHandle);
-												PushOccludedWorldSegment(prevRightSlope, curRightSlope, roadSlopeCol, 1.5f, selectedHandle);
+												if (prevLeftVis && curLeftVis)
+													PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect,
+														overlayCamera.ViewProjection * glm::vec4(prevLeftSlope, 1.0f),
+														overlayCamera.ViewProjection * glm::vec4(curLeftSlope, 1.0f),
+														roadSlopeCol, 1.5f);
+												if (prevRightVis && curRightVis)
+													PushProjectedSegment(ctx, overlayCamera.ViewProjection, sceneRect,
+														overlayCamera.ViewProjection * glm::vec4(prevRightSlope, 1.0f),
+														overlayCamera.ViewProjection * glm::vec4(curRightSlope, 1.0f),
+														roadSlopeCol, 1.5f);
 											}
 											prevLeftSlope = curLeftSlope;
 											prevRightSlope = curRightSlope;
+											prevLeftVis = curLeftVis;
+											prevRightVis = curRightVis;
 										}
 									}
 								}
@@ -5029,57 +5113,16 @@ namespace World
 					}
 
 
-					// ---- 2. EQS 战术掩体查询可视化 (EQSComponent 或 BehaviorTree / 全局预览点云) ----
-					const bool hasSelectedEqs = selected.IsValid() && selected.HasComponent<EQSComponent>() &&
-						selected.HasComponent<TransformComponent>();
+					// ---- 2. EQS 战术掩体查询可视化 (BehaviorTree / 全局预览点云) ----
 					const bool hasBtPreview = g_EQSPreviewState.Evaluated && !g_EQSPreviewState.Candidates.empty();
 
-					if (hasSelectedEqs || hasBtPreview)
+					if (hasBtPreview)
 					{
-						const entt::entity targetHandle = hasSelectedEqs ? selectedHandle : g_EQSPreviewState.TargetEntity;
+						const entt::entity targetHandle = g_EQSPreviewState.TargetEntity;
 						glm::vec3 querierPos = g_EQSPreviewState.QuerierPos;
 						float queryR = std::max(2.0f, g_EQSPreviewState.QueryRadius);
 						uint32_t threatHint = g_EQSPreviewState.ThreatEntityHint;
 						uint8_t bestCoverFound = g_EQSPreviewState.Evaluated ? 1 : 0;
-
-						if (hasSelectedEqs)
-						{
-							const auto& eqs = selected.GetComponent<EQSComponent>();
-							const auto& xf = selected.GetComponent<TransformComponent>();
-							querierPos = xf.Location;
-							queryR = std::max(2.0f, eqs.QueryRadius);
-							threatHint = eqs.ThreatEntityHint;
-							bestCoverFound = eqs.BestCoverFound;
-
-							// 响应式自动触发更新：实体选中变更、位置移动或威胁源位置移动时实时评估
-							static glm::vec3 s_LastEqsQuerierPos(1e9f);
-							static glm::vec3 s_LastEqsThreatPos(1e9f);
-							static entt::entity s_LastEqsTarget = entt::null;
-							static float s_EqsRefreshCooldown = 0.0f;
-							s_EqsRefreshCooldown += 0.016f;
-
-							uint32_t resolvedThreatRaw = 0;
-							glm::vec3 threatPos(0.0f);
-							if (!overlayScene || !EQSCoverSystem::ResolveSceneThreatPosition(*overlayScene, static_cast<uint32_t>(selectedHandle), threatHint, querierPos, threatPos, &resolvedThreatRaw))
-							{
-								threatPos = (g_EQSPreviewState.TargetEntity == selectedHandle && g_EQSPreviewState.Evaluated)
-									? g_EQSPreviewState.ThreatPos
-									: (querierPos + glm::vec3(15.0f, 2.0f, 15.0f));
-							}
-
-							const bool targetChanged = (g_EQSPreviewState.TargetEntity != selectedHandle);
-							const bool posChanged = (glm::distance(s_LastEqsQuerierPos, querierPos) > 0.05f);
-							const bool threatChanged = (glm::distance(s_LastEqsThreatPos, threatPos) > 0.05f);
-
-							if (targetChanged || posChanged || threatChanged || !g_EQSPreviewState.Evaluated || s_EqsRefreshCooldown > 0.35f)
-							{
-								ExecuteEQSPipeline(overlayScene.get(), selected, const_cast<EQSComponent*>(&eqs), g_EQSPreviewState);
-								s_LastEqsQuerierPos = querierPos;
-								s_LastEqsThreatPos = threatPos;
-								s_LastEqsTarget = selectedHandle;
-								s_EqsRefreshCooldown = 0.0f;
-							}
-						}
 
 						// 1. 绘制查询范围圆环（青色 0.2f, 0.8f, 0.95f, 0.85f）
 						const Wui::WuiColor eqsCyan { 0.20f, 0.80f, 0.95f, 0.85f };
@@ -5161,24 +5204,7 @@ namespace World
 								}
 							}
 						}
-						else if (hasSelectedEqs)
-						{
-							// 动态候选网格预览
-							const auto& eqs = selected.GetComponent<EQSComponent>();
-							const float sp = std::clamp(eqs.GridSpacing, 1.0f, 5.0f);
-							const int steps = static_cast<int>(queryR / sp);
-							for (int z = -steps; z <= steps; ++z)
-							{
-								for (int x = -steps; x <= steps; ++x)
-								{
-									const glm::vec3 pt = querierPos + glm::vec3(x * sp, 0.0f, z * sp);
-									if (glm::distance(pt, querierPos) > queryR) continue;
-									const float cs = 0.15f;
-									PushOccludedWorldSegment(pt - glm::vec3(cs, 0, 0), pt + glm::vec3(cs, 0, 0), Wui::WuiColor{ 0.20f, 0.70f, 0.90f, 0.60f }, 1.1f, targetHandle);
-									PushOccludedWorldSegment(pt - glm::vec3(0, 0, cs), pt + glm::vec3(0, 0, cs), Wui::WuiColor{ 0.20f, 0.70f, 0.90f, 0.60f }, 1.1f, targetHandle);
-								}
-							}
-						}
+
 
 						// 4. 绘制最优战术站位：金黄战术菱形 Marker（0.98f, 0.85f, 0.15f, 1.0f）与垂直地面引导光柱
 						if (bestCoverFound != 0 || g_EQSPreviewState.Evaluated)
@@ -6049,7 +6075,7 @@ namespace World
 								return true;
 						}
 
-						const int numSteps = std::clamp(static_cast<int>(std::ceil(dist / 0.80f)), isSurface ? 8 : 12, 48);
+						const int numSteps = std::clamp(static_cast<int>(std::ceil(dist / 2.0f)), isSurface ? 4 : 6, 16);
 						const float normDist = dist;
 						for (int s = 1; s <= numSteps; ++s)
 						{

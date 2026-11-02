@@ -460,12 +460,7 @@ else if (type == "UseSmartObject")
 								ctx.Component.BlackboardTargetPos = ctx.Board.Get<glm::vec3>("TargetPos", ctx.Component.BlackboardTargetPos);
 								ctx.Component.BlackboardValue = ctx.Board.Get<float>("Value", ctx.Component.BlackboardValue);
 								ctx.Component.BlackboardTag = static_cast<uint32_t>(ctx.Board.Get<int32_t>("Tag", 88));
-								if (ctx.Self.HasComponent<EQSComponent>())
-								{
-									auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
-									eqsc.QueryCenter = ctx.Self.GetComponent<TransformComponent>().Location;
-									eqsc.BestCoverFound = 1;
-								}
+
 								return NodeStatus::Success;
 							}
 							return NodeStatus::Failure;
@@ -482,15 +477,7 @@ else if (type == "UseSmartObject")
 						else if (modeStr == "Retreat") queryMode = EQSQueryMode::Retreat;
 
 						uint8_t genMode = 0;
-						if (ctx.Self.HasComponent<EQSComponent>())
-						{
-							const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
-							threatHint = eqsc.ThreatEntityHint;
-							if (eqsc.QueryRadius > 0.1f) radius = eqsc.QueryRadius;
-							if (eqsc.GridSpacing > 0.1f) spacing = eqsc.GridSpacing;
-							if (eqsc.QueryMode <= 2) queryMode = static_cast<EQSQueryMode>(eqsc.QueryMode);
-							genMode = eqsc.GeneratorMode;
-						}
+
 
 						glm::vec3 threatPos(0.0f);
 						uint32_t resolvedThreatRaw = 0;
@@ -641,13 +628,7 @@ else if (type == "UseSmartObject")
 							EQSQueryMode queryMode = (modeStr == "Flank") ? EQSQueryMode::Flank
 								: ((modeStr == "Retreat") ? EQSQueryMode::Retreat : EQSQueryMode::Cover);
 
-							if (ctx.Self.HasComponent<EQSComponent>())
-							{
-								const auto& eqsc = ctx.Self.GetComponent<EQSComponent>();
-								threatHint = eqsc.ThreatEntityHint;
-								if (eqsc.QueryRadius > 0.1f) radius = eqsc.QueryRadius;
-								if (eqsc.GridSpacing > 0.1f) spacing = eqsc.GridSpacing;
-							}
+
 
 							glm::vec3 threatPos(0.0f);
 							uint32_t resolvedThreatRaw = 0;

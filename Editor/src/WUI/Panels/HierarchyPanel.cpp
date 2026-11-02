@@ -861,44 +861,25 @@ namespace World
 							auto& tc = created.AddComponent<TransformComponent>();
 							tc.Location = spawnPos;
 							auto& pcg = created.AddComponent<BiomePCGComponent>();
-							pcg.MinElevation = 0.0f;
-							pcg.MaxElevation = 1000.0f;
-							pcg.MaxSlope = 35.0f;
-							pcg.MoistureThreshold = 0.3f;
+							pcg.BoundsRadius = 50.0f;
+							pcg.BoundsHeight = 40.0f;
+							pcg.DensityMultiplier = 1.0f;
+							pcg.ClearanceMargin = 0.0f;
 							pcg.Seed = 1337;
-							pcg.AutoDeformTerrain = 1;
+							pcg.GenerateOnPlay = 1;
+							pcg.AutoDeformTerrain = 0;
+							pcg.LivePreview = 1;
 						}) && created.IsValid())
 					{
 						host.SetSelectedEntity(created);
 						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create PCG Biome Entity"));
+						host.OpenPcgEditorForEntity(created);
 						host.MarkDocumentDirty();
 					}
 					ctx.CloseAllPopups();
 				}
-				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.createeqs_ent"), nextItem(), "Create Tactical EQS Query (战术掩体查询器)", theme))
-				{
-					const auto gizmoCam = host.GetGizmoCamera();
-					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
-					const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
-					Entity created;
-					if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
-						{
-							created = Entity::CreateEntity(&s, "Tactical EQS Query");
-							auto& tc = created.AddComponent<TransformComponent>();
-							tc.Location = spawnPos;
-							auto& eqs = created.AddComponent<EQSComponent>();
-							eqs.QueryCenter = spawnPos;
-							eqs.QueryRadius = 20.0f;
-							eqs.GridSpacing = 2.0f;
-						}) && created.IsValid())
-					{
-						host.SetSelectedEntity(created);
-						host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Tactical EQS Query"));
-						host.MarkDocumentDirty();
-					}
-					ctx.CloseAllPopups();
-				}
-				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.create_ai_agent"), nextItem(), "Create AI Agent (行为树智能体: BT + NavMesh + EQS)", theme))
+
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.create_ai_agent"), nextItem(), "Create AI Agent (行为树智能体: BT + NavMesh)", theme))
 				{
 					const auto gizmoCam = host.GetGizmoCamera();
 					const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
@@ -916,10 +897,6 @@ namespace World
 							auto& bt = created.AddComponent<BehaviorTreeComponent>();
 							bt.TreeAssetId = 1;
 							bt.Enabled = 1;
-							auto& eqs = created.AddComponent<EQSComponent>();
-							eqs.QueryCenter = spawnPos;
-							eqs.QueryRadius = 20.0f;
-							eqs.GridSpacing = 2.0f;
 						}) && created.IsValid())
 					{
 						host.SetSelectedEntity(created);
@@ -1322,44 +1299,25 @@ namespace World
 						auto& tc = created.AddComponent<TransformComponent>();
 						tc.Location = spawnPos;
 						auto& pcg = created.AddComponent<BiomePCGComponent>();
-						pcg.MinElevation = 0.0f;
-						pcg.MaxElevation = 1000.0f;
-						pcg.MaxSlope = 35.0f;
-						pcg.MoistureThreshold = 0.3f;
+						pcg.BoundsRadius = 50.0f;
+						pcg.BoundsHeight = 40.0f;
+						pcg.DensityMultiplier = 1.0f;
+						pcg.ClearanceMargin = 0.0f;
 						pcg.Seed = 1337;
-						pcg.AutoDeformTerrain = 1;
+						pcg.GenerateOnPlay = 1;
+						pcg.AutoDeformTerrain = 0;
+						pcg.LivePreview = 1;
 					}) && created.IsValid())
 				{
 					host.SetSelectedEntity(created);
 					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create PCG Biome Entity"));
+					host.OpenPcgEditor();
 					host.MarkDocumentDirty();
 				}
 				ctx.CloseAllPopups();
 			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.createeqs"), nextBlankItem(), "Create Tactical EQS Query (战术掩体查询器)", true, theme))
-			{
-				const auto gizmoCam = host.GetGizmoCamera();
-				const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
-				const glm::vec3 spawnPos = gizmoCam.Position + gizmoCam.Forward * dist;
-				Entity created;
-				if (scene->DeferStructuralChange([&created, spawnPos](Scene& s)
-					{
-						created = Entity::CreateEntity(&s, "Tactical EQS Query");
-						auto& tc = created.AddComponent<TransformComponent>();
-						tc.Location = spawnPos;
-						auto& eqs = created.AddComponent<EQSComponent>();
-						eqs.QueryCenter = spawnPos;
-						eqs.QueryRadius = 20.0f;
-						eqs.GridSpacing = 2.0f;
-					}) && created.IsValid())
-				{
-					host.SetSelectedEntity(created);
-					host.PushCommand(std::make_unique<EntityCreateCommand>(created, "Create Tactical EQS Query"));
-					host.MarkDocumentDirty();
-				}
-				ctx.CloseAllPopups();
-			}
-			if (MenuItem(ctx, Wui::HashId("hierarchy.create_ai_agent_blank"), nextBlankItem(), "Create AI Agent (行为树智能体: BT + NavMesh + EQS)", true, theme))
+
+			if (MenuItem(ctx, Wui::HashId("hierarchy.create_ai_agent_blank"), nextBlankItem(), "Create AI Agent (行为树智能体: BT + NavMesh)", true, theme))
 			{
 				const auto gizmoCam = host.GetGizmoCamera();
 				const float dist = (gizmoCam.Distance > 0.1f && gizmoCam.Distance < 50.0f) ? gizmoCam.Distance * 0.5f : 3.0f;
@@ -1377,10 +1335,6 @@ namespace World
 						auto& bt = created.AddComponent<BehaviorTreeComponent>();
 						bt.TreeAssetId = 1;
 						bt.Enabled = 1;
-						auto& eqs = created.AddComponent<EQSComponent>();
-						eqs.QueryCenter = spawnPos;
-						eqs.QueryRadius = 20.0f;
-						eqs.GridSpacing = 2.0f;
 					}) && created.IsValid())
 				{
 					host.SetSelectedEntity(created);

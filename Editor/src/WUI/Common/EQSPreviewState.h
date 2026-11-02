@@ -81,6 +81,6 @@ namespace World
 
 	extern EQSPreviewState g_EQSPreviewState;
 
-	void LoadEQSPreset(uint8_t mode, EQSComponent* comp, EQSPreviewState& state);
-	bool ExecuteEQSPipeline(Scene* scene, Entity entity, EQSComponent* comp, EQSPreviewState& state);
+	void LoadEQSPreset(uint8_t mode, EQSPreviewState& state);
+	bool ExecuteEQSPipeline(Scene* scene, Entity entity, EQSPreviewState& state);
 }

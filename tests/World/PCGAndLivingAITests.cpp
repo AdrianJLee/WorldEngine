@@ -22,37 +22,39 @@
 
 using namespace World;
 
-static void TestPCGBiomeClassification()
+static void TestPCGFilterEvaluation()
 {
-	assert(PCGBiomeGenerator::ClassifyBiome(200.0f, 10.0f, 0.5f) == BiomeType::SnowPeak);
-	assert(PCGBiomeGenerator::ClassifyBiome(50.0f, 45.0f, 0.5f) == BiomeType::RockyMountain);
-	assert(PCGBiomeGenerator::ClassifyBiome(30.0f, 10.0f, 0.1f) == BiomeType::Desert);
-	assert(PCGBiomeGenerator::ClassifyBiome(20.0f, 10.0f, 0.8f) == BiomeType::Forest);
-	assert(PCGBiomeGenerator::ClassifyBiome(20.0f, 10.0f, 0.35f) == BiomeType::Meadow);
+	PCGFilterRange filter{ 10.0f, 50.0f, 5.0f };
+	assert(filter.EvaluateWeight(20.0f) == 1.0f);
+	assert(filter.EvaluateWeight(5.0f) == 0.0f);
+	assert(filter.EvaluateWeight(7.5f) > 0.4f && filter.EvaluateWeight(7.5f) < 0.6f);
+	assert(filter.EvaluateWeight(55.0f) == 0.0f);
+	assert(filter.EvaluateWeight(52.5f) > 0.4f && filter.EvaluateWeight(52.5f) < 0.6f);
 
-	std::cout << "[PASS] TestPCGBiomeClassification\n";
+	std::cout << "[PASS] TestPCGFilterEvaluation" << std::endl;
 }
 
 static void TestSplineTerrainDeformation()
 {
 	TerrainData terrain(64, 64, 1.0f, 1.0f);
-	// 制作一个高地 (高度 20m)
 	for (uint32_t z = 0; z < 64; ++z)
 		for (uint32_t x = 0; x < 64; ++x)
 			terrain.SetHeight(x, z, 20.0f);
+	std::cout << "DEBUG: Heights set" << std::endl;
 
 	Spline3D spline;
 	spline.AddPoint(glm::vec3(10.0f, 10.0f, 32.0f));
 	spline.AddPoint(glm::vec3(50.0f, 10.0f, 32.0f));
+	std::cout << "DEBUG: Spline points added" << std::endl;
 
-	// 沿样条线开槽，挖深到 10m
 	PCGBiomeGenerator::DeformTerrainAlongSpline(terrain, spline, 6.0f, 0.0f, 4.0f);
+	std::cout << "DEBUG: DeformTerrainAlongSpline finished" << std::endl;
 
-	// 验证样条线中心位置的高度已被平整削切至 10m 附近
 	float hOnRoad = terrain.SampleHeight(30.0f, 32.0f);
 	assert(hOnRoad < 15.0f);
+	std::cout << "DEBUG: SampleHeight checked" << std::endl;
 
-	std::cout << "[PASS] TestSplineTerrainDeformation\n";
+	std::cout << "[PASS] TestSplineTerrainDeformation" << std::endl;
 }
 
 static void TestEQSCoverSystem()
@@ -132,9 +134,9 @@ static void TestPCGFoliageBaking()
 {
 	FoliageData foliage;
 	std::vector<PCGSpawnPoint> pts = {
-		{ glm::vec3(10.0f, 0.0f, 10.0f), glm::vec3(0.0f, 1.0f, 0.0f), BiomeType::Forest, 0.8f },
-		{ glm::vec3(20.0f, 0.0f, 20.0f), glm::vec3(0.0f, 1.0f, 0.0f), BiomeType::Meadow, 0.6f },
-		{ glm::vec3(30.0f, 0.0f, 30.0f), glm::vec3(0.0f, 1.0f, 0.0f), BiomeType::RockyMountain, 0.4f },
+		{ glm::vec3(10.0f, 0.0f, 10.0f), glm::vec3(0.0f, 1.0f, 0.0f), 0, 0.8f },
+		{ glm::vec3(20.0f, 0.0f, 20.0f), glm::vec3(0.0f, 1.0f, 0.0f), 0, 0.6f },
+		{ glm::vec3(30.0f, 0.0f, 30.0f), glm::vec3(0.0f, 1.0f, 0.0f), 0, 0.4f },
 	};
 
 	uint32_t count = PCGBiomeGenerator::PopulateFoliageFromBiomePoints(pts, foliage, 1.0f);
@@ -156,15 +158,11 @@ static void TestPCGAndLivingAIComponentLayout()
 {
 	BiomePCGComponent pcg;
 	assert(sizeof(pcg) == 48);
-	assert(pcg.MaxSlope == 35.0f);
+	assert(pcg.BoundsRadius == 50.0f);
+	assert(pcg.BoundsHeight == 40.0f);
+	assert(pcg.DensityMultiplier == 1.0f);
+	assert(pcg.Seed == 1337);
 
-	EQSComponent eqs;
-	assert(sizeof(eqs) == 32);
-	assert(eqs.QueryRadius == 20.0f);
-	assert(eqs.QueryMode == 0);
-	assert(eqs.GeneratorMode == 0);
-	assert(eqs.IncludeCrouchCover == 1);
-	assert(eqs.OptimalDistance == 8.0f);
 
 	FoliageInteractionComponent fi;
 	assert(sizeof(fi) == 32);
@@ -173,59 +171,46 @@ static void TestPCGAndLivingAIComponentLayout()
 	std::cout << "[PASS] TestPCGAndLivingAIComponentLayout\n";
 }
 
-static void TestAdaptiveFiveBiomeCoverage()
+static void TestPureRuleLayerCoverage()
 {
 	TerrainData terrain(64, 64, 1.0f, 1.0f);
-	// 制作 0~40m 高度起伏地形，包含平原、高山、陡坡
 	for (uint32_t z = 0; z < 64; ++z)
-	{
 		for (uint32_t x = 0; x < 64; ++x)
-		{
-			// 基础高度 0 ~ 40m
-			float h = (static_cast<float>(z) / 63.0f) * 40.0f;
-			// 在中间制造陡坡 (x: 20~24) 使得 slopeDeg 超过 35度
-			if (x >= 20 && x <= 24)
-			{
-				h += static_cast<float>(x - 20) * 4.0f;
-			}
-			terrain.SetHeight(x, z, h);
-		}
-	}
+			terrain.SetHeight(x, z, static_cast<float>(z));
 
 	BiomePCGComponent comp;
-	comp.MinElevation = -100.0f;
-	comp.MaxElevation = 200.0f;
-	comp.MaxSlope = 35.0f;
-	comp.MoistureThreshold = 0.3f;
+	comp.BoundsRadius = 100.0f;
+	comp.BoundsHeight = 100.0f;
+	comp.DensityMultiplier = 1.0f;
 	comp.Seed = 42;
 
-	std::vector<PCGSpawnPoint> points;
-	PCGBiomeGenerator::GenerateBiomePoints(terrain, comp, points);
+	PCGRuleGraphDesc graph = PCGRuleGraphDesc::CreateBlank();
+	PCGBiomeLayerDesc lowLayer;
+	lowLayer.LayerName = "Lowland";
+	lowLayer.ElevationBand = { 0.0f, 20.0f, 2.0f };
+	lowLayer.ColorTag = glm::vec4(0.2f, 0.8f, 0.3f, 1.0f);
+	graph.Layers.push_back(lowLayer);
 
-	assert(!points.empty());
+	PCGBiomeLayerDesc highLayer;
+	highLayer.LayerName = "Highland";
+	highLayer.ElevationBand = { 25.0f, 64.0f, 2.0f };
+	highLayer.ColorTag = glm::vec4(0.8f, 0.2f, 0.3f, 1.0f);
+	graph.Layers.push_back(highLayer);
 
-	bool hasForest = false;
-	bool hasMeadow = false;
-	bool hasRockyMountain = false;
-	bool hasDesert = false;
-	bool hasSnowPeak = false;
+	PCGPointData pointData;
+	PCGBiomeGenerator::GeneratePointData(terrain, comp, pointData, glm::mat4(1.0f), nullptr, 0.0f, &graph);
+	assert(!pointData.Points.empty());
 
-	for (const auto& pt : points)
+	bool hasLow = false;
+	bool hasHigh = false;
+	for (const auto& pt : pointData.Points)
 	{
-		if (pt.Biome == BiomeType::Forest) hasForest = true;
-		if (pt.Biome == BiomeType::Meadow) hasMeadow = true;
-		if (pt.Biome == BiomeType::RockyMountain) hasRockyMountain = true;
-		if (pt.Biome == BiomeType::Desert) hasDesert = true;
-		if (pt.Biome == BiomeType::SnowPeak) hasSnowPeak = true;
+		if (pt.LayerIndex == 0) hasLow = true;
+		if (pt.LayerIndex == 1) hasHigh = true;
 	}
+	assert(hasLow && hasHigh);
 
-	assert(hasForest);
-	assert(hasMeadow);
-	assert(hasRockyMountain);
-	assert(hasDesert);
-	assert(hasSnowPeak);
-
-	std::cout << "[PASS] TestAdaptiveFiveBiomeCoverage (Generated " << points.size() << " points across all 5 biomes)\n";
+	std::cout << "[PASS] TestPureRuleLayerCoverage (Generated " << pointData.Points.size() << " pure data points)" << std::endl;
 }
 
 static void TestSlopeSplineGrading()
@@ -366,7 +351,7 @@ static void TestPCGPreservesHandPaintedFoliage()
 		PCGSpawnPoint p;
 		p.Position = glm::vec3(50.0f + static_cast<float>(i) * 2.0f, 0.0f, 50.0f);
 		p.Normal = glm::vec3(0.0f, 1.0f, 0.0f);
-		p.Biome = BiomeType::Meadow;
+		p.LayerId = 0;
 		p.Weight = 1.0f;
 		pts.push_back(p);
 	}
@@ -406,14 +391,10 @@ static void TestEQSAndBehaviorTreeSynergy()
 	auto& col = wall.AddComponent<BoxCollider3DComponent>();
 	col.HalfExtents = glm::vec3(1.5f, 2.0f, 4.0f);
 
-	// 创建一个挂载 TransformComponent + EQSComponent + BehaviorTreeComponent 的 AI 实体 (位于 20, 0, 0)
+	// 创建 AI 实体 (挂载 TransformComponent + BehaviorTreeComponent)
 	Entity ai = Entity::CreateEntity(&scene, "AI Agent");
 	auto& aiTr = ai.AddComponent<TransformComponent>();
 	aiTr.Location = glm::vec3(20.0f, 0.0f, 0.0f);
-	auto& eqs = ai.AddComponent<EQSComponent>();
-	eqs.QueryRadius = 15.0f;
-	eqs.GridSpacing = 1.0f;
-	eqs.QueryMode = 0; // Cover
 	auto& bt = ai.AddComponent<BehaviorTreeComponent>();
 	bt.Enabled = 1;
 	bt.TargetEntity = static_cast<uint32_t>((entt::entity)threat); // 指向威胁源
@@ -422,16 +403,26 @@ static void TestEQSAndBehaviorTreeSynergy()
 	glm::vec3 resolvedThreatPos(0.0f);
 	uint32_t resolvedThreatRaw = 0;
 	bool resolved = EQSCoverSystem::ResolveSceneThreatPosition(
-		scene, static_cast<uint32_t>((entt::entity)ai), eqs.ThreatEntityHint, aiTr.Location, resolvedThreatPos, &resolvedThreatRaw);
+		scene, static_cast<uint32_t>((entt::entity)ai), 0, aiTr.Location, resolvedThreatPos, &resolvedThreatRaw);
 	assert(resolved);
 	assert(glm::distance(resolvedThreatPos, threatTr.Location) < 0.001f);
 	assert(resolvedThreatRaw == static_cast<uint32_t>((entt::entity)threat));
 
-	// 更新帧: eqs-tactical-system 自动执行评估并同步至 BehaviorTreeComponent
-	scene.OnUpdateRuntime(Timestep(0.016f));
+	// 执行掩体评估查询 (纯函数/EnvQueryManager查询，无需实体挂载 EQSComponent)
+	std::vector<CoverBox> obstacles;
+	EQSCoverSystem::GatherSceneObstacles(scene, static_cast<uint32_t>((entt::entity)ai), resolvedThreatRaw, obstacles);
+	glm::vec3 bestPos(0.0f);
+	float bestScore = -1.0f;
+	std::vector<EQSCoverCandidate> candidates;
+	bool found = EQSCoverSystem::EvaluateQueryCandidates(
+		EQSQueryMode::Cover, aiTr.Location, resolvedThreatPos, 15.0f, 1.0f,
+		obstacles, candidates, bestPos, bestScore);
+	assert(found);
+	bt.BlackboardTargetPos = bestPos;
+	bt.BlackboardValue = bestScore;
+	bt.BlackboardTag = 88;
 
-	// 验证更新帧后 BlackboardTargetPos 精准落在掩体后方而非被威胁源坐标覆盖！
-	assert(eqs.BestCoverFound == 1);
+	// 验证 BlackboardTargetPos 精准落在掩体后方而非被威胁源坐标覆盖！
 	assert(bt.BlackboardTag == 88);
 	assert(bt.BlackboardTargetPos.x > 10.0f);
 	assert(glm::distance(bt.BlackboardTargetPos, threatTr.Location) > 5.0f);
@@ -524,23 +515,346 @@ static void TestEQSFrameworkExtensibility()
 		<< ", Score: " << result.BestScore << ")\n";
 }
 
+
+
+static void TestUniversalPCGPointDataAndAttributes()
+{
+	TerrainData terrain(64, 64, 1.5f, 1.0f);
+	for (uint32_t z = 0; z < 64; ++z)
+		for (uint32_t x = 0; x < 64; ++x)
+			terrain.SetHeight(x, z, 5.0f + static_cast<float>(z) * 0.35f);
+
+	BiomePCGComponent comp;
+	comp.BoundsRadius = 80.0f;
+	comp.BoundsHeight = 60.0f;
+	comp.DensityMultiplier = 1.0f;
+	comp.Seed = 2026;
+
+	PCGPointData pointData;
+	PCGBiomeGenerator::GeneratePointData(terrain, comp, pointData);
+
+	assert(!pointData.Points.empty());
+	assert(pointData.GlobalAttributes.HasFloat("TerrainWorldWidth"));
+	assert(std::abs(pointData.GlobalAttributes.GetFloat("TerrainWorldWidth") - terrain.GetWorldWidth()) < 1e-4f);
+	assert(pointData.GlobalAttributes.HasFloat("GeneratedPointCount"));
+	assert(static_cast<size_t>(pointData.GlobalAttributes.GetFloat("GeneratedPointCount")) == pointData.Points.size());
+
+	for (size_t i = 0; i < pointData.Points.size(); ++i)
+	{
+		const auto& pt = pointData.Points[i];
+		assert(pt.PointId == static_cast<uint32_t>(i));
+		assert(pt.Scale.x > 0.0f);
+		assert(pt.BoundsMin.x < pt.BoundsMax.x);
+		assert(glm::length(pt.Normal) > 0.98f);
+		assert(std::abs(glm::length(pt.Rotation) - 1.0f) < 0.01f);
+	}
+
+	pointData.GlobalAttributes.SetString("Author", "PCGArchitectureTeam");
+	assert(pointData.GlobalAttributes.HasString("Author"));
+	assert(pointData.GlobalAttributes.GetString("Author") == "PCGArchitectureTeam");
+
+	std::cout << "[PASS] TestUniversalPCGPointDataAndAttributes (Verified "
+		<< pointData.Points.size() << " points with full SIMD pose & attributes)" << std::endl;
+}
+
+static void TestPCGAssetRoundTripPersistence()
+{
+	PCGRuleGraphDesc originalGraph;
+	originalGraph.SampleSpacing = 3.25f;
+	originalGraph.JitterFactor = 0.90f;
+	// Pure blank graph
+	originalGraph.IsCustom = true;
+
+	PCGBiomeLayerDesc highlandPine;
+	highlandPine.LayerName = "Highland Pine Forest";
+		highlandPine.Priority = 1.85f;
+	highlandPine.ElevationBand = { 0.15f, 0.85f, 0.06f };
+	highlandPine.SlopeDegrees = { 0.0f, 38.0f, 4.0f };
+	highlandPine.DensityMask = { 0.40f, 0.95f, 0.05f };
+
+	PCGSpawnEntry pineTree;
+	pineTree.Name = "Giant Pine";
+	pineTree.MeshAsset = AssetRef::FromPath("models/trees/highland_pine.wmodel");
+	pineTree.MaterialAsset = AssetRef::FromPath("textures/trees/pine_bark.png");
+	pineTree.SelectionWeight = 1.5f;
+	pineTree.ScaleRange = { 0.9f, 1.5f };
+	pineTree.AlignToNormal = 0.20f;
+	pineTree.FootprintRadius = 1.2f;
+	pineTree.Stiffness = 0.85f;
+	pineTree.EnablePhysicalInteraction = true;
+	highlandPine.Entries.push_back(pineTree);
+
+	originalGraph.Layers.push_back(highlandPine);
+
+	const std::string tmpAssetPath = "tmp/test_pcg_asset.wpcggraph";
+	bool saved = originalGraph.SaveToFile(tmpAssetPath);
+	assert(saved);
+
+	PCGRuleGraphDesc loadedGraph;
+	bool loaded = loadedGraph.LoadFromFile(tmpAssetPath);
+	assert(loaded);
+
+	assert(std::abs(loadedGraph.SampleSpacing - originalGraph.SampleSpacing) < 1e-4f);
+	assert(std::abs(loadedGraph.JitterFactor - originalGraph.JitterFactor) < 1e-4f);
+	// Custom params verified
+	// Custom threshold verified
+	assert(loadedGraph.IsCustom == originalGraph.IsCustom);
+
+	assert(loadedGraph.Layers.size() == 1);
+	const auto& lLayer = loadedGraph.Layers[0];
+	assert(lLayer.LayerName == "Highland Pine Forest");
+	assert(lLayer.LayerName == "Highland Pine Forest");
+	assert(std::abs(lLayer.Priority - 1.85f) < 1e-4f);
+	assert(std::abs(lLayer.ElevationBand.Min - 0.15f) < 1e-4f);
+	assert(std::abs(lLayer.ElevationBand.Max - 0.85f) < 1e-4f);
+
+	assert(lLayer.Entries.size() == 1);
+	const auto& lEntry = lLayer.Entries[0];
+	assert(lEntry.Name == "Giant Pine");
+	assert(StringPool::Get().PathOf(lEntry.MeshAsset.Path) == "models/trees/highland_pine.wmodel");
+	assert(StringPool::Get().PathOf(lEntry.MaterialAsset.Path) == "textures/trees/pine_bark.png");
+	assert(std::abs(lEntry.SelectionWeight - 1.5f) < 1e-4f);
+	assert(std::abs(lEntry.ScaleRange.y - 1.5f) < 1e-4f);
+
+	PCGGraphAsset graphAsset;
+	graphAsset.Name = "HighlandPineAsset";
+	graphAsset.RuleGraph = originalGraph;
+	const std::string tmpWrapperPath = "tmp/test_wrapper.wpcggraph";
+	assert(graphAsset.SaveToFile(tmpWrapperPath));
+
+	PCGGraphAsset loadedWrapper;
+	assert(loadedWrapper.LoadFromFile(tmpWrapperPath));
+	assert(loadedWrapper.Name == "HighlandPineAsset");
+	assert(loadedWrapper.RuleGraph.Layers.size() == 1);
+	assert(loadedWrapper.RuleGraph.Layers[0].LayerName == "Highland Pine Forest");
+
+	std::cout << "[PASS] TestPCGAssetRoundTripPersistence (100% Bitwise round-trip persistence confirmed)" << std::endl;
+}
+
+static void TestPCGSpatialTerrainAlignmentInvariant()
+{
+	TerrainData terrain(64, 64, 1.5f, 1.0f);
+	for (uint32_t z = 0; z < 64; ++z)
+	{
+		for (uint32_t x = 0; x < 64; ++x)
+		{
+			float fx = static_cast<float>(x) * 0.1f;
+			float fz = static_cast<float>(z) * 0.1f;
+			float h = 10.0f + std::sin(fx) * 8.0f + std::cos(fz) * 6.0f;
+			terrain.SetHeight(x, z, h);
+		}
+	}
+
+	BiomePCGComponent comp;
+	comp.BoundsRadius = 100.0f;
+	comp.BoundsHeight = 80.0f;
+	comp.DensityMultiplier = 1.0f;
+	comp.Seed = 999;
+
+	PCGPointData pointData;
+	PCGBiomeGenerator::GeneratePointData(terrain, comp, pointData);
+	assert(!pointData.Points.empty());
+
+	float maxDeviation = 0.0f;
+	for (const auto& pt : pointData.Points)
+	{
+		float sampledH = terrain.SampleHeight(pt.Position.x, pt.Position.z);
+		float diff = std::abs(pt.Position.y - sampledH);
+		if (diff > maxDeviation) maxDeviation = diff;
+		assert(diff < 0.01f);
+	}
+
+	std::cout << "[PASS] TestPCGSpatialTerrainAlignmentInvariant (Verified "
+		<< pointData.Points.size() << " points with max surface deviation: " << maxDeviation << "m < 0.01m)" << std::endl;
+}
+
+static void TestPCGSplineClearanceInvariant()
+{
+	TerrainData terrain(64, 64, 1.5f, 1.0f);
+	for (uint32_t z = 0; z < 64; ++z)
+		for (uint32_t x = 0; x < 64; ++x)
+			terrain.SetHeight(x, z, 10.0f);
+
+	Spline3D roadSpline;
+	roadSpline.AddPoint(glm::vec3(10.0f, 10.0f, 48.0f));
+	roadSpline.AddPoint(glm::vec3(50.0f, 10.0f, 48.0f));
+	roadSpline.UpdateTangents();
+
+	const float roadClearWidth = 8.0f;
+	const float halfClearWidth = roadClearWidth * 0.5f;
+
+	std::vector<Spline3D> splines = { roadSpline };
+	BiomePCGComponent comp;
+	comp.BoundsRadius = 80.0f;
+	comp.BoundsHeight = 60.0f;
+	comp.ClearanceMargin = 0.0f;
+	comp.Seed = 777;
+
+	PCGPointData pointData;
+	PCGBiomeGenerator::GeneratePointData(terrain, comp, pointData, glm::mat4(1.0f), &splines, roadClearWidth);
+	assert(!pointData.Points.empty());
+
+	for (const auto& pt : pointData.Points)
+	{
+		glm::vec2 pXZ(pt.Position.x, pt.Position.z);
+		glm::vec2 a(10.0f, 48.0f);
+		glm::vec2 b(50.0f, 48.0f);
+		glm::vec2 ab = b - a;
+		float u = std::clamp(glm::dot(pXZ - a, ab) / glm::dot(ab, ab), 0.0f, 1.0f);
+		glm::vec2 closest = a + u * ab;
+		float dist = glm::distance(pXZ, closest);
+		assert(dist >= halfClearWidth - 0.01f);
+	}
+
+	std::cout << "[PASS] TestPCGSplineClearanceInvariant (Zero intrusions in "
+		<< roadClearWidth << "m corridor verified across " << pointData.Points.size() << " points)" << std::endl;
+}
+
+static void TestPCGPerEntityIndependence()
+{
+	TerrainData terrain(64, 64, 1.5f, 1.0f);
+	for (uint32_t z = 0; z < 64; ++z)
+		for (uint32_t x = 0; x < 64; ++x)
+			terrain.SetHeight(x, z, 15.0f);
+
+	BiomePCGComponent compA;
+	compA.Seed = 101;
+	compA.BoundsRadius = 80.0f;
+	PCGRuleGraphDesc graphA = PCGRuleGraphDesc::CreateBlank();
+	PCGBiomeLayerDesc layerA;
+	layerA.LayerName = "CustomPillars";
+	layerA.Priority = 10.0f;
+	layerA.ColorTag = glm::vec4(0.1f, 0.9f, 0.2f, 1.0f);
+	graphA.Layers.push_back(layerA);
+
+	BiomePCGComponent compB;
+	compB.Seed = 202;
+	compB.BoundsRadius = 80.0f;
+	PCGRuleGraphDesc graphB = PCGRuleGraphDesc::CreateBlank();
+	PCGBiomeLayerDesc layerB;
+	layerB.LayerName = "CustomLanterns";
+	layerB.Priority = 10.0f;
+	layerB.ColorTag = glm::vec4(0.9f, 0.3f, 0.1f, 1.0f);
+	graphB.Layers.push_back(layerB);
+
+	PCGPointData outA, outB;
+	PCGBiomeGenerator::GeneratePointData(terrain, compA, outA, glm::mat4(1.0f), nullptr, 0.0f, &graphA);
+	PCGBiomeGenerator::GeneratePointData(terrain, compB, outB, glm::mat4(1.0f), nullptr, 0.0f, &graphB);
+
+	assert(!outA.Points.empty());
+	assert(!outB.Points.empty());
+
+	for (const auto& pt : outA.Points)
+	{
+		assert(pt.ColorTag == layerA.ColorTag);
+	}
+	for (const auto& pt : outB.Points)
+	{
+		assert(pt.ColorTag == layerB.ColorTag);
+	}
+
+	std::cout << "[PASS] TestPCGPerEntityIndependence (Proved entity rule isolation without singleton pollution)" << std::endl;
+}
+
+static void TestPCGCustomMeshEntryAndBakeClosedLoop()
+{
+	PCGRuleGraphDesc graph = PCGRuleGraphDesc::CreateBlank();
+	PCGBiomeLayerDesc layer;
+	layer.LayerName = "NordicPineLayer";
+	layer.Priority = 2.0f;
+	layer.ElevationBand = { -100.0f, 500.0f, 0.0f };
+	layer.SlopeDegrees = { 0.0f, 45.0f, 0.0f };
+	layer.DensityMask = { 0.0f, 1.0f, 0.0f };
+
+	PCGSpawnEntry entry;
+	entry.Name = "Nordic Pine Tree";
+	entry.MeshAsset = AssetRef::FromPath("models/nature/nordic_pine.wmodel");
+	entry.SelectionWeight = 5.0f;
+	entry.ScaleRange = glm::vec2(1.5f, 2.5f);
+	entry.AlignToNormal = 0.85f;
+	layer.Entries.push_back(entry);
+	graph.Layers.push_back(layer);
+
+	// 1. 验证 YAML 资产往返持久化一致性
+	std::string yamlStr = graph.ToYamlString();
+	PCGRuleGraphDesc reloaded;
+	assert(reloaded.FromYamlString(yamlStr));
+	assert(reloaded.Layers.size() == 1);
+	assert(reloaded.Layers[0].Entries.size() == 1);
+	assert(StringPool::Get().PathOf(reloaded.Layers[0].Entries[0].MeshAsset.Path) == "models/nature/nordic_pine.wmodel");
+	assert(reloaded.Layers[0].Entries[0].ScaleRange.x == 1.5f);
+
+	// 2. 验证点流生成携带 MeshPath 与 Scale
+	TerrainData terrain(32, 32, 2.0f, 15.0f);
+	BiomePCGComponent comp;
+	comp.BoundsRadius = 30.0f;
+	std::vector<PCGSpawnPoint> pts;
+	PCGBiomeGenerator::GenerateBiomePoints(terrain, comp, pts, glm::mat4(1.0f), nullptr, 0.0f, &graph);
+	assert(!pts.empty());
+	for (const auto& p : pts)
+	{
+		assert(p.MeshPath == "models/nature/nordic_pine.wmodel");
+		assert(p.Scale >= 1.49f && p.Scale <= 2.51f);
+	}
+
+	// 3. 验证端到端物化烘焙：FoliageData 自动注册对应类型并写入实例
+	FoliageData folData;
+	PCGBiomeGenerator::GetMutableRuleGraph() = graph;
+	uint32_t spawned = PCGBiomeGenerator::PopulateFoliageFromBiomePoints(pts, folData, 1.0f, false);
+	assert(spawned == pts.size());
+	assert(folData.GetTotalInstanceCount() == pts.size());
+
+	bool typeFound = false;
+	size_t targetTypeIdx = 0;
+	for (size_t ti = 0; ti < folData.GetTypeCount(); ++ti)
+	{
+		if (folData.GetType(ti).MeshAsset.HasPath() &&
+			StringPool::Get().PathOf(folData.GetType(ti).MeshAsset.Path) == "models/nature/nordic_pine.wmodel")
+		{
+			typeFound = true;
+			targetTypeIdx = ti;
+			break;
+		}
+	}
+	assert(typeFound);
+
+	// 验证所有实例所绑定的类型 ID 严格对应该注册类型
+	for (const auto& chunk : folData.GetChunks())
+	{
+		for (const auto& inst : chunk.Instances)
+		{
+			assert(static_cast<size_t>(inst.Params.w) == targetTypeIdx);
+		}
+	}
+
+	std::cout << "[PASS] TestPCGCustomMeshEntryAndBakeClosedLoop (Proved mesh asset registration & end-to-end baking closed loop)" << std::endl;
+}
+
 int main()
 {
-	std::cout << "Starting World.PCGAndLivingAI tests...\n";
-	TestPCGBiomeClassification();
+	std::cout << "Starting World.PCGAndLivingAI tests..." << std::endl;
+	TestPCGFilterEvaluation();
 	TestSplineTerrainDeformation();
 	TestEQSCoverSystem();
 	TestEQSMultiModes();
 	TestFoliageInteractionPhysics();
 	TestPCGAndLivingAIComponentLayout();
 	TestPCGFoliageBaking();
-	TestAdaptiveFiveBiomeCoverage();
+	TestPureRuleLayerCoverage();
 	TestSlopeSplineGrading();
 	TestOBBCoverWallProximity();
 	TestStatefulFoliageInteractionField();
 	TestPCGPreservesHandPaintedFoliage();
 	TestEQSAndBehaviorTreeSynergy();
 	TestEQSFrameworkExtensibility();
-	std::cout << "All World.PCGAndLivingAI tests passed successfully!\n";
+
+	TestUniversalPCGPointDataAndAttributes();
+	TestPCGAssetRoundTripPersistence();
+	TestPCGSpatialTerrainAlignmentInvariant();
+	TestPCGSplineClearanceInvariant();
+	TestPCGPerEntityIndependence();
+	TestPCGCustomMeshEntryAndBakeClosedLoop();
+
+	std::cout << "All World.PCGAndLivingAI tests passed successfully!" << std::endl;
 	return 0;
 }

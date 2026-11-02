@@ -578,6 +578,15 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 			m_Host.OpenCurveEditor(logical);
 			WLD_CORE_INFO("[curve] editor opened: {0}", logical);
 		}
+		else if (LowerExtension(path) == ".wpcggraph" || LowerExtension(path) == ".wpcg")
+		{
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			m_Host.OpenPcgEditor(logical);
+			WLD_CORE_INFO("[pcg] editor opened: {0}", logical);
+		}
 		else if (LowerExtension(path) == ".wbt" || LowerExtension(path) == ".wbehaviortree"
 			|| LowerExtension(path) == ".wbb" || LowerExtension(path) == ".wblackboard"
 			|| LowerExtension(path) == ".weqs" || LowerExtension(path) == ".weqsquery")
