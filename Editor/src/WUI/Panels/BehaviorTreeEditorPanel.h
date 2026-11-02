@@ -104,7 +104,6 @@ namespace World
 		uint32_t m_NextNodeId = 1;
 		uint32_t m_SelectedNodeId = 1;
 		int m_SelectedRuleIdx = 0;
-		int m_SelectedBbTemplateIndex = 0;
 
 		ViewTab m_ActiveTab = ViewTab::TreeOutline;
 		std::string m_StatusFeedback;

@@ -199,26 +199,16 @@ namespace World
 		m_Nodes.clear();
 		m_BlackboardKeys.clear();
 
-		m_LogicalPath = "assets/ai/SmartObjectDemo.wbt";
-		m_AssetName = "SmartObjectDemo";
+		m_LogicalPath = "assets/ai/new_behavior_tree.wbt";
+		m_AssetName = "new_behavior_tree";
 		m_Dirty = false;
 
-		// 默认黑板 Key
-		m_BlackboardKeys.push_back({ "TargetPos", "Vector3", "[0.0, 0.0, 0.0]" });
-		m_BlackboardKeys.push_back({ "TargetEntity", "Entity", "0" });
-		m_BlackboardKeys.push_back({ "Health", "Float", "100.0" });
+		// 纯净极简的初始根节点
+		m_Nodes.push_back({ 1, 0, BTNodeKind::Selector, "Root Selector", "行为树根选择器", "", "", 0.0f, "" });
 
-		// 默认节点拓扑: Root Selector -> Sequence(Heal) / Action(Patrol)
-		m_Nodes.push_back({ 1, 0, BTNodeKind::Selector, "Root Selector", "顶层主决策选择器: 优先执行急救，平时巡逻", "", "", 0.0f, "" });
-		m_Nodes.push_back({ 2, 1, BTNodeKind::Sequence, "Heal Sequence", "生命告急急救序列", "", "", 0.0f, "" });
-		m_Nodes.push_back({ 3, 2, BTNodeKind::Condition, "Health Below 30%", "检查当前生命值是否低于 30%", "HealthBelow", "", 30.0f, "" });
-		m_Nodes.push_back({ 4, 2, BTNodeKind::Action, "Seek Medical Station", "寻找并前往最近的医疗站智能对象", "", "SeekSmartObject", 0.0f, "MedicalStation" });
-		m_Nodes.push_back({ 5, 2, BTNodeKind::Action, "Interact and Heal", "交互使用医疗站持续充能回血", "", "UseSmartObject", 0.0f, "" });
-		m_Nodes.push_back({ 6, 1, BTNodeKind::Action, "Patrol Area", "日常区域巡逻漫步", "", "Patrol", 10.0f, "" });
-
-		m_NextNodeId = 7;
+		m_NextNodeId = 2;
 		m_SelectedNodeId = 1;
-		m_StatusFeedback = "已初始化默认行为树模板 (Default Template Loaded)";
+		m_StatusFeedback = "已初始化空白行为树 (Clean Behavior Tree Ready)";
 	}
 
 	std::filesystem::path BehaviorTreeEditorPanel::ResolvePhysicalPath(const std::string& logicalPath) const
@@ -2379,77 +2369,15 @@ void BehaviorTreeEditorPanel::RenderBlackboard(Wui::WuiContext& ctx, const Wui::
 			}
 		}
 
-		static const std::vector<std::string> kBlackboardTemplates = {
-			"TargetPos (Vector3)",
-			"TargetEntity (Entity)",
-			"Waypoints (ArrayVector3 路径点数组)",
-			"PerceivedThreats (ArrayEntity 敌对目标数组)",
-			"Health (Float)",
-			"MoveSpeed (Float)",
-			"PatrolRadius (Float)",
-			"HasThreat (Bool)",
-			"CombatAlert (Double)",
-			"Custom (自由新建)"
-		};
-
 		float curX = rect.X + 16.0f;
 		float curY = rect.Y + 36.0f;
 
-		if (Wui::Button(ctx, Wui::HashId("bt.bb.add"), { curX, curY, 100.0f, 24.0f }, "+ 添加变量", theme))
-		{
-			switch (m_SelectedBbTemplateIndex)
-			{
-			case 0:
-				m_BlackboardKeys.push_back({ "TargetPos", "Vector3", "[0.0, 0.0, 0.0]" });
-				break;
-			case 1:
-				m_BlackboardKeys.push_back({ "TargetEntity", "Entity", "0" });
-				break;
-			case 2:
-				m_BlackboardKeys.push_back({ "Waypoints", "ArrayVector3", "[[10.0, 0.0, 10.0], [20.0, 0.0, 15.0]]" });
-				break;
-			case 3:
-				m_BlackboardKeys.push_back({ "PerceivedThreats", "ArrayEntity", "[]" });
-				break;
-			case 4:
-				m_BlackboardKeys.push_back({ "Health", "Float", "100.0" });
-				break;
-			case 5:
-				m_BlackboardKeys.push_back({ "MoveSpeed", "Float", "3.5" });
-				break;
-			case 6:
-				m_BlackboardKeys.push_back({ "PatrolRadius", "Float", "15.0" });
-				break;
-			case 7:
-				m_BlackboardKeys.push_back({ "HasThreat", "Bool", "false" });
-				break;
-			case 8:
-				m_BlackboardKeys.push_back({ "CombatAlert", "Double", "0.0" });
-				break;
-			default:
-				m_BlackboardKeys.push_back({ "NewKey_" + std::to_string(m_BlackboardKeys.size()), "Float", "0.0" });
-				break;
-			}
-			m_Dirty = true;
-		}
-		curX += 108.0f;
-
-		Wui::Label(ctx, { curX, curY + 4.0f }, "变量模板:", theme.TextMuted, theme.FontSizeSmall);
-		curX += 60.0f;
-
-		if (Wui::Combo(ctx, Wui::HashId("bt.bb.template_combo"), { curX, curY, 180.0f, 24.0f }, "常用模板", kBlackboardTemplates, m_SelectedBbTemplateIndex, theme))
-		{
-			// Template selection changed
-		}
-		curX += 188.0f;
-
-		if (Wui::Button(ctx, Wui::HashId("bt.bb.quick_custom"), { curX, curY, 80.0f, 24.0f }, "+ 自由变量", theme))
+		if (Wui::Button(ctx, Wui::HashId("bt.bb.add"), { curX, curY, 120.0f, 24.0f }, "+ 添加黑板键", theme))
 		{
 			m_BlackboardKeys.push_back({ "NewKey_" + std::to_string(m_BlackboardKeys.size()), "Float", "0.0" });
 			m_Dirty = true;
 		}
 
-		curY += 34.0f;
 
 		float tableW = rect.W - 32.0f;
 		float colKeyW = tableW * 0.35f;
