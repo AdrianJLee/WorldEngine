@@ -1,4 +1,4 @@
-﻿#include <chrono>
+#include <chrono>
 #include "AudioSystem.h"
 #include <random>
 #include "AudioCooker.h"
@@ -11,6 +11,7 @@
 #include "World/Core/StringPool.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
+#include "World/Utils/Paths.h"
 
 namespace World::Audio
 {
@@ -101,8 +102,9 @@ namespace World::Audio
 		footstep.GetRootContainer()->variations.push_back({ "assets/audio/sfx/footstep_grass.waudio", 1.0f });
 		RegisterSoundEvent(footstep);
 
-		// Load default mixer configuration and voice profiles from disk
-		std::string mixerPath = "projects/assets/audio/main.wmixer";
+		// Load default mixer configuration from disk
+		std::string mixerPath = (World::Paths::AssetRoot() / "audio/main.wmixer").string();
+		if (!std::filesystem::exists(mixerPath)) mixerPath = "projects/assets/audio/main.wmixer";
 		if (!std::filesystem::exists(mixerPath)) mixerPath = "assets/audio/main.wmixer";
 		if (!std::filesystem::exists(mixerPath)) mixerPath = "templates/project-example/assets/audio/main.wmixer";
 		if (std::filesystem::exists(mixerPath))
@@ -1195,7 +1197,60 @@ namespace World::Audio
 	{
 		std::lock_guard<std::mutex> lock(m_RegistryMutex);
 		auto it = m_SoundEvents.find(eventId);
-		return (it != m_SoundEvents.end()) ? &it->second : nullptr;
+		if (it != m_SoundEvents.end())
+		{
+			return &it->second;
+		}
+
+		std::string normalizedPath = eventId;
+		while (!normalizedPath.empty() && (normalizedPath.front() == '/' || normalizedPath.front() == '\\'))
+		{
+			normalizedPath.erase(normalizedPath.begin());
+		}
+
+		const std::vector<std::string> candidates = {
+			eventId,
+			normalizedPath,
+			(World::Paths::AssetRoot() / normalizedPath).string(),
+			(World::Paths::AssetRoot() / "audio/events" / normalizedPath).string(),
+			(World::Paths::AssetRoot() / "audio/events" / (normalizedPath + ".wsound")).string(),
+			(World::Paths::AssetRoot() / "audio" / normalizedPath).string(),
+			(World::Paths::AssetRoot() / "audio" / (normalizedPath + ".wsound")).string(),
+			"assets/" + normalizedPath,
+			"assets/audio/events/" + normalizedPath,
+			"assets/audio/events/" + normalizedPath + ".wsound",
+			"projects/default/assets/" + normalizedPath,
+			"projects/default/assets/audio/events/" + normalizedPath,
+			"projects/default/assets/audio/events/" + normalizedPath + ".wsound",
+			"templates/project-example/assets/" + normalizedPath,
+			"templates/project-example/assets/audio/events/" + normalizedPath,
+			"templates/project-example/assets/audio/events/" + normalizedPath + ".wsound"
+		};
+
+		std::error_code ec;
+		for (const auto& candidate : candidates)
+		{
+			if (std::filesystem::exists(candidate, ec) && !std::filesystem::is_directory(candidate, ec))
+			{
+				std::ifstream in(candidate);
+				if (in.is_open())
+				{
+					std::stringstream ss;
+					ss << in.rdbuf();
+					SoundEvent ev;
+					if (ev.DeserializeYaml(ss.str()))
+					{
+						std::string id = ev.GetId();
+						m_SoundEvents[eventId] = ev;
+						m_SoundEvents[id] = ev;
+						m_SoundEvents[candidate] = ev;
+						return &m_SoundEvents[eventId];
+					}
+				}
+			}
+		}
+
+		return nullptr;
 	}
 
 	std::vector<std::string> AudioSystem::GetRegisteredSoundEventIds() const
@@ -1237,6 +1292,8 @@ namespace World::Audio
 		const std::vector<std::string> candidates = {
 			path,
 			normalizedPath,
+			(World::Paths::AssetRoot() / normalizedPath).string(),
+			(World::Paths::AssetRoot() / "audio" / normalizedPath).string(),
 			"assets/" + normalizedPath,
 			"assets/audio/" + normalizedPath,
 			"Engine/assets/" + normalizedPath,
@@ -1251,7 +1308,23 @@ namespace World::Audio
 		{
 			if (std::filesystem::exists(candidate, ec) && !std::filesystem::is_directory(candidate, ec))
 			{
-				auto loaded = AudioCooker::LoadCookedFile(candidate);
+				std::shared_ptr<AudioBuffer> loaded;
+				if (candidate.rfind(".waudio") != std::string::npos)
+				{
+					loaded = AudioCooker::LoadCookedFile(candidate);
+				}
+				else
+				{
+					AudioBuffer tmp;
+					if (AudioCooker::LoadAudioFile(candidate, tmp))
+					{
+						loaded = std::make_shared<AudioBuffer>(std::move(tmp));
+					}
+					else
+					{
+						loaded = AudioCooker::LoadCookedFile(candidate);
+					}
+				}
 				if (loaded)
 				{
 					std::lock_guard<std::mutex> lock(m_RegistryMutex);

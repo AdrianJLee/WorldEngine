@@ -1,5 +1,5 @@
+#include "World/Audio/AudioSystem.h"
 #include "WUI/Panels/BehaviorTreeEditorPanel.h"
-#include "WUI/Panels/AudioMixerPanel.h"
 #include "ContentBrowserPanel_Internal.h"
 
 namespace World
@@ -387,16 +387,21 @@ void ContentBrowserPanel::OpenItem(const std::filesystem::path& path){
 					"UI Designer is not available in this editor session."));
 			}
 		}
-				else if (LowerExtension(path) == ".wsound" || LowerExtension(path) == ".waudio" || LowerExtension(path) == ".wmixer" || LowerExtension(path) == ".wvoice")
+		else if (LowerExtension(path) == ".wsound")
 		{
-			AudioMixerPanel::RequestOpenAsset(path.generic_string());
-			auto* shell = dynamic_cast<EditorShell*>(&m_Host);
-			if (shell)
-			{
-				shell->OpenOrFocusIndependentWindow("audio_mixer");
-				if (m_Ctx)
-					m_Ctx->RecordOp("browser", "open-audio-asset", path.filename().generic_string(), path.generic_string());
-			}
+			const std::filesystem::path contentRoot = m_Model.Root;
+			std::error_code ec;
+			const std::filesystem::path relative = std::filesystem::relative(path, contentRoot, ec);
+			const std::string logical = ec ? path.generic_string() : relative.generic_string();
+			m_Host.OpenSoundEventEditor(logical);
+			if (m_Ctx)
+				m_Ctx->RecordOp("browser", "open-sound-event", path.filename().generic_string(), logical);
+		}
+		else if (LowerExtension(path) == ".waudio" || LowerExtension(path) == ".wav" || LowerExtension(path) == ".ogg" || LowerExtension(path) == ".mp3")
+		{
+			Audio::AudioSystem::Get().PostEvent2D(path.generic_string(), 1.0f, 1.0f, false);
+			if (m_Ctx)
+				m_Ctx->RecordOp("browser", "play-audio-preview", path.filename().generic_string(), path.generic_string());
 		}
 		else if (LowerExtension(path) == ".wtex")
 		{

@@ -465,35 +465,58 @@ void ContentBrowserPanel::RegisterDefaultAssetTypes(){
 				SelectCreated(target, "new-eqsquery");
 				return true;
 			});
-		add("audio_mixer", "Audio Mixer", ".wmixer", 34, false,
+		add("audio_shader", "Audio Shader", ".washader", 35, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
-				const std::filesystem::path target = MakeUniqueAssetPath(dir, "main", ".wmixer");
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_shader", ".washader");
 				std::ofstream out(target);
 				if (!out.is_open())
 				{
 					if (error) *error = "could not write " + target.string();
 					return false;
 				}
-				out << "Version: 1\nBuses:\n  - Id: 0\n    Name: \"Master\"\n    Volume: 1.0\n";
+				out << "// WorldEngine Audio Shader: " << target.stem().string() << "\n"
+					<< "param float Frequency = 440.0 [20.0, 2000.0], \"基础振荡频率 (Hz)\";\n"
+					<< "param float Decay = 2.5 [0.1, 10.0], \"声音指数衰减率\";\n"
+					<< "param float Overdrive = 1.5 [1.0, 8.0], \"饱和失真度\";\n\n"
+					<< "float osc = poly_saw(Frequency, t);\n"
+					<< "float shaped = wavefold(osc * Overdrive, 0.85);\n"
+					<< "float env = exp(-Decay * t);\n"
+					<< "float sig = filter_lp(shaped * env, clamp(Frequency * 3.0, 100.0, 16000.0), 1.5);\n"
+					<< "out = stereo(sig, sig);\n";
 				NotifyAssetWritten(target);
-				SelectCreated(target, "new-audio-mixer");
+				SelectCreated(target, "new-audio-shader");
 				return true;
 			});
 
-		add("voice_profile", "Timbre Profile", ".wvoice", 36, false,
+		add("sound_synth", "Sound Synth Patch", ".wsynth", 34, false,
 			[this](const std::filesystem::path& dir, std::string* error)
 			{
-				const std::filesystem::path target = MakeUniqueAssetPath(dir, "character", ".wvoice");
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_synth", ".wsynth");
 				std::ofstream out(target);
 				if (!out.is_open())
 				{
 					if (error) *error = "could not write " + target.string();
 					return false;
 				}
-				out << "CharacterId: \"character_01\"\nPresetName: \"Neutral\"\nPitchShiftSemi: 0.0\nRateScale: 1.0\n";
+				out << "uuid: \"" << target.stem().string() << "\"\n"
+					<< "version: 1\n"
+					<< "name: \"" << target.stem().string() << "\"\n"
+					<< "material: Stone\n"
+					<< "excitation: ImpulseStrike\n"
+					<< "durationSeconds: 1.5\n"
+					<< "mass: 0.5\n"
+					<< "hardness: 0.6\n"
+					<< "roughness: 0.4\n"
+					<< "damping: 0.5\n"
+					<< "velocity: 0.7\n"
+					<< "cavityResonance: 0.3\n"
+					<< "pitchShiftSemi: 0.0\n"
+					<< "formantScale: 1.0\n"
+					<< "breathRoughness: 0.15\n"
+					<< "rateScale: 1.0\n";
 				NotifyAssetWritten(target);
-				SelectCreated(target, "new-voice-profile");
+				SelectCreated(target, "new-sound-synth");
 				return true;
 			});
 
@@ -604,7 +627,7 @@ void ContentBrowserPanel::UnregisterDefaultAssetTypes(){
 		m_AssetTypesRegistered = false;
 		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
 		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
-		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "audio_mixer", "voice_profile", "behaviortree", "sprite_atlas", "sprite_animation", "tilemap", "vfx" })
+		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "behaviortree", "sprite_atlas", "sprite_animation", "tilemap", "vfx" })
 			registry.Unregister(id);
 	}
 
@@ -779,7 +802,7 @@ bool ContentBrowserPanel::RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId row
 		{ "material", "材质与着色 (Material & Shader)  ▶", { "material", "shader" } },
 		{ "vfx", "视觉特效 (Visual Effects)  ▶", { "vfx" } },
 		{ "2d", "2D 精灵系统 (2D Sprites & Tiles)  ▶", { "sprite_atlas", "sprite_animation", "tilemap", "ruletile" } },
-		{ "audio", "音频系统 (Audio System)  ▶", { "sound_event", "audio_mixer", "voice_profile" } },
+		{ "audio", "音频系统 (Audio System)  ▶", { "sound_event" } },
 		{ "physics", "物理与数学 (Physics & Math)  ▶", { "physics_material", "curve" } },
 				{ "ai", "AI 与行为树 (AI & Behavior Tree)  ▶", { "behaviortree", "blackboard", "eqsquery" } },
 		{ "script", "脚本与代码 (Scripts & Logic)  ▶", { "script", "behaviortree" } },

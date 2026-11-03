@@ -140,10 +140,8 @@ void RegisterAttachNode(const std::string& panel, const Wui::WuiRect& rect, cons
 			{ "plugins",         EditorShell::PanelForm::Independent, { 200.0f, 120.0f, 760.0f, 500.0f } },
 			// M5:GameUI 可视化设计器(独立窗口形态;三栏 = 大纲树 / 画布 / 属性)。
 			{ "ui_designer",     EditorShell::PanelForm::Independent, { 140.0f, 120.0f, 1000.0f, 640.0f } },
-			{ "audio_mixer",     EditorShell::PanelForm::Independent, { 140.0f, 160.0f, 1080.0f, 620.0f } },
-			{ "ai_audio_studio", EditorShell::PanelForm::Independent, { 120.0f, 140.0f, 1040.0f, 640.0f } },
-			{ "audio_profiler",  EditorShell::PanelForm::Independent, { 160.0f, 180.0f, 920.0f, 560.0f } },
 			{ "physics_material_editor", EditorShell::PanelForm::Independent, { 220.0f, 150.0f, 740.0f, 540.0f } },
+			{ "sound_event_editor",     EditorShell::PanelForm::Independent, { 180.0f, 140.0f, 840.0f, 600.0f } },
 			{ "curve_editor",    EditorShell::PanelForm::Independent, { 180.0f, 180.0f, 760.0f, 480.0f } },
 			// M4:Anim Graph 编辑器(单实例;内容浏览器双击 .wanimgraph / Window 菜单 / 文件选择器同一入口)。
 			{ "animgraph",       EditorShell::PanelForm::Independent, { 80.0f, 40.0f, 1120.0f, 680.0f } },

@@ -252,6 +252,7 @@ namespace World::Audio
 		ss << "Id: \"" << m_Id << "\"\n";
 		ss << "BusId: " << m_BusId << "\n";
 		ss << "MaxInstances: " << m_MaxInstances << "\n";
+		ss << "StealPolicy: " << static_cast<int>(m_StealPolicy) << "\n";
 		ss << "CooldownSeconds: " << m_CooldownSeconds << "\n";
 		ss << "VolumeRange: [" << m_MinVolume << ", " << m_MaxVolume << "]\n";
 		ss << "PitchRange: [" << m_MinPitchSemitones << ", " << m_MaxPitchSemitones << "]\n";
@@ -281,6 +282,15 @@ namespace World::Audio
 
 	bool SoundEvent::DeserializeYaml(const std::string& yamlText)
 	{
+		if (!m_RootContainer)
+		{
+			m_RootContainer = std::make_shared<SoundContainerNode>();
+			m_RootContainer->type = ContainerType::Random;
+		}
+		else
+		{
+			m_RootContainer->variations.clear();
+		}
 		std::istringstream stream(yamlText);
 		std::string line;
 		while (std::getline(stream, line))
@@ -313,9 +323,35 @@ namespace World::Audio
 			{
 				m_MaxInstances = static_cast<uint32_t>(std::stoul(line.substr(colonPos + 1)));
 			}
+			else if (key == "StealPolicy")
+			{
+				m_StealPolicy = static_cast<StealPolicy>(std::stoul(line.substr(colonPos + 1)));
+			}
 			else if (key == "CooldownSeconds")
 			{
 				m_CooldownSeconds = std::stof(line.substr(colonPos + 1));
+			}
+			else if (key == "VolumeRange")
+			{
+				auto lb = line.find('[', colonPos);
+				auto comma = line.find(',', lb);
+				auto rb = line.find(']', comma);
+				if (lb != std::string::npos && comma != std::string::npos && rb != std::string::npos)
+				{
+					m_MinVolume = std::stof(line.substr(lb + 1, comma - lb - 1));
+					m_MaxVolume = std::stof(line.substr(comma + 1, rb - comma - 1));
+				}
+			}
+			else if (key == "PitchRange")
+			{
+				auto lb = line.find('[', colonPos);
+				auto comma = line.find(',', lb);
+				auto rb = line.find(']', comma);
+				if (lb != std::string::npos && comma != std::string::npos && rb != std::string::npos)
+				{
+					m_MinPitchSemitones = static_cast<float>(std::stof(line.substr(lb + 1, comma - lb - 1)));
+					m_MaxPitchSemitones = static_cast<float>(std::stof(line.substr(comma + 1, rb - comma - 1)));
+				}
 			}
 			else if (key == "Is3D")
 			{
@@ -342,6 +378,24 @@ namespace World::Audio
 			else if (key == "MaxDistance")
 			{
 				m_Spatial.maxDistance = std::stof(line.substr(colonPos + 1));
+			}
+			else if (key == "AttenuationModel")
+			{
+				m_Spatial.model = static_cast<AttenuationModel>(std::stoul(line.substr(colonPos + 1)));
+			}
+			else if (key == "Type")
+			{
+				if (m_RootContainer)
+				{
+					m_RootContainer->type = static_cast<ContainerType>(std::stoul(line.substr(colonPos + 1)));
+				}
+			}
+			else if (key == "ShuffleNoRepeat")
+			{
+				if (m_RootContainer)
+				{
+					m_RootContainer->shuffleNoRepeat = (line.find("true") != std::string::npos);
+				}
 			}
 			else if (key == "Path")
 			{

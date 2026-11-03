@@ -1,7 +1,8 @@
+#include "World/Audio/AudioSystem.h"
 #include "EditorShell_Internal.h"
-#include "WUI/Panels/AudioMixerPanel.h"
 #include "WUI/Panels/PhysicsMaterialEditorPanel.h"
 #include "WUI/Panels/ParticleEditorPanel.h"
+#include "WUI/Panels/SoundEventEditorPanel.h"
 #include "WUI/Panels/TextureSettingsPanel.h"
 #include "WUI/Panels/UiDesignerPanel.h"
 #include "WUI/Panels/BehaviorTreeEditorPanel.h"
@@ -912,11 +913,16 @@ void EditorShell::OpenAsset(const std::string& rawPath)
 		OpenPrefabWindow(logical);
 		Notify("已打开预制体资产窗口: " + logical);
 	}
-	else if (ext == ".wsound" || ext == ".waudio" || ext == ".wmixer" || ext == ".wvoice" || ext == ".wav" || ext == ".ogg" || ext == ".mp3")
+	else if (ext == ".wsound")
 	{
-		AudioMixerPanel::RequestOpenAsset(physPath.empty() ? path : physPath.generic_string());
-		OpenOrFocusIndependentWindow("audio_mixer");
-		Notify("已在音频调音台载入: " + logical);
+		OpenSoundEventEditor(logical);
+		Notify("已在声效事件编辑器中打开: " + logical);
+	}
+	else if (ext == ".waudio" || ext == ".wav" || ext == ".ogg" || ext == ".mp3")
+	{
+		std::string playPath = physPath.empty() ? path : physPath.generic_string();
+		Audio::AudioSystem::Get().PostEvent2D(playPath, 1.0f, 1.0f, false);
+		Notify("已播放试听: " + logical);
 	}
 	else if (ext == ".wui")
 	{
@@ -956,6 +962,17 @@ void EditorShell::OpenParticleEditor(const std::string& logicalPath)
 		ParticleEditorPanel::RequestOpenAsset(path);
 	}
 	OpenOrFocusIndependentWindow("particle_editor");
+}
+
+void EditorShell::OpenSoundEventEditor(const std::string& logicalPath)
+{
+	std::string path = logicalPath;
+	std::replace(path.begin(), path.end(), '\\', '/');
+	if (!path.empty())
+	{
+		SoundEventEditorPanel::RequestOpenEvent(path);
+	}
+	OpenOrFocusIndependentWindow("sound_event_editor");
 }
 
 

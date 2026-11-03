@@ -1548,7 +1548,7 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 
 		// 5. 音频系统工坊 (Audio Studio)
 		const std::vector<std::string> kAudioPanels = {
-			"audio_mixer", "ai_audio_studio", "audio_profiler"
+			"sound_event_editor"
 		};
 		std::vector<MenuEntry> audioSubs;
 		for (const auto& pid : kAudioPanels)
@@ -1606,7 +1606,7 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		windowEntries.push_back({ Wui::Tr("menu.window.cat.world", "世界与关卡构建 (World Building)"), false, {}, false, "", 0, true, std::move(worldSubs) });
 		windowEntries.push_back({ Wui::Tr("menu.window.cat.logic", "动画与交互逻辑 (Animation & Logic)"), false, {}, false, "", 0, true, std::move(logicSubs) });
 		windowEntries.push_back({ Wui::Tr("menu.window.cat.render", "渲染与图形设计 (Rendering & VFX)"), false, {}, false, "", 0, true, std::move(renderSubs) });
-		windowEntries.push_back({ Wui::Tr("menu.window.cat.audio", "音频系统工坊 (Audio Studio)"), false, {}, false, "", 0, true, std::move(audioSubs) });
+		if (!audioSubs.empty()) windowEntries.push_back({ Wui::Tr("menu.window.cat.audio", "音频系统工坊 (Audio Studio)"), false, {}, false, "", 0, true, std::move(audioSubs) });
 		windowEntries.push_back({ Wui::Tr("menu.window.cat.system", "性能剖析与系统 (Profiling & System)"), false, {}, false, "", 0, true, std::move(systemSubs) });
 		windowEntries.push_back({ Wui::Tr("menu.window.cat.tools", "配置、插件与工具 (Settings & Tools)"), false, {}, false, "", 0, true, std::move(toolSubs) });
 		windowEntries.push_back({ Wui::Tr("menu.window.cat.modes", "视口工作模式 (Workflow Modes)"), false, {}, false, "", 0, true, std::move(modeSubs) });
@@ -1621,32 +1621,24 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 
 		const Wui::WuiId menuAudio = Wui::HashId("menu.audio");
 		std::vector<MenuEntry> audioEntries;
-		auto openAsIndependentWindow = [this](const std::string& panel)
-		{
-			OpenIndependentPanel(panel);
-			if (auto* host = FindFloatHost(panel))
-			{
-				host->SetHidden(false);
-				host->ActivatePanel(panel);
-			}
-			auto it = std::find(m_AttachedPanels.begin(), m_AttachedPanels.end(), panel);
-			if (it != m_AttachedPanels.end()) m_AttachedPanels.erase(it);
-			FocusIndependentWindow(panel);
-		};
+		auto& audioSys = Audio::AudioSystem::Get();
+		auto* masterBus = audioSys.GetMixerGraph().FindBus(Audio::kBusMaster);
+		const bool isMuted = masterBus ? masterBus->IsMute() : false;
 
-		audioEntries.push_back({ Wui::Tr("menu.audio.manager", "音频管理器 (Audio Manager)"),
-			m_Layout.IsFloating("audio_mixer"),
-			[this] { OpenOrFocusIndependentWindow("audio_mixer"); }, false,
-			Wui::Tr("menu.audio.manager.tooltip", "打开音频管理器: 统一管理工程音频库、试听播放器与游戏全局音量") });
-		audioEntries.push_back({ Wui::Tr("menu.audio.studio", "AI 音频工作站 (AI Audio Studio)"),
-			m_Layout.IsFloating("ai_audio_studio"),
-			[this] { OpenOrFocusIndependentWindow("ai_audio_studio"); }, false,
-			Wui::Tr("menu.audio.studio.tooltip", "打开 AI 音频生成工坊: 角色对白、ARKit 52 口型、AI 短音效与背景音乐切点") });
-		audioEntries.push_back({ Wui::Tr("menu.audio.profiler", "音频分析器 (Audio Profiler)"),
-			m_Layout.IsFloating("audio_profiler"),
-			[this] { OpenOrFocusIndependentWindow("audio_profiler"); }, false,
-			Wui::Tr("menu.audio.profiler.tooltip", "打开音频分析器: 实时监控混音耗时、物理/虚拟声道分配、FFT频谱与活跃声部") });
+		audioEntries.push_back({ isMuted ? Wui::Tr("menu.audio.unmute", "取消主音量静音 (Unmute Master)") : Wui::Tr("menu.audio.mute", "主音量静音 (Mute Master)"),
+			isMuted,
+			[&audioSys] {
+				auto* mb = audioSys.GetMixerGraph().FindBus(Audio::kBusMaster);
+				if (mb) audioSys.GetMixerGraph().SetBusMute(Audio::kBusMaster, !mb->IsMute());
+			}, false,
+			Wui::Tr("menu.audio.mute.tooltip", "切换主音频总线静音状态") });
+
+		audioEntries.push_back({ Wui::Tr("menu.audio.sound_event_editor", "声效事件编辑器 (Sound Event Editor)"), false,
+			[this] { OpenSoundEventEditor(); }, false,
+			Wui::Tr("menu.audio.sound_event_editor.tooltip", "打开声效事件编辑器检视并配置声音资产 (.wsound)") });
+
 		audioEntries.push_back({ "---", false, {}, true });
+
 		audioEntries.push_back({ Wui::Tr("menu.audio.stop_all", "停止全部声音 (Stop All Audio)"), false,
 			[] { Audio::AudioSystem::Get().StopAll(0.05f); }, false,
 			Wui::Tr("menu.audio.stop_all.tooltip", "立即停止所有播放中与试听中的声音") });

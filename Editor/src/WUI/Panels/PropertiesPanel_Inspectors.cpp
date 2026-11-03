@@ -4194,7 +4194,22 @@ float PropertiesPanel::DrawAudioSourceInspector(Wui::WuiContext& ctx, const Wui:
 		Audio::AudioSystem::Get().StopAll(0.05f);
 	}
 
-	float noticeY = y + 28.0f;
+	const Wui::WuiRect btnEdit { rect.X + 184.0f, y, 96.0f, 24.0f };
+	Wui::Tooltip(ctx, btnEdit, "在声效事件编辑器中打开并编辑此声音事件资产 (.wsound)");
+	if (Wui::Button(ctx, Wui::HashId("prop.audiosrc.edit"), btnEdit, "✎ 编辑事件", theme))
+	{
+		if (hasSound)
+		{
+			m_Host.OpenSoundEventEditor(soundPath);
+		}
+		else
+		{
+			m_Host.OpenSoundEventEditor();
+		}
+	}
+
+	float curY = y + 30.0f;
+	float noticeY = curY + 4.0f;
 	if (hasSound)
 	{
 		std::string statusText = "● 状态: 已就绪" + std::string(comp->Spatial3D ? " [3D 空间声源]" : " [2D 立体声]");

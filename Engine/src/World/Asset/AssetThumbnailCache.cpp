@@ -52,7 +52,7 @@ namespace World
 		}
 
 		if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac" ||
-		    ext == ".waudio" || ext == ".wsound" || ext == ".wmixer" || ext == ".wvoice")
+		    ext == ".waudio" || ext == ".wsound")
 		{
 			return AssetCategory::Audio;
 		}

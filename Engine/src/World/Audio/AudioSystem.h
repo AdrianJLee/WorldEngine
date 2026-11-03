@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "AudioTypes.h"
 #include "AudioRtpc.h"
@@ -9,7 +9,6 @@
 #include "SoundEvent.h"
 #include "IAudioBackend.h"
 #include "InteractiveMusic.h"
-#include "AiAudioStudio.h"
 #include "AudioFft.h"
 #include "AudioPerceptionBridge.h"
 #include "AudioProfiler.h"
@@ -282,7 +281,6 @@ namespace World::Audio
 		const VoicePool& GetVoicePool() const noexcept { return m_VoicePool; }
 
 		InteractiveMusicManager& GetMusic() noexcept { return m_Music; }
-		AiAudioStudioManager& GetAiStudio() noexcept { return m_AiStudio; }
 
 		IAudioBackend* GetBackend() noexcept { return m_Backend.get(); }
 
@@ -310,11 +308,10 @@ namespace World::Audio
 		AudioRtpcManager m_RtpcManager;
 		MixerGraph m_Mixer;
 		InteractiveMusicManager m_Music;
-		AiAudioStudioManager m_AiStudio;
 
 		AudioCommandQueue m_CommandQueue;
 
-		std::unordered_map<std::string, SoundEvent> m_SoundEvents;
+		mutable std::unordered_map<std::string, SoundEvent> m_SoundEvents;
 		mutable std::unordered_map<std::string, std::shared_ptr<AudioBuffer>> m_AudioBuffers;
 
 		// ECS Voice tracking & Zone state

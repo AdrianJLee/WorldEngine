@@ -21,16 +21,13 @@
 #include "WUI/Panels/PluginsPanel.h"
 #include "WUI/Panels/PluginPanel.h"
 #include "WUI/Panels/UiDesignerPanel.h"
-#include "WUI/Panels/AudioMixerPanel.h"
-#include "WUI/Panels/AudioProfilerPanel.h"
-#include "WUI/Panels/SoundEventEditorPanel.h"
-#include "WUI/Panels/AiAudioStudioPanel.h"
 #include "WUI/Panels/SpriteAtlasEditorPanel.h"
 #include "WUI/Panels/SpriteAnimationEditorPanel.h"
 #include "WUI/Panels/TilemapEditorPanel.h"
 #include "WUI/Panels/RuleTileEditorPanel.h"
 #include "WUI/Panels/PhysicsMaterialEditorPanel.h"
 #include "WUI/Panels/ParticleEditorPanel.h"
+#include "WUI/Panels/SoundEventEditorPanel.h"
 #include "WUI/Panels/CurveEditorPanel.h"
 #include "WUI/Panels/AnimGraphPanel.h"
 #include "WUI/Panels/BehaviorTreeEditorPanel.h"
@@ -141,7 +138,6 @@ namespace World
 		void FocusIndependentWindow(const std::string& panel) override;
 		void ActivatePanel(const std::string& panel) override;
 		void OpenOrFocusIndependentWindow(const std::string& panel);
-		void OpenAudioProfiler();
 		void DockBackIndependentWindow(const std::string& panel) override;
 		// D3:打开材质编辑器(必要时先打开独立窗口)并载入指定材质。
 		void OpenMaterialEditor(const std::string& path) override;
@@ -158,6 +154,7 @@ namespace World
 		RuleTileEditorPanel* FindRuleTilePanel(const std::string& logicalPath);
 		void OpenPhysicsMaterialEditor(const std::string& logicalPath) override;
 		void OpenParticleEditor(const std::string& logicalPath) override;
+		void OpenSoundEventEditor(const std::string& logicalPath = "") override;
 		void OpenCurveEditor(const std::string& logicalPath) override;
 		// M4:Anim Graph 面板(单实例,kPanelSpecs id = "animgraph")。
 		// 先把逻辑路径排进面板待办,再打开/前置窗口(与 OpenCurveEditor 同一条路径)。

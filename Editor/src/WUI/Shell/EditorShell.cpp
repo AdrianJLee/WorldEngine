@@ -249,10 +249,8 @@ EditorShell::EditorShell(EditorLayer& editor, bool launcherMode) : m_Editor(edit
 		m_PanelRegistry.emplace("scripts", std::make_unique<ScriptsPanel>());
 		// M5:GameUI 可视化设计器(config 表已声明 ui_designer;这里登记实例)。
 		m_PanelRegistry.emplace("ui_designer", std::make_unique<UiDesignerPanel>());
-		m_PanelRegistry.emplace("audio_mixer", std::make_unique<AudioMixerPanel>());
-		m_PanelRegistry.emplace("ai_audio_studio", std::make_unique<AiAudioStudioPanel>());
-		m_PanelRegistry.emplace("audio_profiler", std::make_unique<AudioProfilerPanel>());
 		m_PanelRegistry.emplace("physics_material_editor", std::make_unique<PhysicsMaterialEditorPanel>());
+		m_PanelRegistry.emplace("sound_event_editor", std::make_unique<SoundEventEditorPanel>());
 m_PanelRegistry.emplace("curve_editor", std::make_unique<CurveEditorPanel>());
 m_PanelRegistry.emplace("animgraph", std::make_unique<AnimGraphPanel>());
 		m_PanelRegistry.emplace("behaviortree", std::make_unique<BehaviorTreeEditorPanel>());
@@ -1450,8 +1448,8 @@ std::string EditorShell::PanelTitle(const std::string& id) const{
 			{ "scripts",         { "panel.scripts", "Scripts" } },
 			{ "plugins",         { "panel.plugins.title", "Plugins" } },
 			{ "texture_settings", { "panel.texture_settings", "Texture Settings" } },
-			{ "audio_profiler",  { "panel.audio_profiler", "音频分析器 (Audio Profiler)" } },
 			{ "physics_material_editor", { "panel.physics_material_editor", "Physics Material Editor" } },
+			{ "sound_event_editor", { "panel.sound_event_editor", "Sound Event Editor" } },
 			{ "curve_editor",    { "panel.curve_editor", "Curve Editor" } },
 			{ "animgraph",       { "panel.animgraph", "Animation Graph" } },
 			{ "behaviortree",    { "panel.behaviortree", "Behavior Tree" } },
@@ -1520,10 +1518,7 @@ void EditorShell::RecordDockChange(Wui::WuiContext& ctx, const std::string& acti
 		SaveLayout();
 	}
 
-void EditorShell::OpenAudioProfiler()
-{
-	OpenOrFocusIndependentWindow("audio_profiler");
-}
+
 
 void EditorShell::OpenCurveEditor(const std::string& logicalPath)
 {

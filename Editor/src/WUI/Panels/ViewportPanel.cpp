@@ -3835,37 +3835,70 @@ namespace World
 						{
 							if (audioSrc->Spatial3D)
 							{
-								// 1. MinDistance (全响近场区): 亮青色三轴立体大圆线框
+								constexpr int kCircleSegments = 24;
+								constexpr float kTwoPi = 6.28318530718f;
+
+								auto DrawOccludedCircle = [&](float radius, int axis, const Wui::WuiColor& col, float thickness)
+								{
+									for (int i = 0; i < kCircleSegments; ++i)
+									{
+										const float a0 = kTwoPi * static_cast<float>(i) / static_cast<float>(kCircleSegments);
+										const float a1 = kTwoPi * static_cast<float>(i + 1) / static_cast<float>(kCircleSegments);
+										glm::vec3 off0(0.0f), off1(0.0f);
+										if (axis == 0)
+										{
+											off0 = { std::cos(a0) * radius, std::sin(a0) * radius, 0.0f };
+											off1 = { std::cos(a1) * radius, std::sin(a1) * radius, 0.0f };
+										}
+										else if (axis == 1)
+										{
+											off0 = { std::cos(a0) * radius, 0.0f, std::sin(a0) * radius };
+											off1 = { std::cos(a1) * radius, 0.0f, std::sin(a1) * radius };
+										}
+										else
+										{
+											off0 = { 0.0f, std::cos(a0) * radius, std::sin(a0) * radius };
+											off1 = { 0.0f, std::cos(a1) * radius, std::sin(a1) * radius };
+										}
+										const glm::vec3 w0 = glm::vec3(world * glm::vec4(off0, 1.0f));
+										const glm::vec3 w1 = glm::vec3(world * glm::vec4(off1, 1.0f));
+										PushOccludedWorldSegment(w0, w1, col, thickness, handle);
+									}
+								};
+
+								// 1. MinDistance (全响近场区): 亮青色三轴立体大圆线框 (带深度遮挡)
 								if (audioSrc->MinDistance > 0.0f)
 								{
 									const Wui::WuiColor minColor { theme.Info.R, theme.Info.G, theme.Info.B, isSelected ? 0.95f : 0.5f };
+									const float thickness = isSelected ? 1.6f : 1.1f;
 									for (int axis = 0; axis < 3; ++axis)
 									{
-										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-											audioSrc->MinDistance, axis, minColor, isSelected ? 1.6f : 1.1f, &overlayMin, &overlayMax);
+										DrawOccludedCircle(audioSrc->MinDistance, axis, minColor, thickness);
 									}
 								}
 
-								// 2. MaxDistance (衰减截止区): 深蓝色三轴立体大圆线框
+								// 2. MaxDistance (衰减截止区): 深蓝色三轴立体大圆线框 (带深度遮挡)
 								if (audioSrc->MaxDistance > audioSrc->MinDistance)
 								{
 									const Wui::WuiColor maxColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, isSelected ? 0.75f : 0.35f };
+									const float thickness = isSelected ? 1.3f : 0.9f;
 									for (int axis = 0; axis < 3; ++axis)
 									{
-										PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, glm::vec3(0.0f),
-											audioSrc->MaxDistance, axis, maxColor, isSelected ? 1.3f : 0.9f, &overlayMin, &overlayMax);
+										DrawOccludedCircle(audioSrc->MaxDistance, axis, maxColor, thickness);
 									}
 								}
 
-								// 3. 中心扬声器 3 轴十字标: 0.3m 定位十字
+								// 3. 中心扬声器 3 轴十字标: 0.3m 定位十字 (带深度遮挡)
 								const float cross = 0.15f; // 0.3m 总跨度
 								const Wui::WuiColor crossColor { theme.Info.R, theme.Info.G, theme.Info.B, isSelected ? 0.95f : 0.5f };
-								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									{ -cross, 0.0f, 0.0f }, { cross, 0.0f, 0.0f }, crossColor, isSelected ? 2.0f : 1.2f, &overlayMin, &overlayMax);
-								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									{ 0.0f, -cross, 0.0f }, { 0.0f, cross, 0.0f }, crossColor, isSelected ? 2.0f : 1.2f, &overlayMin, &overlayMax);
-								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									{ 0.0f, 0.0f, -cross }, { 0.0f, 0.0f, cross }, crossColor, isSelected ? 2.0f : 1.2f, &overlayMin, &overlayMax);
+								const float crossThick = isSelected ? 2.0f : 1.2f;
+
+								PushOccludedWorldSegment(glm::vec3(world * glm::vec4(-cross, 0.0f, 0.0f, 1.0f)),
+									glm::vec3(world * glm::vec4(cross, 0.0f, 0.0f, 1.0f)), crossColor, crossThick, handle);
+								PushOccludedWorldSegment(glm::vec3(world * glm::vec4(0.0f, -cross, 0.0f, 1.0f)),
+									glm::vec3(world * glm::vec4(0.0f, cross, 0.0f, 1.0f)), crossColor, crossThick, handle);
+								PushOccludedWorldSegment(glm::vec3(world * glm::vec4(0.0f, 0.0f, -cross, 1.0f)),
+									glm::vec3(world * glm::vec4(0.0f, 0.0f, cross, 1.0f)), crossColor, crossThick, handle);
 
 								drewAudio = true;
 							}

@@ -80,6 +80,7 @@ namespace World::Audio
 		explicit SoundEvent(std::string id, BusId busId = kBusSfx);
 
 		const std::string& GetId() const noexcept { return m_Id; }
+		void SetId(std::string id) noexcept { m_Id = std::move(id); }
 		BusId GetBusId() const noexcept { return m_BusId; }
 		void SetBusId(BusId busId) noexcept { m_BusId = busId; }
 
@@ -92,6 +93,10 @@ namespace World::Audio
 		float GetCooldownSeconds() const noexcept { return m_CooldownSeconds; }
 		void SetCooldownSeconds(float sec) noexcept { m_CooldownSeconds = sec; }
 
+		float GetMinVolume() const noexcept { return m_MinVolume; }
+		float GetMaxVolume() const noexcept { return m_MaxVolume; }
+		float GetMinPitchSemitones() const noexcept { return m_MinPitchSemitones; }
+		float GetMaxPitchSemitones() const noexcept { return m_MaxPitchSemitones; }
 		void SetVolumeRange(float minVol, float maxVol) noexcept { m_MinVolume = minVol; m_MaxVolume = maxVol; }
 		void SetPitchRangeSemitones(float minSemi, float maxSemi) noexcept { m_MinPitchSemitones = minSemi; m_MaxPitchSemitones = maxSemi; }
 
