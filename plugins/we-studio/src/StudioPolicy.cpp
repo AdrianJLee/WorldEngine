@@ -477,6 +477,84 @@ namespace World::Studio
 					}
 				}
 
+				// 3. 严格核验成品游戏循环铁律 (Finished Game Loop Mandate)
+				// 检查脚本中是否包含完整的状态机 (开始、胜负、重开)
+				bool hasGameFlow = false;
+				auto checkScriptFlow = [&](const fs::path& dir) {
+					if (fs::exists(dir)) {
+						std::error_code ec;
+						for (const auto& entry : fs::directory_iterator(dir, ec)) {
+							if (entry.is_regular_file() && entry.path().extension() == ".luau") {
+								std::ifstream sf(entry.path());
+								std::string sText((std::istreambuf_iterator<char>(sf)), std::istreambuf_iterator<char>());
+								// 检查是否有状态枚举/重置逻辑
+								if ((sText.find("STATE_") != std::string::npos || sText.find("mode") != std::string::npos || sText.find("state") != std::string::npos) &&
+									(sText.find("reset") != std::string::npos || sText.find("restart") != std::string::npos || sText.find("retry") != std::string::npos || sText.find("Reset") != std::string::npos))
+								{
+									hasGameFlow = true;
+									break;
+								}
+							}
+						}
+					}
+				};
+				checkScriptFlow(scriptsDir1);
+				if (!hasGameFlow) checkScriptFlow(scriptsDir2);
+
+				if (!hasGameFlow)
+				{
+					result.blockers.push_back("[Gate Blocker] Finished Game Loop violation: Game scripts lack a complete game flow (missing Title/Battle/GameOver/Victory state machine or restart/retry function). A finished game must not be a wandering demo.");
+				}
+
+				// 4. 严格核验敌对目标与挑战机制 (Threat & Objective Mandate)
+				bool hasThreatOrObjective = false;
+				if (fs::exists(levelsDir))
+				{
+					std::error_code ec;
+					for (const auto& entry : fs::recursive_directory_iterator(levelsDir, ec))
+					{
+						if (entry.is_regular_file() && entry.path().extension() == ".entity")
+						{
+							std::ifstream ef(entry.path());
+							std::string eText((std::istreambuf_iterator<char>(ef)), std::istreambuf_iterator<char>());
+							if (eText.find("Enemy") != std::string::npos || eText.find("Boss") != std::string::npos ||
+								eText.find("Chest") != std::string::npos || eText.find("Coin") != std::string::npos ||
+								eText.find("Hazard") != std::string::npos || eText.find("Crystal") != std::string::npos ||
+								eText.find("Goal") != std::string::npos)
+							{
+								hasThreatOrObjective = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (!hasThreatOrObjective)
+				{
+					result.blockers.push_back("[Gate Blocker] Game Challenge violation: Scene lacks enemy, hazard, or interactive objective entities. A finished game must feature opponents, threats, or clear winning goals.");
+				}
+
+				// 5. 严格核验音频事件沉浸感 (Audio Event Mandate)
+				const fs::path audioEventsDir = root / "assets" / "audio" / "events";
+				bool hasAudioEvent = false;
+				if (fs::exists(audioEventsDir))
+				{
+					std::error_code ec;
+					for (const auto& entry : fs::directory_iterator(audioEventsDir, ec))
+					{
+						if (entry.is_regular_file() && entry.path().extension() == ".wsound")
+						{
+							hasAudioEvent = true;
+							break;
+						}
+					}
+				}
+
+				if (!hasAudioEvent)
+				{
+					result.blockers.push_back("[Gate Blocker] Audio Immersion violation: No audio events (.wsound) configured in assets/audio/events/. A finished game requires sound feedback.");
+				}
+
 				if (result.blockers.empty())
 				{
 					result.satisfiedRequirements.push_back("Required output verified: " + outName);
