@@ -18,7 +18,12 @@ namespace World::Studio
 		ss << "- Direct out-of-channel edits will be flagged as unattributed modifications and will block gate advancement.\n";
 		ss << "- The engine source tree (Engine/, Editor/, Runtime/) is strictly read-only.\n\n";
 
-		ss << "## 2. Active Roles and Responsibilities\n";
+		ss << "## 2. Good Game Quality Standards (Anti-Stub Mandate)\n";
+		ss << "- **Anti-Stub Asset Rule**: DO NOT generate flat monochrome square PNGs or construct vehicles/characters using default stretch primitive cubes. Always reuse official production-grade assets from `templates/project-example/assets/` (TextureAtlas, SpriteAnimation, Tilemaps, Audio) and `Engine/content/` (PBR textures, models, VFX).\n";
+		ss << "- **Native Physics Rule**: NEVER implement fake physics or coordinate bounds in Luau scripts. Always attach native `RigidBody2DComponent`/`3DComponent` and colliders so the engine handles true collisions.\n";
+		ss << "- **Visual Baseline Rule**: NEVER deliver black scenes. Configure proper camera projection, lighting, and background/sky dome elements. Avoid ASCII string block HUDs.\n\n";
+
+		ss << "## 3. Active Roles and Responsibilities\n";
 		for (const auto& kv : policy.GetRoles())
 		{
 			const auto& r = kv.second;
