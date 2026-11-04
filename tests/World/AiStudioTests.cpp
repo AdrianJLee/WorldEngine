@@ -199,7 +199,42 @@ int main()
 		}
 	}
 
-	// 6. 验证合并进 we-studio 的 InterviewSystem 与 taste.yaml 防重复键记录
+			// 5.5 反白模拼积木铁律拦截验证 (Anti-Primitive-Stubbing Gate Check)
+		{
+			StudioPolicy stubPolicy("default", tempProj.string());
+
+			// 构造一个包含 20 个全白模 Cube 实体且无光源的假 3D 关卡
+			const fs::path stubLevelDir = tempProj / "assets" / "levels" / "StubRace" / "entities";
+			std::error_code ecStub;
+			fs::create_directories(stubLevelDir, ecStub);
+
+			for (int i = 0; i < 20; ++i)
+			{
+				std::ofstream f(stubLevelDir / (std::to_string(2000 + i) + ".entity"));
+				f << "Entity:\n  World::MeshRendererComponent:\n    Primitive: 0\n    Mesh: \"\"\n    Material: \"\"\n";
+			}
+
+			// 也写入一个脚本满足脚本存在性
+			const fs::path pScripts = tempProj / "assets" / "scripts" / "systems";
+			fs::create_directories(pScripts, ecStub);
+			std::ofstream sf(pScripts / "StubGame.luau");
+			sf << "print('stub')\n";
+
+			// 尝试推进到 Prototype，门禁必须硬性拦截！指出全场景为纯色 Cube 白模且缺光源！
+			auto gProto = stubPolicy.EvaluateGate(WorkflowStage::Prototype, tempProj.string());
+			CHECK(!gProto.pass);
+			bool foundAntiStub = false;
+			bool foundBlackScreen = false;
+			for (const auto& b : gProto.blockers)
+			{
+				if (b.find("Anti-Stub violation") != std::string::npos) foundAntiStub = true;
+				if (b.find("Black screen hazard") != std::string::npos) foundBlackScreen = true;
+			}
+			CHECK(foundAntiStub);
+			CHECK(foundBlackScreen);
+		}
+
+		// 6. 验证合并进 we-studio 的 InterviewSystem 与 taste.yaml 防重复键记录
 	{
 		auto& interview = InterviewSystem::Get();
 		auto round = interview.GetCurrentRound(tempProj.string(), 0);

@@ -402,7 +402,7 @@ namespace World::Studio
 			}
 			else if (outName == "playable_prototype" || outName == "vertical_slice_build")
 			{
-				// 检查脚本与场景实体存在性
+				// 1. 检查游戏逻辑脚本存在性
 				bool hasCustomScripts = false;
 				const fs::path scriptsDir1 = root / "assets" / "scripts" / "systems";
 				const fs::path scriptsDir2 = root / "assets" / "scripts";
@@ -422,7 +422,62 @@ namespace World::Studio
 				{
 					result.blockers.push_back("[Gate Blocker] Required output '" + outName + "' missing: No game logic scripts found under assets/scripts/.");
 				}
-				else
+
+				// 2. 严格核验反白模/反拼积木铁律 (Anti-Primitive-Stubbing Mandate)
+				// 扫描关卡实体：如果实体全都是拉伸 Cube 白模 (Mesh 为空且材质为空)，坚决拦截伪完成交付
+				const fs::path levelsDir = root / "assets" / "levels";
+				if (fs::exists(levelsDir))
+				{
+					std::error_code ec;
+					size_t totalMeshEntities = 0;
+					size_t stubPrimitiveEntities = 0;
+					bool hasAnyLight = false;
+
+					for (const auto& entry : fs::recursive_directory_iterator(levelsDir, ec))
+					{
+						if (entry.is_regular_file() && entry.path().extension() == ".entity")
+						{
+							std::ifstream ef(entry.path());
+							std::string eText((std::istreambuf_iterator<char>(ef)), std::istreambuf_iterator<char>());
+
+							if (eText.find("DirectionalLightComponent") != std::string::npos ||
+								eText.find("PointLightComponent") != std::string::npos ||
+								eText.find("AmbientLightComponent") != std::string::npos)
+							{
+								hasAnyLight = true;
+							}
+
+							if (eText.find("MeshRendererComponent:") != std::string::npos)
+							{
+								++totalMeshEntities;
+								// 检查是否为没有任何 mesh 资产的纯色立方体
+								if (eText.find("Mesh: \"\"") != std::string::npos || eText.find("Mesh: ''") != std::string::npos || eText.find("Mesh:\n") != std::string::npos)
+								{
+									if (eText.find("Material: \"\"") != std::string::npos || eText.find("Material: ''") != std::string::npos || eText.find("Material:") == std::string::npos)
+									{
+										++stubPrimitiveEntities;
+									}
+								}
+							}
+						}
+					}
+
+					// 如果实体数量庞大 (>= 15)，但全部 (>= 90%) 都是空壳拉伸方块拼凑而成，判定为空壳违规！
+					if (totalMeshEntities >= 15 && stubPrimitiveEntities * 10 >= totalMeshEntities * 9)
+					{
+						result.blockers.push_back("[Gate Blocker] Anti-Stub violation: Scene consists of 100% raw untextured primitive cubes ("
+							+ std::to_string(stubPrimitiveEntities) + "/" + std::to_string(totalMeshEntities)
+							+ "). Real imported 3D model (.wmodel/.obj) or material (.wmat) assets are strictly required.");
+					}
+
+					// 如果有 3D Mesh 实体但没有一盏光，判定为黑屏阻断
+					if (totalMeshEntities > 0 && !hasAnyLight)
+					{
+						result.blockers.push_back("[Gate Blocker] Black screen hazard: 3D scene contains meshes but no light source (DirectionalLight/PointLight).");
+					}
+				}
+
+				if (result.blockers.empty())
 				{
 					result.satisfiedRequirements.push_back("Required output verified: " + outName);
 				}
