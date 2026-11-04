@@ -201,6 +201,20 @@ namespace World::Ai
 						syntaxErr.Message
 					});
 				}
+
+				// 静态 API 契约审计：拦截面向对象冒号误用 (如 Input:Down, Input:IsKeyPressed)
+				if (source.find("Input:Down") != std::string::npos ||
+					source.find("Input:IsKeyPressed") != std::string::npos ||
+					source.find("Input:Pressed") != std::string::npos ||
+					source.find("Input:Released") != std::string::npos)
+				{
+					report.errors.push_back({
+						"ERR_LUAU_STATIC_API_VIOLATION",
+						entry.path().string(),
+						0,
+						"Static API Contract Violation: 'Input' library methods must be called statically via dot (e.g. Input.Down), NOT with colon (Input:Down)."
+					});
+				}
 				++scriptsChecked;
 			}
 		}
