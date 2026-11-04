@@ -8,7 +8,7 @@ namespace World::Ai
 	class CommandRegistry;
 }
 
-namespace World::Assistant
+namespace World::Studio
 {
 	struct QuestionOption
 	{
@@ -51,7 +51,15 @@ namespace World::Assistant
 		// 获取项目品味档案
 		std::string GetTasteProfile(const std::string& projectRoot) const;
 
-		// 注册命令到 CommandRegistry
+		// 注册命令到 CommandRegistry (包含 studio.* 与 assistant.* 兼容别名)
 		static void RegisterCommands(World::Ai::CommandRegistry& reg);
 	};
+}
+
+namespace World::Assistant
+{
+	using World::Studio::QuestionOption;
+	using World::Studio::InterviewQuestion;
+	using World::Studio::InterviewRound;
+	using World::Studio::InterviewSystem;
 }

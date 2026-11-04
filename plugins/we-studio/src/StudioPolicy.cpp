@@ -18,6 +18,12 @@ namespace World::Studio
 	{
 		fs::path FindPresetsBase()
 		{
+#if defined(WLD_REPO_ROOT)
+			const fs::path repoCandidate = fs::u8path(WLD_REPO_ROOT) / "plugins" / "we-studio" / "presets";
+			std::error_code ecRepo;
+			if (fs::exists(repoCandidate, ecRepo))
+				return repoCandidate;
+#endif
 			const fs::path candidates[] = {
 				fs::current_path() / "plugins" / "we-studio" / "presets",
 				fs::u8path(Paths::ProjectDir().string()) / "plugins" / "we-studio" / "presets"
@@ -27,7 +33,11 @@ namespace World::Studio
 				if (fs::exists(c))
 					return c;
 			}
+#if defined(WLD_REPO_ROOT)
+			return fs::u8path(WLD_REPO_ROOT) / "plugins" / "we-studio" / "presets";
+#else
 			return fs::current_path() / "plugins" / "we-studio" / "presets";
+#endif
 		}
 	}
 

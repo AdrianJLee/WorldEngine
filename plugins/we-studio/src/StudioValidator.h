@@ -23,7 +23,7 @@ namespace World::Studio
 	class StudioValidator
 	{
 	public:
-		static StudioValidationResult Validate(const StudioPolicy& policy);
+		static StudioValidationResult Validate(const StudioPolicy& policy, const std::string& projectRoot = "");
 		static void RegisterCommands(World::Ai::CommandRegistry& reg);
 	};
 }

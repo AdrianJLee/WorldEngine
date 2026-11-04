@@ -1,10 +1,15 @@
 #include "AgentsDocGenerator.h"
 #include "StudioValidator.h"
+#include "BacklogManager.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/WUI/WuiJson.h"
+#include "World/Utils/Paths.h"
+
+#include <filesystem>
 
 namespace World::Studio
 {
+	namespace fs = std::filesystem;
 	using namespace World::Wui;
 
 	std::string StudioValidationResult::ToJson() const
@@ -13,27 +18,31 @@ namespace World::Studio
 		root.type = JsonValue::Type::Object;
 		root.Object.push_back({ "valid", JsonValue::MakeBool(valid) });
 
-		JsonValue eArr; eArr.type = JsonValue::Type::Array;
-		for (const auto& e : errors) eArr.Array.push_back(JsonValue::MakeString(e));
+		JsonValue eArr;
+		eArr.type = JsonValue::Type::Array;
+		for (const auto& e : errors)
+			eArr.Array.push_back(JsonValue::MakeString(e));
 		root.Object.push_back({ "errors", std::move(eArr) });
 
-		JsonValue wArr; wArr.type = JsonValue::Type::Array;
-		for (const auto& w : warnings) wArr.Array.push_back(JsonValue::MakeString(w));
+		JsonValue wArr;
+		wArr.type = JsonValue::Type::Array;
+		for (const auto& w : warnings)
+			wArr.Array.push_back(JsonValue::MakeString(w));
 		root.Object.push_back({ "warnings", std::move(wArr) });
 
 		return root.Dump();
 	}
 
-	StudioValidationResult StudioValidator::Validate(const StudioPolicy& policy)
+	StudioValidationResult StudioValidator::Validate(const StudioPolicy& policy, const std::string& projectRoot)
 	{
 		StudioValidationResult res;
 		const auto& roles = policy.GetRoles();
 
+		// 1. 策略静态契约校验 (循环评审/自审自过检测 与 写入范围越界检测)
 		for (const auto& kv : roles)
 		{
 			const auto& r = kv.second;
 
-			// 1. 循环评审/自审自过检测
 			for (const auto& revTarget : r.reviews)
 			{
 				if (revTarget == r.id)
@@ -43,7 +52,6 @@ namespace World::Studio
 				}
 			}
 
-			// 2. 写入范围越界检测
 			for (const auto& w : r.write)
 			{
 				if (w.rfind("..", 0) == 0 || w.find("/../") != std::string::npos)
@@ -59,6 +67,21 @@ namespace World::Studio
 			}
 		}
 
+		// 2. 真实项目客观健康度校验 (坚决杜绝假自检)
+		const std::string root = projectRoot.empty() ? Paths::ProjectDir().string() : projectRoot;
+		if (!root.empty())
+		{
+			const auto bugs = BacklogManager::Get().ListBugs(root, "blocker");
+			for (const auto& b : bugs)
+			{
+				if (b.status != "closed" && b.status != "resolved")
+				{
+					res.errors.push_back("Active Blocker Bug detected: [" + b.id + "] " + b.title);
+					res.valid = false;
+				}
+			}
+		}
+
 		res.valid = res.errors.empty();
 		return res;
 	}
@@ -68,16 +91,17 @@ namespace World::Studio
 		using namespace World::Ai;
 		CommandDescriptor desc;
 		desc.name = "studio.validate";
-		desc.description = "Validate studio preset, role definitions, circular reviews, and write scopes.";
+		desc.description = "Validate studio preset, role definitions, circular reviews, and active project blocker defects.";
 		desc.effect = CommandEffect::Read;
 		desc.scope = CommandScope::Both;
 		desc.owner = "plugin:we-studio";
-		desc.paramsSchema = "{\"type\":\"object\"}";
+		desc.paramsSchema = "{\"type\":\"object\",\"properties\":{\"root\":{\"type\":\"string\"}}}";
 		desc.resultSchema = "{\"type\":\"object\",\"properties\":{\"valid\":{\"type\":\"boolean\"},\"errors\":{\"type\":\"array\"}}}";
-		desc.handler = [](const std::map<std::string, std::string>& /*args*/, std::string& result, std::string& /*error*/)
+		desc.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
 		{
+			const std::string root = args.count("root") ? args.at("root") : "";
 			StudioPolicy policy;
-			result = Validate(policy).ToJson();
+			result = Validate(policy, root).ToJson();
 			return true;
 		};
 		reg.RegisterCommand(std::move(desc));
@@ -96,10 +120,12 @@ namespace World::Studio
 			const std::string root = args.count("root") ? args.at("root") : "";
 			StudioPolicy policy;
 			const bool ok = AgentsDocGenerator::WriteToProject(root, policy);
-			JsonValue r; r.type = JsonValue::Type::Object;
+			JsonValue r;
+			r.type = JsonValue::Type::Object;
 			r.Object.push_back({ "generated", JsonValue::MakeBool(ok) });
 			result = r.Dump();
 			return ok;
 		};
-		reg.RegisterCommand(std::move(docCmd));}
+		reg.RegisterCommand(std::move(docCmd));
+	}
 }

@@ -94,6 +94,47 @@ namespace World::Studio
 
 	namespace
 	{
+		void SafeUpdateStatusAndNotes(std::string& content, const std::string& status, const std::string& headerTitle, const std::string& noteText)
+		{
+			size_t fmStart = content.find("---");
+			if (fmStart != std::string::npos)
+			{
+				size_t fmEnd = content.find("---", fmStart + 3);
+				if (fmEnd != std::string::npos)
+				{
+					std::string fm = content.substr(fmStart, fmEnd - fmStart);
+					size_t pos = fm.find("\nstatus: ");
+					if (pos != std::string::npos)
+					{
+						size_t eol = fm.find('\n', pos + 1);
+						if (eol == std::string::npos) eol = fm.size();
+						fm.replace(pos, eol - pos, "\nstatus: " + status);
+						content.replace(fmStart, fmEnd - fmStart, fm);
+					}
+					else if (fm.rfind("status: ", 0) == 0)
+					{
+						size_t eol = fm.find('\n');
+						if (eol == std::string::npos) eol = fm.size();
+						fm.replace(0, eol, "status: " + status);
+						content.replace(fmStart, fmEnd - fmStart, fm);
+					}
+				}
+			}
+
+			if (!noteText.empty())
+			{
+				const std::string header = "## " + headerTitle;
+				if (content.find(header) != std::string::npos)
+				{
+					content += "- " + noteText + "\n";
+				}
+				else
+				{
+					content += "\n\n" + header + "\n- " + noteText + "\n";
+				}
+			}
+		}
+
 		std::string MapRoleToDepartment(const std::string& role)
 		{
 			std::string r = role;

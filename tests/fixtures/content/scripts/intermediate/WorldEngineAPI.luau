@@ -1054,13 +1054,15 @@ function ui:isOpen() end
 
 -- Component fields are exposed through Entity:GetComponent("BiomePCGComponent"); there is no runtime global named BiomePCGComponent.
 ---@class BiomePCGComponent
----@field MinElevation number
 ---@field RuleAsset string
 ---@field Seed number
+---@field LivePreview number
+---@field DensityMultiplier number
+---@field BoundsRadius number
+---@field ClearanceMargin number
 ---@field AutoDeformTerrain number
----@field MaxSlope number
----@field MoistureThreshold number
----@field MaxElevation number
+---@field BoundsHeight number
+---@field GenerateOnPlay number
 
 -- Component fields are exposed through Entity:GetComponent("BoxCollider2DComponent"); there is no runtime global named BoxCollider2DComponent.
 ---@class BoxCollider2DComponent
@@ -1194,16 +1196,6 @@ function ui:isOpen() end
 ---@field EnableSpring boolean
 ---@field EnableCollision boolean
 ---@field EnableLimit boolean
-
----@field OptimalDistance number
----@field ThreatEntityHint number
----@field GeneratorMode number
----@field QueryMode number
----@field QueryCenter vec3
----@field IncludeCrouchCover number
----@field BestCoverFound number
----@field GridSpacing number
----@field QueryRadius number
 
 -- Component fields are exposed through Entity:GetComponent("FoliageComponent"); there is no runtime global named FoliageComponent.
 ---@class FoliageComponent

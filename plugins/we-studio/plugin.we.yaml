@@ -9,4 +9,4 @@ ship: never
 provides:
   - workflow.policy
   - workflow.backlog
-  - editor.ui
+  - project.interview

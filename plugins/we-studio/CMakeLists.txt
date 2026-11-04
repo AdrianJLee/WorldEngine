@@ -4,6 +4,7 @@ add_library(WePlugin_we-studio SHARED
     src/BacklogManager.cpp
     src/StudioValidator.cpp
     src/AgentsDocGenerator.cpp
+    src/InterviewSystem.cpp
 )
 
 set_target_properties(WePlugin_we-studio PROPERTIES

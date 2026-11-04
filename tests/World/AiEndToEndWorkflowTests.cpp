@@ -8,9 +8,8 @@
 
 #include "../../plugins/we-studio/src/StudioPolicy.h"
 #include "../../plugins/we-studio/src/BacklogManager.h"
-#include "../../plugins/we-gen/src/GenPipeline.h"
-#include "../../plugins/we-ai-assistant/src/AssistantEngine.h"
-#include "../../plugins/we-ai-assistant/src/InterviewSystem.h"
+#include "../../plugins/we-studio/src/InterviewSystem.h"
+#include "../../plugins/we-studio/src/StudioValidator.h"
 
 #include <cassert>
 #include <cstdio>
@@ -18,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #define CHECK(expr) \
 	do { \
@@ -29,13 +29,109 @@
 
 namespace fs = std::filesystem;
 
+namespace
+{
+	uint32_t PngCrc32(const uint8_t* data, size_t length)
+	{
+		uint32_t crc = 0xFFFFFFFF;
+		for (size_t i = 0; i < length; ++i)
+		{
+			crc ^= data[i];
+			for (int k = 0; k < 8; ++k)
+				crc = (crc >> 1) ^ (0xEDB88320 & (-(int)(crc & 1)));
+		}
+		return ~crc;
+	}
+
+	uint32_t PngAdler32(const uint8_t* data, size_t length)
+	{
+		uint32_t a = 1, b = 0;
+		for (size_t i = 0; i < length; ++i)
+		{
+			a = (a + data[i]) % 65521;
+			b = (b + a) % 65521;
+		}
+		return (b << 16) | a;
+	}
+
+	void WriteBigEndian32(std::vector<uint8_t>& buf, uint32_t val)
+	{
+		buf.push_back(static_cast<uint8_t>((val >> 24) & 0xFF));
+		buf.push_back(static_cast<uint8_t>((val >> 16) & 0xFF));
+		buf.push_back(static_cast<uint8_t>((val >> 8) & 0xFF));
+		buf.push_back(static_cast<uint8_t>(val & 0xFF));
+	}
+
+	std::vector<uint8_t> CreateTestPng32x32()
+	{
+		std::vector<uint8_t> png;
+		const uint8_t sig[8] = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+		png.insert(png.end(), sig, sig + 8);
+
+		std::vector<uint8_t> ihdrData;
+		ihdrData.push_back('I'); ihdrData.push_back('H'); ihdrData.push_back('D'); ihdrData.push_back('R');
+		WriteBigEndian32(ihdrData, 32);
+		WriteBigEndian32(ihdrData, 32);
+		ihdrData.push_back(8);
+		ihdrData.push_back(6);
+		ihdrData.push_back(0);
+		ihdrData.push_back(0);
+		ihdrData.push_back(0);
+
+		WriteBigEndian32(png, 13);
+		png.insert(png.end(), ihdrData.begin(), ihdrData.end());
+		WriteBigEndian32(png, PngCrc32(ihdrData.data(), ihdrData.size()));
+
+		std::vector<uint8_t> rawPixels;
+		rawPixels.reserve(32 * 129);
+		for (int y = 0; y < 32; ++y)
+		{
+			rawPixels.push_back(0);
+			for (int x = 0; x < 32; ++x)
+			{
+				rawPixels.push_back(0x20);
+				rawPixels.push_back(0xA0);
+				rawPixels.push_back(0x50);
+				rawPixels.push_back(0xFF);
+			}
+		}
+
+		std::vector<uint8_t> zlibStream;
+		zlibStream.push_back(0x78);
+		zlibStream.push_back(0x01);
+		const uint16_t rawLen = static_cast<uint16_t>(rawPixels.size());
+		const uint16_t rawNlen = ~rawLen;
+		zlibStream.push_back(0x01);
+		zlibStream.push_back(static_cast<uint8_t>(rawLen & 0xFF));
+		zlibStream.push_back(static_cast<uint8_t>((rawLen >> 8) & 0xFF));
+		zlibStream.push_back(static_cast<uint8_t>(rawNlen & 0xFF));
+		zlibStream.push_back(static_cast<uint8_t>((rawNlen >> 8) & 0xFF));
+		zlibStream.insert(zlibStream.end(), rawPixels.begin(), rawPixels.end());
+		WriteBigEndian32(zlibStream, PngAdler32(rawPixels.data(), rawPixels.size()));
+
+		std::vector<uint8_t> idatChunk;
+		idatChunk.push_back('I'); idatChunk.push_back('D'); idatChunk.push_back('A'); idatChunk.push_back('T');
+		idatChunk.insert(idatChunk.end(), zlibStream.begin(), zlibStream.end());
+
+		WriteBigEndian32(png, static_cast<uint32_t>(zlibStream.size()));
+		png.insert(png.end(), idatChunk.begin(), idatChunk.end());
+		WriteBigEndian32(png, PngCrc32(idatChunk.data(), idatChunk.size()));
+
+		const uint8_t iendChunk[12] = {
+			0x00, 0x00, 0x00, 0x00,
+			'I', 'E', 'N', 'D',
+			0xAE, 0x42, 0x60, 0x82
+		};
+		png.insert(png.end(), iendChunk, iendChunk + 12);
+		return png;
+	}
+}
+
 int main()
 {
 	using namespace World::Agent;
 	using namespace World::Ai;
 	using namespace World::Studio;
-	using namespace World::Gen;
-	using namespace World::Assistant;
 	using namespace World::Wui;
 
 	std::printf("Running WorldAiEndToEndWorkflowTests...\n");
@@ -61,9 +157,8 @@ int main()
 
 	auto& reg = CommandRegistry::Get();
 	BacklogManager::RegisterCommands(reg);
-	GenPipeline::RegisterCommands(reg);
 	InterviewSystem::RegisterCommands(reg);
-	AssistantEngine::RegisterCommands(reg);
+	StudioValidator::RegisterCommands(reg);
 
 	// 1. 制作人开启会话与生成职能开关方案 (Role Activation Plan)
 	std::string sessionProducer = core.OpenSession("producer", "KICKOFF-01", tempProj.string());
@@ -82,28 +177,19 @@ int main()
 	CHECK(fs::exists(tempProj / ".we" / "studio" / "taste.yaml"));
 	CHECK(fs::exists(tempProj / ".we" / "studio" / "assumptions.md"));
 
-	// 3. 资产生成管线 (we-gen) 生成真实合法的二进制 PNG 图像与侧车文件
-	GenRequest genReq;
-	genReq.type = "2d_sprite";
-	genReq.prompt = "Cyber hero jump animation frame";
-	genReq.targetPath = "assets/textures/hero.png";
-	genReq.estimatedCost = 0.05;
-
-	auto genRes = GenPipeline::Generate(tempProj.string(), genReq);
-	CHECK(genRes.success);
-	const fs::path pngFile = tempProj / genReq.targetPath;
+	// 3. 规范写入 2D 精灵资产产物
+	const std::string targetAssetRel = "assets/textures/hero.png";
+	const fs::path pngFile = tempProj / targetAssetRel;
+	{
+		auto pngBytes = CreateTestPng32x32();
+		std::ofstream out(pngFile, std::ios::binary);
+		CHECK(out.is_open());
+		out.write(reinterpret_cast<const char*>(pngBytes.data()), pngBytes.size());
+	}
 	CHECK(fs::exists(pngFile));
 
-	// 验证生成产物为合法 PNG 签名 (非纯文本假文件)
-	{
-		std::ifstream pf(pngFile, std::ios::binary);
-		char header[8] = { 0 };
-		pf.read(header, 8);
-		CHECK(std::memcmp(header, "\x89PNG\r\n\x1a\n", 8) == 0);
-	}
-
-	// 4. 自证命令族校验生成的资产
-	auto assetReport = SelfValidation::ValidateAsset(genReq.targetPath, tempProj.string());
+	// 4. 自证命令族校验资产
+	auto assetReport = SelfValidation::ValidateAsset(targetAssetRel, tempProj.string());
 	CHECK(assetReport.valid);
 	CHECK(assetReport.metrics.count("width") > 0);
 	CHECK(assetReport.metrics.at("width") == "32");
@@ -150,7 +236,7 @@ int main()
 		CHECK(fs::exists(tempProj / "qa" / "snap.ppm"));
 	}
 
-	// 7. 执行与验收分离校验 (§3.4)
+	// 7. 执行与验收分离校验
 	{
 		auto& bm = BacklogManager::Get();
 		StudioTask t;
@@ -160,7 +246,6 @@ int main()
 		const std::string tId = bm.CreateTask(tempProj.string(), t);
 
 		std::string res, err;
-		// 玩法程序自己审自己的任务必须被拦截
 		CHECK(!reg.Dispatch("review.submit", {
 			{ "task_id", tId },
 			{ "reviewer", "gameplay_programmer" },
@@ -169,7 +254,6 @@ int main()
 		}, res, err));
 		CHECK(err.find("Self-review is forbidden") != std::string::npos);
 
-		// QA 负责人验收通过
 		CHECK(reg.Dispatch("review.submit", {
 			{ "task_id", tId },
 			{ "reviewer", "qa_lead" },
@@ -184,13 +268,12 @@ int main()
 		CHECK(core.AdvanceStage(sessionProducer, advErr));
 		CHECK(core.GetCurrentStage() == WorkflowStage::Feasibility);
 
-		// 验证状态落盘
 		CHECK(fs::exists(tempProj / ".we" / "ai" / "state.json"));
 		CHECK(fs::exists(tempProj / ".we" / "ai" / "journal" / "journal.md"));
 	}
 
 	fs::remove_all(tempProj, ec);
 
-	std::printf("WorldAiEndToEndWorkflowTests PASSED (10/10 AI Test Suite Verified).\n");
+	std::printf("WorldAiEndToEndWorkflowTests PASSED (Headless Workflow Verified).\n");
 	return 0;
 }
