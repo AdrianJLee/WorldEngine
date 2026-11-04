@@ -1,5 +1,4 @@
-# Project Assumptions Ledger (制作人默认假设清单)
+# Project Assumptions Ledger (制作人立项假设台账)
 
-- [genre_type] 采用 `2d_platformer` (横版动作/平台跳跃) 作为基准验证原型，支持随时由出品人推翻重设。
-- [input_scheme] 默认键鼠 (`WASD + Space`) 与手柄双输入映射绑定。
-- [art_pipeline] 采用风格锁 (`art/style-lock.yaml`) 驱动资产生成与一致性校验。
+*本项目为纯净空白项目，尚未绑定具体预设品类与美术风格。*
+*在立项访谈 (assistant.interview.*) 完成或确立研发目标后，制作人与各部门总监的立项假设与架构约定将自动沉淀于此。*

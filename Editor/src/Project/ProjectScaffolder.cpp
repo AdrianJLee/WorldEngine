@@ -1270,7 +1270,13 @@ namespace World::Editor
 			// 保留无害;`/.vs/` 覆盖新落点。
 			const std::vector<std::string> ignoreEntries = {
 				"*-Edit.exe", "*-Play.exe", "*-Edit.cmd", "*-Play.cmd",
-				"launch.vs.json", "/.we/", "/.vs/", "/build/", "/local/" };
+				"launch.vs.json",
+				"/.we/engine-root.txt",
+				"/.we/*.cmd",
+				"/.we/*.bak*",
+				"/.we/ai/changesets/",
+				"/.we/ai/writes/",
+				"/.vs/", "/build/", "/local/" };
 			if (!EnsureGitignoreEntries(projectRoot, ignoreEntries, &gitignoreError))
 				placement.Warnings.push_back("could not update .gitignore: " + gitignoreError);
 
