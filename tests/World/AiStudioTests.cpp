@@ -165,6 +165,38 @@ int main()
 		CHECK(!rBad.valid);
 		CHECK(!rBad.errors.empty());
 		CHECK(rBad.errors[0].find("Circular review error") != std::string::npos);
+
+		// 5.4 真实流程门禁拦截验证 (EvaluateGate 真实产物与任务未闭环阻断)
+		{
+			StudioPolicy gatePolicy("default", tempProj.string());
+
+			// 未指定品类时，Stage 0 (Concept) 门禁必须真实阻断！
+			auto g0 = gatePolicy.EvaluateGate(WorkflowStage::Concept, tempProj.string());
+			CHECK(!g0.pass);
+			CHECK(!g0.blockers.empty());
+			CHECK(g0.blockers[0].find("Project genre/taste is unspecified") != std::string::npos);
+
+			// 完成立项品味设定后，Stage 0 产物通过
+			InterviewSystem::Get().AnswerQuestion(tempProj.string(), "genre_type", "2d_platformer");
+			auto g0Ok = gatePolicy.EvaluateGate(WorkflowStage::Concept, tempProj.string());
+			CHECK(g0Ok.pass);
+
+			// 在 Stage 0 创建一个 open 任务，门禁必须硬性拦截推进！(杜绝带着开着的任务跳级)
+			StudioTask tOpen;
+			tOpen.title = "Unfinished Concept Document";
+			tOpen.role = "creative_director";
+			tOpen.stage = "0";
+			std::string tOpenId = BacklogManager::Get().CreateTask(tempProj.string(), tOpen);
+
+			auto g0TaskBlock = gatePolicy.EvaluateGate(WorkflowStage::Concept, tempProj.string());
+			CHECK(!g0TaskBlock.pass);
+			CHECK(g0TaskBlock.blockers[0].find("Active unfinished task") != std::string::npos);
+
+			// 任务完成后，阻断解除
+			CHECK(BacklogManager::Get().UpdateTask(tempProj.string(), tOpenId, "done", "Finished"));
+			auto g0TaskDone = gatePolicy.EvaluateGate(WorkflowStage::Concept, tempProj.string());
+			CHECK(g0TaskDone.pass);
+		}
 	}
 
 	// 6. 验证合并进 we-studio 的 InterviewSystem 与 taste.yaml 防重复键记录

@@ -1,6 +1,7 @@
 #include "StudioPolicy.h"
 #include "BacklogManager.h"
 #include "World/Ai/SelfValidation.h"
+#include "World/Ai/PlaytestRunner.h"
 #include "World/Ai/WriteGuard.h"
 #include "World/Utils/Paths.h"
 
@@ -275,7 +276,9 @@ namespace World::Studio
 
 		const fs::path root = fs::u8path(projectRoot.empty() ? m_ProjectRoot : projectRoot);
 
-		// 1. 检查阶段自证命令 (project.validate, asset.validate, playtest.run, build.package)
+		// ---------------------------------------------------------------------
+		// 1. 真实自证命令校验 (Real Self-Validations)
+		// ---------------------------------------------------------------------
 		for (const auto& sv : stageDef->selfValidations)
 		{
 			if (sv == "project.validate")
@@ -291,23 +294,167 @@ namespace World::Studio
 					result.satisfiedRequirements.push_back("project.validate passed clean.");
 				}
 			}
+			else if (sv == "playtest.run")
+			{
+				// 寻找可用关卡文件执行真实无头试玩推帧
+				fs::path sceneTarget;
+				const fs::path manifestPath = root / "project.we.yaml";
+				if (fs::exists(manifestPath))
+				{
+					try
+					{
+						YAML::Node doc = YAML::LoadFile(manifestPath.string());
+						if (doc["start_scene"])
+						{
+							const std::string sc = doc["start_scene"].as<std::string>();
+							const fs::path p1 = root / sc;
+							const fs::path p2 = root / "assets" / sc;
+							if (fs::exists(p1)) sceneTarget = p1;
+							else if (fs::exists(p2)) sceneTarget = p2;
+						}
+					}
+					catch (...) {}
+				}
+				if (sceneTarget.empty())
+				{
+					const fs::path defaultScene = root / "assets" / "scenes" / "Main.wlevel";
+					const fs::path level1Scene = root / "assets" / "scenes" / "level1.yaml";
+					if (fs::exists(defaultScene)) sceneTarget = defaultScene;
+					else if (fs::exists(level1Scene)) sceneTarget = level1Scene;
+				}
+
+				if (sceneTarget.empty() || !fs::exists(sceneTarget))
+				{
+					result.blockers.push_back("[Gate Blocker] playtest.run failed: No valid scene file found for simulation in assets/scenes/.");
+				}
+				else
+				{
+					Ai::PlaytestConfig ptCfg;
+					ptCfg.scenePath = sceneTarget.string();
+					ptCfg.frames = 30;
+					ptCfg.asserts = { "entity_count > 0" };
+
+					auto ptRes = Ai::PlaytestRunner::Run(ptCfg, nullptr);
+					if (!ptRes.pass)
+					{
+						std::string reason = ptRes.failures.empty() ? "Simulation assertion failed" : ptRes.failures[0]; result.blockers.push_back("[Gate Blocker] playtest.run failed: " + reason);
+					}
+					else
+					{
+						result.satisfiedRequirements.push_back("playtest.run simulated clean (30 frames, entity_count > 0).");
+					}
+				}
+			}
 			else
 			{
 				result.satisfiedRequirements.push_back("Self validation verified: " + sv);
 			}
 		}
 
-		// 2. 检查必需产出物
+		// ---------------------------------------------------------------------
+		// 2. 真实必需产出物物理检查 (Real Required Outputs Verification)
+		// ---------------------------------------------------------------------
 		for (const auto& outName : stageDef->requiredOutputs)
 		{
-			result.satisfiedRequirements.push_back("Required output registered: " + outName);
+			if (outName == "brief" || outName == "vision_pitch")
+			{
+				const fs::path tastePath = root / ".we" / "studio" / "taste.yaml";
+				bool hasValidBrief = false;
+				if (fs::exists(tastePath))
+				{
+					std::ifstream f(tastePath);
+					std::string str((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+					if (str.find("genre_type: \"\"") == std::string::npos && str.find("genre_type:") != std::string::npos)
+					{
+						hasValidBrief = true;
+					}
+				}
+				if (!hasValidBrief)
+				{
+					result.blockers.push_back("[Gate Blocker] Required output '" + outName + "' missing: Project genre/taste is unspecified in .we/studio/taste.yaml.");
+				}
+				else
+				{
+					result.satisfiedRequirements.push_back("Required output verified: " + outName);
+				}
+			}
+			else if (outName == "art_style_lock")
+			{
+				const fs::path tastePath = root / ".we" / "studio" / "taste.yaml";
+				bool hasStyle = false;
+				if (fs::exists(tastePath))
+				{
+					std::ifstream f(tastePath);
+					std::string str((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+					if (str.find("art_style: \"\"") == std::string::npos && str.find("art_style:") != std::string::npos)
+					{
+						hasStyle = true;
+					}
+				}
+				if (!hasStyle)
+				{
+					result.blockers.push_back("[Gate Blocker] Required output 'art_style_lock' missing: Art style is unspecified in .we/studio/taste.yaml.");
+				}
+				else
+				{
+					result.satisfiedRequirements.push_back("Required output verified: art_style_lock");
+				}
+			}
+			else if (outName == "playable_prototype" || outName == "vertical_slice_build")
+			{
+				// 检查脚本与场景实体存在性
+				bool hasCustomScripts = false;
+				const fs::path scriptsDir1 = root / "assets" / "scripts" / "systems";
+				const fs::path scriptsDir2 = root / "assets" / "scripts";
+				auto checkDir = [&](const fs::path& dir) {
+					if (fs::exists(dir)) {
+						std::error_code ec;
+						for (const auto& entry : fs::directory_iterator(dir, ec)) {
+							if (entry.is_regular_file() && entry.path().extension() == ".luau")
+								return true;
+						}
+					}
+					return false;
+				};
+				hasCustomScripts = checkDir(scriptsDir1) || checkDir(scriptsDir2);
+
+				if (!hasCustomScripts)
+				{
+					result.blockers.push_back("[Gate Blocker] Required output '" + outName + "' missing: No game logic scripts found under assets/scripts/.");
+				}
+				else
+				{
+					result.satisfiedRequirements.push_back("Required output verified: " + outName);
+				}
+			}
+			else
+			{
+				result.satisfiedRequirements.push_back("Required output registered: " + outName);
+			}
 		}
 
-		// 3. 检查未关闭的 Blocker 缺陷 (§6.5, D10)
-		auto bugs = BacklogManager::Get().ListBugs(root.string(), "blocker", "open");
+		// ---------------------------------------------------------------------
+		// 3. 检查当前阶段未闭环任务 (Unfinished Tasks Check)
+		// ---------------------------------------------------------------------
+		auto tasks = BacklogManager::Get().ListTasks(root.string());
+		for (const auto& t : tasks)
+		{
+			if ((t.stage == std::to_string(sIdx) || t.stage == stageDef->id) && (t.status == "open" || t.status == "in_progress"))
+			{
+				result.blockers.push_back("[Gate Blocker] Active unfinished task: [" + t.id + "] " + t.title + " (status: " + t.status + ")");
+			}
+		}
+
+		// ---------------------------------------------------------------------
+		// 4. 检查未关闭的 Blocker 缺陷 (§6.5, D10)
+		// ---------------------------------------------------------------------
+		auto bugs = BacklogManager::Get().ListBugs(root.string(), "blocker");
 		for (const auto& b : bugs)
 		{
-			result.blockers.push_back("[Gate Blocker] Unresolved blocker defect: " + b.title + " (" + b.id + ")");
+			if (b.status != "closed" && b.status != "resolved")
+			{
+				result.blockers.push_back("[Gate Blocker] Unresolved blocker defect: [" + b.id + "] " + b.title);
+			}
 		}
 
 		result.pass = result.blockers.empty();
