@@ -1,4 +1,4 @@
-#include "World/Level/Spline3D.h"
+﻿#include "World/Level/Spline3D.h"
 #include "World/Level/WhiteboxBuilder.h"
 #include "World/Level/PhysicsPainter.h"
 #include "World/Terrain/Terrain.h"
@@ -151,27 +151,27 @@ static void TestWhiteboxBuilder()
 	// 7. WhiteboxBuilder::BuildMesh 静态分发
 	WhiteboxComponent comp;
 	WhiteboxMesh outMesh;
-	comp.Shape = WhiteboxComponent::ShapeType::Box;
+	comp.SetShapeType(WhiteboxComponent::ShapeType::Box);
 	WhiteboxBuilder::BuildMesh(comp, outMesh);
 	assert(outMesh.Vertices.size() == 24);
 
-	comp.Shape = WhiteboxComponent::ShapeType::Cylinder;
+	comp.SetShapeType(WhiteboxComponent::ShapeType::Cylinder);
 	WhiteboxBuilder::BuildMesh(comp, outMesh);
 	assert(!outMesh.Vertices.empty());
 
-	comp.Shape = WhiteboxComponent::ShapeType::Sphere;
+	comp.SetShapeType(WhiteboxComponent::ShapeType::Sphere);
 	WhiteboxBuilder::BuildMesh(comp, outMesh);
 	assert(!outMesh.Vertices.empty());
 
-	comp.Shape = WhiteboxComponent::ShapeType::Stairs;
+	comp.SetShapeType(WhiteboxComponent::ShapeType::Stairs);
 	WhiteboxBuilder::BuildMesh(comp, outMesh);
 	assert(!outMesh.Vertices.empty());
 
-	comp.Shape = WhiteboxComponent::ShapeType::Wedge;
+	comp.SetShapeType(WhiteboxComponent::ShapeType::Wedge);
 	WhiteboxBuilder::BuildMesh(comp, outMesh);
 	assert(!outMesh.Vertices.empty());
 
-	comp.Shape = WhiteboxComponent::ShapeType::Arch;
+	comp.SetShapeType(WhiteboxComponent::ShapeType::Arch);
 	WhiteboxBuilder::BuildMesh(comp, outMesh);
 	assert(!outMesh.Vertices.empty());
 
@@ -224,7 +224,7 @@ static void TestLevelAuthoringComponentLayout()
 
 	WhiteboxComponent whitebox;
 	assert(sizeof(whitebox) == 32);
-	assert(whitebox.Shape == WhiteboxComponent::ShapeType::Box);
+	assert(whitebox.GetShapeType() == WhiteboxComponent::ShapeType::Box);
 	assert(whitebox.Steps == 8);
 
 	std::cout << "[PASS] TestLevelAuthoringComponentLayout\n";

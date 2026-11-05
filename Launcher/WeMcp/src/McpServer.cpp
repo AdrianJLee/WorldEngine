@@ -1,7 +1,9 @@
-#include "McpServer.h"
+﻿#include "McpServer.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/Agent/WeAgentCore.h"
+#include <chrono>
 #include <sstream>
+#include <thread>
 
 namespace World::Mcp
 {
@@ -39,15 +41,26 @@ namespace World::Mcp
 		caps.Object.push_back({ "tools", std::move(toolsCap) });
 		result.Object.push_back({ "capabilities", std::move(caps) });
 
-		result.Object.push_back({ "instructions", JsonValue::MakeString(R"raw(You are an AI Game Producer and Department Director operating within WorldEngine.
-Mandatory Workflow Guidelines:
-1. Session & Role First: Always open a session via 'session.open' with your assigned role before executing write/exec tools.
-2. Stages & Gates: Follow the 8-stage pipeline. Check status via 'workflow.status' or 'gate.check'.
-3. Taste & Direction: Check project taste profile via 'assistant.taste.get' and answer interview questions via 'assistant.interview.answer'.
-4. Task Management: Break game features into tasks using 'task.create', update via 'task.update', and submit independent review via 'review.submit' (self-review is forbidden). Log blockers with 'bug.create'.
-5. Asset Pipeline: All texture, model, audio generation MUST be requested via 'gen.generate' which enforces style-lock and budget limits.
-6. QA Verification: Always validate project health via 'studio.validate' and 'project.validate', and run headless simulation via 'playtest.run'.
-7. Security: The engine source tree is read-only. Confine all game assets and scripts to the project root.)raw") });
+		result.Object.push_back({ "instructions", JsonValue::MakeString(R"raw(You are an AI Game Producer and Department Director operating inside WorldEngine.
+
+AUTHORING FIRST. A "game" is an authored scene + scripts + real assets that actually runs, not a backlog of tasks marked done.
+
+Mandatory loop:
+1. Open a session (session.open). Read the project with studio.taste.get and project.validate.
+2. Author the level with real commands: scene.open (or scene.create_level), then scene.create_entity / scene.add_component / scene.set. Persist with scene.save, which writes .wlevel plus levels/<Id>/entities/*.entity.
+3. Write scripts and data through changeset.begin -> changeset.stage_write -> changeset.apply. Do not bypass the audited write channel.
+4. Verify with playtest.run on the saved .wlevel. Use entity:<Name> exists, component:<Type> exists, no_void_fall, no_nan. A pass on an empty scene with no camera and no light proves nothing.
+5. Look at the actual frame with capture.scene (Editor host) or capture.screen. playtest.run does NOT produce screenshots: its captures[] is intentionally empty in headless mode.
+6. Run gate.check / studio.validate before task.update(..., done). Unknown artifacts never auto-pass.
+
+Quality non-negotiables:
+- Every rendered entity must have real content: MeshRendererComponent with a real .wmodel/.wmat, or WhiteboxComponent for prototyping. A pile of default cubes is not a finished game.
+- A playable scene needs a CameraComponent and at least one light (DirectionalLight/PointLight/AmbientLight).
+- Movement and collision must use engine rigid bodies/colliders, not hard-coded screen coordinates.
+- Threats and objectives must exist as entities carrying real components (HealthComponent, BehaviorTreeComponent, SmartObjectComponent), not just a suggestive name.
+- Audio must be an AudioSourceComponent referencing an existing .wsound.
+
+Security: the engine source tree is read-only. All game content belongs under the project content root.)raw") });
 
 		McpResponse resp;
 		resp.id = id;
@@ -59,37 +72,49 @@ Mandatory Workflow Guidelines:
 	{
 		auto allDescriptors = Ai::CommandRegistry::Get().GetAllDescriptors();
 
-		// 若已连接远端宿主，同步拉取远端 ai.capabilities 合并编辑器专属命令
+		// 远端宿主(Editor)拥有 scene/material/asset/capture.* 完整创作面。
+		// 首次拉取要容忍"端口已开、命令尚未注册完"的启动竞态,否则模型只看到精简工具表。
 		if (m_Bridge && m_Bridge->IsConnectedToRemote())
 		{
-			std::string capRes, capErr;
-			if (m_Bridge->Dispatch("ai.capabilities", {}, capRes, capErr))
+			if (!m_RemoteCommandsLoaded)
 			{
-				auto parsedCaps = JsonValue::Parse(capRes, nullptr);
-				if (parsedCaps && parsedCaps->type == JsonValue::Type::Object)
+				for (int attempt = 0; attempt < 10 && m_RemoteCommands.empty(); ++attempt)
 				{
-					const auto* arr = parsedCaps->Find("capabilities");
-					if (arr && arr->type == JsonValue::Type::Array)
+					std::string capRes, capErr;
+					if (m_Bridge->Dispatch("ai.capabilities", {}, capRes, capErr))
 					{
-						for (const auto& item : arr->Array)
+						auto parsedCaps = JsonValue::Parse(capRes, nullptr);
+						if (parsedCaps && parsedCaps->type == JsonValue::Type::Object)
 						{
-							const auto* nVal = item.Find("name");
-							if (!nVal) continue;
-							const std::string cName = nVal->AsString();
-							if (Ai::CommandRegistry::Get().HasCommand(cName))
-								continue;
+							const auto* arr = parsedCaps->Find("capabilities");
+							if (arr && arr->type == JsonValue::Type::Array)
+							{
+								for (const auto& item : arr->Array)
+								{
+									const auto* nVal = item.Find("name");
+									if (!nVal) continue;
+									const std::string cName = nVal->AsString();
+									if (Ai::CommandRegistry::Get().HasCommand(cName))
+										continue;
 
-							Ai::CommandDescriptor d;
-							d.name = cName;
-							if (const auto* descVal = item.Find("description")) d.description = descVal->AsString();
-							if (const auto* effVal = item.Find("effect")) d.effect = Ai::StringToCommandEffect(effVal->AsString());
-							if (const auto* scpVal = item.Find("scope")) d.scope = Ai::StringToCommandScope(scpVal->AsString());
-							if (const auto* pSchema = item.Find("params_schema")) d.paramsSchema = pSchema->Dump();
-							allDescriptors.push_back(std::move(d));
+									Ai::CommandDescriptor d;
+									d.name = cName;
+									if (const auto* descVal = item.Find("description")) d.description = descVal->AsString();
+									if (const auto* effVal = item.Find("effect")) d.effect = Ai::StringToCommandEffect(effVal->AsString());
+									if (const auto* scpVal = item.Find("scope")) d.scope = Ai::StringToCommandScope(scpVal->AsString());
+									if (const auto* pSchema = item.Find("params_schema")) d.paramsSchema = pSchema->Dump();
+									m_RemoteCommands.push_back(std::move(d));
+								}
+							}
 						}
 					}
+					if (m_RemoteCommands.empty())
+						std::this_thread::sleep_for(std::chrono::milliseconds(100));
 				}
+				m_RemoteCommandsLoaded = true;
 			}
+			for (const auto& remote : m_RemoteCommands)
+				allDescriptors.push_back(remote);
 		}
 
 		auto& core = Agent::WeAgentCore::Get();

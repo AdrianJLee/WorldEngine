@@ -37,7 +37,7 @@ namespace World
 	// "不挂载任何项目"必须在 Application 构造**之前**生效:Application 的基类构造函数会
 	// 依次 MountProjectContent() 与 Renderer::Init(),两者都按"进程 CWD + World::Paths"
 	// 定位项目清单(见 Engine/src/World/Asset/ProjectManifest.cpp 的 Locate):
-	//   1) World::Paths 的项目根覆盖成哨兵目录(不存在)⇒ 编译期默认(空的 projects/ 容器)不命中;
+	//   1) World::Paths 的项目根覆盖成哨兵目录(不存在)⇒ 编译期默认(build/no-project)不命中;
 	//   2) 构造期间把 CWD 临时切到 Editor.exe 所在目录(与双击 exe 的 CWD 一致)⇒
 	//      `cwd/project.we.yaml` 与"当前项目根"两条兜底也不命中;
 	//   3) 作用域结束(Application 构造完成)恢复原 CWD —— 之后按 CWD 解析的东西

@@ -1,4 +1,4 @@
-#include "World/Agent/WeAgentCore.h"
+﻿#include "World/Agent/WeAgentCore.h"
 #include "World/Plugins/PluginManifest.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/WUI/WuiJson.h"
@@ -101,7 +101,12 @@ int main()
 	const fs::path tempProj = fs::current_path() / "build" / "tmp_test_studio";
 	std::error_code ec;
 	fs::remove_all(tempProj, ec);
-	fs::create_directories(tempProj, ec);
+	fs::create_directories(tempProj / "assets", ec);
+	{
+		// StudioValidator 现在会真实检查项目清单与内容根。
+		std::ofstream manifest(tempProj / "project.we.yaml");
+		manifest << "id: AiStudioTest\nname: AiStudioTest\nversion: 1.0.0\ncontent_root: assets\n";
+	}
 
 	std::string createdBugId;
 	{
@@ -203,15 +208,31 @@ int main()
 		{
 			StudioPolicy stubPolicy("default", tempProj.string());
 
-			// 构造一个包含 20 个全白模 Cube 实体且无光源的假 3D 关卡
+			// 构造一个真实可加载、但包含 20 个全白模 Cube 且无光源的关卡包。
+			// 必须走 .wlevel + levels/<Id>/entities 的正式关卡结构,门禁才会按真实组件统计。
+			const fs::path stubScene = tempProj / "assets" / "scenes" / "StubRace.wlevel";
 			const fs::path stubLevelDir = tempProj / "assets" / "levels" / "StubRace" / "entities";
 			std::error_code ecStub;
+			fs::create_directories(stubScene.parent_path(), ecStub);
 			fs::create_directories(stubLevelDir, ecStub);
+			{
+				std::ofstream manifest(stubScene);
+				manifest << "Id: StubRace\nName: StubRace\nGridCellSize: 64\n"
+				         << "DataLayers:\n  - Mask: 1\n    Name: Base_World\n    DefaultActive: true\n";
+			}
 
 			for (int i = 0; i < 20; ++i)
 			{
 				std::ofstream f(stubLevelDir / (std::to_string(2000 + i) + ".entity"));
-				f << "Entity:\n  World::MeshRendererComponent:\n    Primitive: 0\n    Mesh: \"\"\n    Material: \"\"\n";
+				f << "ChunkID: 0\nEntity:\n"
+				  << "  World::UUIDComponent:\n    ID:\n      m_UUID: " << (2000 + i) << "\n"
+				  << "  World::TagComponent:\n    Tag: \"Stub" << i << "\"\n"
+				  << "  World::MeshRendererComponent:\n    Primitive: 0\n    Mesh: \"\"\n    Material: \"\"\n";
+			}
+			{
+				std::ofstream manifest(tempProj / "project.we.yaml");
+				manifest << "id: AiStudioGateTest\nname: AiStudioGateTest\nversion: 1.0.0\n"
+				         << "content_root: assets\nstart_scene: scenes/StubRace.wlevel\n";
 			}
 
 			// 也写入一个脚本满足脚本存在性

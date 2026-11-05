@@ -1,5 +1,7 @@
 #include "wldpch.h"
 #include "World/Ai/PlaytestRunner.h"
+#include "World/Schema/Schema.h"
+#include "World/Level/Authoring/LevelPackage.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/WUI/WuiJson.h"
 #include "World/Scene/Components.h"
@@ -11,6 +13,7 @@
 
 #include <yaml-cpp/yaml.h>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -190,6 +193,7 @@ namespace World::Ai
 
 		std::unique_ptr<WorldContext> localContext;
 		std::unique_ptr<Scene> localScene;
+		Ref<Scene> packagedScene;
 		Scene* targetScene = activeScene;
 
 		if (!targetScene)
@@ -223,8 +227,44 @@ namespace World::Ai
 					}
 				}
 
-				if (!foundScene.empty())
+				if (foundScene.empty())
 				{
+					result.logs.push_back("Scene file not found: " + config.scenePath);
+					result.failures.push_back("playtest: scene file not found: " + config.scenePath);
+					result.pass = false;
+				}
+				else if (foundScene.extension() == ".wlevel")
+				{
+					// 真实关卡包:逐实体反序列化**全部组件**(MeshRenderer/Camera/Light/RigidBody/Script…),
+					// 不是只读 Tag+Transform 的假加载。
+					WorldContext& context = localContext ? *localContext : Application::Get().GetContext();
+					Level::LevelPackage package;
+					std::string loadError;
+					if (!package.Load(foundScene, &loadError))
+					{
+						result.logs.push_back("Failed to load level package: " + loadError);
+						result.failures.push_back("playtest: level package load failed: " + loadError);
+						result.pass = false;
+					}
+					else
+					{
+						packagedScene = package.Instantiate(context);
+						if (!packagedScene)
+						{
+							result.failures.push_back("playtest: level package instantiate failed");
+							result.pass = false;
+						}
+						else
+						{
+							targetScene = packagedScene.get();
+							result.logs.push_back("Loaded level package '" + foundScene.string() + "' (" +
+								std::to_string(GetSceneEntityCount(targetScene)) + " entities, all components).");
+						}
+					}
+				}
+				else
+				{
+					// 兼容历史测试用的 Entities YAML(只有 Tag/Transform)。真实工程必须走 .wlevel。
 					try
 					{
 						YAML::Node sDoc = YAML::LoadFile(foundScene.string());
@@ -239,6 +279,7 @@ namespace World::Ai
 									name = entityNode["Tag"].as<std::string>();
 
 								Entity ent = targetScene->CreateEntityShell(name);
+								ent.AddComponent<TransformComponent>();
 								if (entityNode["TransformComponent"])
 								{
 									auto& tc = ent.GetComponent<TransformComponent>();
@@ -257,18 +298,16 @@ namespace World::Ai
 									}
 								}
 							}
-							result.logs.push_back("Loaded scene '" + foundScene.string() + "' (" +
-								std::to_string(GetSceneEntityCount(targetScene)) + " entities).");
+							result.logs.push_back("Loaded legacy Entities YAML '" + foundScene.string() + "' (" +
+								std::to_string(GetSceneEntityCount(targetScene)) + " entities; Tag+Transform only).");
 						}
 					}
 					catch (const std::exception& e)
 					{
 						result.logs.push_back("Failed to parse scene YAML: " + std::string(e.what()));
+						result.failures.push_back("playtest: scene YAML parse failed: " + std::string(e.what()));
+						result.pass = false;
 					}
-				}
-				else
-				{
-					result.logs.push_back("Scene file not found: " + config.scenePath);
 				}
 			}
 		}
@@ -299,24 +338,66 @@ namespace World::Ai
 		const auto end = std::chrono::high_resolution_clock::now();
 		const double durationMs = std::chrono::duration<double, std::milli>(end - start).count();
 
-		// 生成快照
+		// 快照:headless 没有渲染面,绝不伪造像素。
+		// 真实画面证据走编辑器 AI 通道的 capture.scene / capture.screen(WeMcp 会自动拉起 Editor)。
 		for (const auto& capPath : config.captures)
+			result.logs.push_back("capture skipped: '" + capPath + "' (headless playtest has no render surface; use capture.scene via Editor MCP)");
+
+		// 真实场景报告:让模型与门禁都能核对"场景里到底有什么"。
 		{
-			const fs::path p = fs::u8path(capPath);
-			std::error_code ec;
-			fs::create_directories(p.parent_path(), ec);
-			std::ofstream out(p, std::ios::binary);
-			if (out)
+			const auto& registry = targetScene->GetRegistry();
+			size_t cameras = 0, lights = 0, meshes = 0, meshWithAsset = 0, bodies = 0, audioSources = 0, healthEntities = 0;
+			glm::vec3 bboxMin { 0.0f }, bboxMax { 0.0f };
+			bool hasBounds = false;
+			for (auto handle : registry.view<TagComponent>())
 			{
-				out << "P6\n32 32\n255\n";
-				for (int i = 0; i < 32 * 32 * 3; ++i)
-					out.put(static_cast<char>((i * 7) % 256));
-				result.captures.push_back(p.string());
-				result.logs.push_back("Captured frame snapshot to: " + p.string());
+				if (registry.all_of<CameraComponent>(handle)) ++cameras;
+				if (registry.all_of<DirectionalLightComponent>(handle) || registry.all_of<PointLightComponent>(handle) ||
+					registry.all_of<AmbientLightComponent>(handle)) ++lights;
+				if (registry.all_of<RigidBody2DComponent>(handle) || registry.all_of<RigidBody3DComponent>(handle) ||
+					registry.all_of<BoxCollider2DComponent>(handle) || registry.all_of<BoxCollider3DComponent>(handle)) ++bodies;
+				if (registry.all_of<AudioSourceComponent>(handle)) ++audioSources;
+				if (registry.all_of<HealthComponent>(handle)) ++healthEntities;
+				if (const auto* mesh = registry.try_get<MeshRendererComponent>(handle))
+				{
+					++meshes;
+					if (!StringPool::Get().PathOf(mesh->Mesh.Path).empty() || !StringPool::Get().PathOf(mesh->Material.Path).empty())
+						++meshWithAsset;
+				}
+				if (const auto* transform = registry.try_get<TransformComponent>(handle))
+				{
+					const glm::vec3 p = transform->Location;
+					if (!hasBounds) { bboxMin = p; bboxMax = p; hasBounds = true; }
+					else { bboxMin = glm::min(bboxMin, p); bboxMax = glm::max(bboxMax, p); }
+				}
 			}
+
+			JsonValue report;
+			report.type = JsonValue::Type::Object;
+			report.Object.push_back({ "entities", JsonValue::MakeNumber(static_cast<double>(GetSceneEntityCount(targetScene))) });
+			report.Object.push_back({ "cameras", JsonValue::MakeNumber(static_cast<double>(cameras)) });
+			report.Object.push_back({ "lights", JsonValue::MakeNumber(static_cast<double>(lights)) });
+			report.Object.push_back({ "meshes", JsonValue::MakeNumber(static_cast<double>(meshes)) });
+			report.Object.push_back({ "meshes_with_asset", JsonValue::MakeNumber(static_cast<double>(meshWithAsset)) });
+			report.Object.push_back({ "physics_bodies", JsonValue::MakeNumber(static_cast<double>(bodies)) });
+			report.Object.push_back({ "audio_sources", JsonValue::MakeNumber(static_cast<double>(audioSources)) });
+			report.Object.push_back({ "health_entities", JsonValue::MakeNumber(static_cast<double>(healthEntities)) });
+			if (hasBounds)
+			{
+				JsonValue minArr; minArr.type = JsonValue::Type::Array;
+				minArr.Array.push_back(JsonValue::MakeNumber(bboxMin.x));
+				minArr.Array.push_back(JsonValue::MakeNumber(bboxMin.y));
+				minArr.Array.push_back(JsonValue::MakeNumber(bboxMin.z));
+				JsonValue maxArr; maxArr.type = JsonValue::Type::Array;
+				maxArr.Array.push_back(JsonValue::MakeNumber(bboxMax.x));
+				maxArr.Array.push_back(JsonValue::MakeNumber(bboxMax.y));
+				maxArr.Array.push_back(JsonValue::MakeNumber(bboxMax.z));
+				report.Object.push_back({ "bbox_min", std::move(minArr) });
+				report.Object.push_back({ "bbox_max", std::move(maxArr) });
+			}
+			result.logs.push_back("scene_report: " + report.Dump());
 		}
 
-		// 执行断言
 		for (const auto& assertStr : config.asserts)
 		{
 			if (assertStr == "entity_count > 0")
@@ -372,21 +453,55 @@ namespace World::Ai
 			else if (assertStr.rfind("component:", 0) == 0)
 			{
 				const size_t pos = assertStr.find(" exists");
-				if (pos != std::string::npos)
+				if (pos == std::string::npos)
+				{
+					result.failures.push_back("Assertion failed: " + assertStr + " (expected 'component:<Type> exists')");
+					result.pass = false;
+				}
+				else
 				{
 					const std::string comp = assertStr.substr(10, pos - 10);
+					const Schema::TypeSchema* schema = targetScene->GetContext().Schemas().Find(comp);
+					if (!schema)
+					{
+						for (const auto* candidate : targetScene->GetContext().Schemas().List(Schema::TypeCategory::Component))
+						{
+							if (!candidate)
+								continue;
+							const size_t sep = candidate->Id.Name.rfind("::");
+							const std::string shortName = sep == std::string::npos ? candidate->Id.Name : candidate->Id.Name.substr(sep + 2);
+							if (shortName == comp || candidate->DisplayName == comp)
+							{
+								schema = candidate;
+								break;
+							}
+						}
+					}
 					bool found = false;
-					if (comp == "TransformComponent")
-						found = !targetScene->GetRegistry().view<TransformComponent>().empty();
-					else if (comp == "TagComponent")
-						found = !targetScene->GetRegistry().view<TagComponent>().empty();
-					else if (comp == "CameraComponent")
-						found = !targetScene->GetRegistry().view<CameraComponent>().empty();
-
+					if (schema && schema->Storage)
+					{
+						auto& registry = targetScene->GetRegistry();
+						auto* storage = registry.storage(schema->Storage->ComponentId);
+						found = storage && !storage->empty();
+					}
 					if (!found)
 					{
 						result.failures.push_back("Assertion failed: Component '" + comp + "' does not exist in scene");
 						result.pass = false;
+					}
+				}
+			}
+			else if (assertStr == "no_nan")
+			{
+				for (auto entityHandle : targetScene->GetRegistry().view<TransformComponent>())
+				{
+					const auto& trans = targetScene->GetRegistry().get<TransformComponent>(entityHandle);
+					const glm::vec3 p = trans.Location;
+					if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+					{
+						result.failures.push_back("Assertion failed: no_nan (entity " + std::to_string(static_cast<uint32_t>(entityHandle)) + " has non-finite transform)");
+						result.pass = false;
+						break;
 					}
 				}
 			}
@@ -408,13 +523,16 @@ namespace World::Ai
 			}
 			else if (assertStr.rfind("luau:", 0) == 0)
 			{
+				// 以前这里只把字面量 false 判失败，其余静默通过 —— 那是假自证。
 				const std::string expr = assertStr.substr(5);
-				if (expr == "false" || expr == "1 == 0")
+				if (expr != "true")
 				{
-					result.failures.push_back("Assertion failed: " + assertStr);
+					result.failures.push_back("Assertion failed: " + assertStr +
+						" (luau expressions are not executed by playtest; use entity:/component:/no_void_fall or run Runtime)");
 					result.pass = false;
 				}
 			}
+
 		}
 
 		const double avgStepMs = result.framesSimulated > 0 ? (durationMs / result.framesSimulated) : 0.0;

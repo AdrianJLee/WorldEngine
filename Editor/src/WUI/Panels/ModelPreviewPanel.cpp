@@ -5144,7 +5144,7 @@ float ModelPreviewPanel::DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& 
 		for (char& c : cleanName)
 			if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
 
-		std::filesystem::path dir = "projects/default/assets/animation";
+		std::filesystem::path dir = World::Paths::AssetRoot() / "animation";
 		if (!std::filesystem::exists(dir))
 			std::filesystem::create_directories(dir);
 		std::filesystem::path target = dir / (cleanName + ".wclip");
@@ -5199,7 +5199,7 @@ float ModelPreviewPanel::DrawTabClips(Wui::WuiContext& ctx, const Wui::WuiRect& 
 		for (char& c : cleanName)
 			if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
 
-		std::filesystem::path dir = "projects/default/assets/animation";
+		std::filesystem::path dir = World::Paths::AssetRoot() / "animation";
 		if (!std::filesystem::exists(dir))
 			std::filesystem::create_directories(dir);
 		std::filesystem::path target = dir / (cleanName + ".wclip");

@@ -74,7 +74,6 @@ namespace World
 			std::filesystem::path(path),
 			Paths::AssetRoot() / path,
 			Paths::ProjectDir() / path,
-			std::filesystem::current_path() / "projects/default" / path,
 			std::filesystem::current_path() / "templates/project-example" / path,
 			std::filesystem::current_path() / path
 		};
@@ -143,8 +142,6 @@ namespace World
 			(Paths::ProjectDir() / "assets/audio").generic_string(),
 			"assets/audio/events",
 			"assets/audio",
-			"projects/default/assets/audio/events",
-			"projects/default/assets/audio",
 			"templates/project-example/assets/audio/events",
 			"templates/project-example/assets/audio"
 		};
@@ -214,7 +211,6 @@ namespace World
 			p,
 			Paths::AssetRoot() / p,
 			Paths::ProjectDir() / p,
-			std::filesystem::current_path() / "projects/default" / p,
 			std::filesystem::current_path() / "templates/project-example" / p,
 			std::filesystem::current_path() / p
 		};

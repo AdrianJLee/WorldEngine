@@ -101,10 +101,6 @@ namespace World
 		if (std::filesystem::exists(primary, ec))
 			searchRoots.push_back(primary);
 
-		std::filesystem::path projAssets = std::filesystem::current_path() / "projects" / "assets";
-		if (std::filesystem::exists(projAssets, ec))
-			searchRoots.push_back(projAssets);
-
 		std::filesystem::path templateAssets = std::filesystem::current_path() / "templates" / "project-example" / "assets";
 		if (std::filesystem::exists(templateAssets, ec))
 			searchRoots.push_back(templateAssets);

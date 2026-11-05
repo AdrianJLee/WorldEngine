@@ -189,7 +189,7 @@ std::string JsonEscape(const std::string& text){
 	// 的 LauncherBootScope 注释;这里把"三个动作"落成代码:哨兵项目根 + 临时 CWD + 恢复。
 LauncherBootScope::LauncherBootScope(){
 		// 1) 项目根 → 哨兵目录(不创建、不读):让 ProjectManifest::Locate 的第 2 步
-		//    (World::Paths::ProjectFile)不命中编译期默认值(空的 projects/ 容器)。
+		//    (World::Paths::ProjectFile)不命中编译期默认值(build/no-project 哨兵)。
 		World::Paths::SetProjectDirOverride(std::filesystem::path(WLD_LOCAL_DIR) / "launcher-stub");
 
 		// 2) CWD → Editor.exe 所在目录(双击 exe 时 Explorer 给的 CWD):

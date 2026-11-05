@@ -627,7 +627,7 @@ namespace World::Ai
 		if (!projectRoot.empty())
 			candidates.push_back(fs::u8path(projectRoot) / "assets/scripts/intermediate/WorldEngineAPI.luau");
 
-		candidates.push_back(fs::current_path() / "projects/assets/scripts/intermediate/WorldEngineAPI.luau");
+		candidates.push_back(Paths::AssetRoot() / "scripts/intermediate/WorldEngineAPI.luau");
 		candidates.push_back(fs::current_path() / "templates/project-example/assets/scripts/intermediate/WorldEngineAPI.luau");
 		candidates.push_back(fs::current_path() / "tests/fixtures/content/scripts/intermediate/WorldEngineAPI.luau");
 

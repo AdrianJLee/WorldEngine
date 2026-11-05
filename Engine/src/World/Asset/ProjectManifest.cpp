@@ -1446,7 +1446,7 @@ namespace World::Asset
 				*manifestPath = workingManifest;
 			return true;
 		}
-		// 2. **当前项目根**下的清单:编译期默认 = <repo>/projects/(不含项目,只有容器目录),
+		// 2. **当前项目根**下的清单:编译期默认 = <repo>/build/no-project/(哨兵,不含项目),
 		//    可被 --project / WLD_PROJECT_DIR 覆盖。这是"打开任意位置项目"的入口 ——
 		//    换了项目根,清单就必须跟着换。
 		const std::filesystem::path projectManifest = World::Paths::ProjectFile("project.we.yaml");

@@ -251,8 +251,9 @@ static void GenerateSampleDefaultTerrainAsset()
 {
 	TerrainData terrain(256, 256, 2.0f, 1.0f);
 	terrain.GenerateProceduralLandscape(2026);
-	std::filesystem::create_directories("projects/default/assets/terrains");
-	terrain.SaveToFile("projects/default/assets/terrains/default.wterrain");
+	// Tests write under build/ only; the repo root no longer grows a projects/ tree.
+	std::filesystem::create_directories("build/tmp/project-assets/terrains");
+	terrain.SaveToFile("build/tmp/project-assets/terrains/default.wterrain");
 	std::cout << "[PASS] GenerateSampleDefaultTerrainAsset\n";
 }
 

@@ -107,13 +107,13 @@ target_compile_definitions(World PUBLIC
     WLD_LOCAL_DIR="${WLD_ENGINE_ROOT}/local/"
     # WLD_GAME_DIR = Game **模块**目录(只放 gameplay DLL 源码);项目内容根见 WLD_PROJECT_DIR。
     WLD_GAME_DIR="${WLD_ENGINE_ROOT}/Game/"
-    # Layout-S7:项目内容(清单/关卡表/assets)在 projects/<名>/。
-    # PROJ-7/T3:引擎不再内置默认项目 —— projects/ 只是"项目默认放在仓库里"的容器目录
-    # (见 projects/README.md),本身不是项目。宏名与运行期语义不变:--project / 环境变量
-    # WLD_PROJECT_DIR 仍是唯一入口;下面两个默认值指向不存在的资产目录是**有意的**
-    # (= "没有当前项目":没有清单就没有内容根,宿主据此只出项目启动器)。
-    WLD_PROJECT_DIR="${WLD_ENGINE_ROOT}/projects/"
-    WLD_ASSETPATH="${WLD_ENGINE_ROOT}/projects/assets"
+    # Layout-S7:项目内容(清单/关卡表/assets)由项目清单决定,与仓库布局无关。
+    # PROJ-7/T3 + 2026-11-05:引擎不再内置默认项目,仓库根也不再保留 projects/ 示例容器。
+    # 宏名与运行期语义不变:--project / 环境变量 WLD_PROJECT_DIR 仍是唯一入口;下面两个
+    # 默认值指向 build/ 下的 **disposable 哨兵目录**(不存在 = "没有当前项目"),这样
+    # "没有项目"时任何内容根写入都落在构建目录里,不会在仓库根长出 projects/。
+    WLD_PROJECT_DIR="${WLD_ENGINE_ROOT}/build/no-project/"
+    WLD_ASSETPATH="${WLD_ENGINE_ROOT}/build/no-project/assets"
     # PROJ-7/T1:测试夹具内容根 —— 只给 tests/ 用,把"测试真的读的项目内容"从项目目录搬进
     # 仓库内夹具(tests/fixtures/content);WLD_PROJECT_DIR / WLD_ASSETPATH 的运行期语义不变。
     WLD_TEST_ASSETPATH="${WLD_ENGINE_ROOT}/tests/fixtures/content"

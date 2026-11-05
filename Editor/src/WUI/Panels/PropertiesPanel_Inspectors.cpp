@@ -4144,7 +4144,7 @@ float PropertiesPanel::DrawAudioSourceInspector(Wui::WuiContext& ctx, const Wui:
 				std::ifstream in(p);
 				if (!in.is_open() && !p.is_absolute())
 				{
-					std::filesystem::path candidate = std::filesystem::current_path() / "projects" / "default" / p;
+					std::filesystem::path candidate = World::Paths::AssetRoot() / p;
 					if (std::filesystem::exists(candidate)) in.open(candidate);
 				}
 				if (in.is_open())

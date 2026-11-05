@@ -124,3 +124,19 @@ WorldEngine AI 原生游戏研发职能流程与任务/缺陷管理系统（AI G
 - `src/AgentsDocGenerator.h` / `src/AgentsDocGenerator.cpp`：自动生成项目根目录的 `AGENTS.md` 团队守则；
 - `src/StudioPlugin.cpp`：插件 ABI 入口、策略注入与 WUI 面板；
 - `presets/**`：包含 7 套全品类预设的 roles 与 process 规则配置。
+
+---
+
+## 5. AI 创作闭环（2026-11-05）
+
+除了任务/门禁，`we-studio` 现在提供“能真正做游戏”的命令面：
+
+- **真实建关**：`scene.create_level`（写 `.wlevel` + `levels/<Id>/entities/`）、`scene.open`、`scene.save`
+- **真实实体**：`scene.create_entity`、`scene.delete_entity`
+- **真实组件**：`scene.add_component`、`scene.remove_component`、`scene.set`（schema 反射，含插件组件）
+- **受审计写盘**：`changeset.begin` → `changeset.stage_write` → `changeset.apply`（`diff` / `revert` 可用）
+- **真实取证**：`playtest.run`（加载 `.wlevel` 全组件、真实推帧、`no_nan`/`component:` 断言）、`capture.scene`（真 PNG）
+- **标准注入**：`studio.guide.get` 返回 `good_game_standard.md` + 当前角色守则
+
+门禁不再接受字符串自证：相机/光照/真实 `.wmodel/.wmat`、刚体/碰撞、`HealthComponent`/`BehaviorTreeComponent`、
+可解析的 `.wsound` 引用与脚本系统接线都是硬性物理检查；未知产出物必须有 `.we/studio/{artifacts,reports}/` 下的真实文件。

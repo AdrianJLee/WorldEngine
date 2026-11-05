@@ -1,4 +1,4 @@
-#include "EngineBridge.h"
+﻿#include "EngineBridge.h"
 #include "World/Plugins/PluginManager.h"
 #include "World/Core/WorldContext.h"
 #include "World/WUI/WuiJson.h"
@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -34,6 +35,17 @@ namespace World::Mcp
 
 	namespace
 	{
+		// 把 MCP 启动决策写入项目内日志:连接失败时用户能直接看到"为什么降级"。
+		void AppendBootLog(const std::string& projectDir, const std::string& line)
+		{
+			const fs::path root = projectDir.empty() ? World::Paths::ProjectDir() : fs::u8path(projectDir);
+			std::error_code ec;
+			fs::create_directories(root / ".we" / "ai", ec);
+			std::ofstream out(root / ".we" / "ai" / "mcp-boot.log", std::ios::app);
+			if (out)
+				out << line << "\n";
+		}
+
 		void InitWinsock()
 		{
 			static bool s_Init = false;
@@ -136,13 +148,15 @@ namespace World::Mcp
 			? fs::path(WLD_REPO_ROOT)
 			: fs::current_path();
 
+		// Editor 才是完整创作面的宿主(scene/material/asset/capture.*);
+		// Runtime 目前没有 --ai-control 服务端,放在后面只作未来兜底。
 		std::vector<fs::path> hostCandidates = {
-			fs::path(WLD_BINARY_ROOT) / "Runtime" / WLD_BUILD_TYPE / "Runtime.exe",
-			fs::path(WLD_BINARY_ROOT) / "Runtime" / "Debug" / "Runtime.exe",
-			repoRoot / "build" / "x64-Debug" / "Runtime" / "Debug" / "Runtime.exe",
 			fs::path(WLD_BINARY_ROOT) / "Editor" / WLD_BUILD_TYPE / "Editor.exe",
 			fs::path(WLD_BINARY_ROOT) / "Editor" / "Debug" / "Editor.exe",
-			repoRoot / "build" / "x64-Debug" / "Editor" / "Debug" / "Editor.exe"
+			repoRoot / "build" / "x64-Debug" / "Editor" / "Debug" / "Editor.exe",
+			fs::path(WLD_BINARY_ROOT) / "Runtime" / WLD_BUILD_TYPE / "Runtime.exe",
+			fs::path(WLD_BINARY_ROOT) / "Runtime" / "Debug" / "Runtime.exe",
+			repoRoot / "build" / "x64-Debug" / "Runtime" / "Debug" / "Runtime.exe"
 		};
 
 		fs::path hostExe;
@@ -192,9 +206,9 @@ namespace World::Mcp
 		m_LaunchedProcessHandle = reinterpret_cast<uintptr_t>(pi.hProcess);
 
 		// 轮询等待 Headless 宿主端口就绪
-		for (int attempt = 0; attempt < 15; ++attempt)
+		for (int attempt = 0; attempt < 40; ++attempt)
 		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			std::this_thread::sleep_for(std::chrono::milliseconds(250));
 			if (TryConnectSocket(port))
 				return true;
 		}
@@ -220,17 +234,26 @@ namespace World::Mcp
 		if (TryConnectSocket(targetPort))
 		{
 			m_ReadOnlyFallback = false;
+			AppendBootLog(projectDir, "[ok] connected to existing AI control host on 127.0.0.1:" + std::to_string(targetPort));
 			return true;
 		}
 
 		const char* autoLaunchEnv = std::getenv("WLD_MCP_AUTO_LAUNCH");
-		if (allowAutoLaunchHeadless || (autoLaunchEnv && std::string(autoLaunchEnv) == "1"))
+		const bool allowAutoLaunch = allowAutoLaunchHeadless || (autoLaunchEnv && std::string(autoLaunchEnv) == "1");
+		if (allowAutoLaunch)
 		{
+			AppendBootLog(projectDir, "[info] no host on 127.0.0.1:" + std::to_string(targetPort) + "; launching Editor headless");
 			if (TryLaunchHeadlessHost(targetPort, projectDir))
 			{
 				m_ReadOnlyFallback = false;
+				AppendBootLog(projectDir, "[ok] launched Editor headless and connected on 127.0.0.1:" + std::to_string(targetPort));
 				return true;
 			}
+			AppendBootLog(projectDir, "[warn] Editor headless did not open the AI control port; falling back to embedded headless");
+		}
+		else
+		{
+			AppendBootLog(projectDir, "[warn] auto-launch disabled; embedded headless fallback (creative Editor commands unavailable)");
 		}
 
 		m_ConnectedToRemote = false;

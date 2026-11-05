@@ -3,6 +3,7 @@
 #include "World/Ai/VfxCommands.h"
 #include "World/Ai/SelfValidation.h"
 #include "World/Ai/PlaytestRunner.h"
+#include "World/Ai/SceneAuthoring.h"
 #include "World/Ai/ProjectPackager.h"
 #include "World/Ai/WriteGuard.h"
 #include "World/Ai/ChangesetTracker.h"
@@ -89,6 +90,7 @@ namespace World::Ai
 				RegisterCommand(std::move(capabilitiesCmd));
 		SelfValidation::RegisterCommands(*this);
 		PlaytestRunner::RegisterCommands(*this);
+		SceneAuthoring::RegisterCommands(*this);
 		ProjectPackager::RegisterCommands(*this);
 		ChangesetTracker::RegisterCommands(*this);
 		Agent::WeAgentCore::RegisterCommands(*this);

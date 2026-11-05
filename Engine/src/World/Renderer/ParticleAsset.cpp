@@ -797,10 +797,6 @@ out << YAML::EndMap;
 				return std::filesystem::absolute(fromAssetRoot);
 		}
 
-		// Check projects/assets
-		std::filesystem::path fromProj = std::filesystem::current_path() / "projects" / "assets" / p;
-		if (std::filesystem::exists(fromProj, ec) && std::filesystem::is_regular_file(fromProj, ec))
-			return std::filesystem::absolute(fromProj);
 
 		// Check relative to EngineContentRoot
 		const auto& engineRoot = World::Paths::EngineContentRoot();

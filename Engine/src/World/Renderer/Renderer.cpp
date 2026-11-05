@@ -1,4 +1,4 @@
-#include "wldpch.h"
+﻿#include "wldpch.h"
 #include "World/Renderer/Renderer.h"
 
 #include "World/Asset/ProjectManifest.h"
@@ -1181,6 +1181,11 @@ namespace World
 		}
 	}
 
+	namespace
+	{
+		void WriteRgbImage(const std::filesystem::path& path, uint32_t width, uint32_t height,
+			const uint8_t* rgb, bool bottomUp);
+	}
 	void Renderer::RequestPresentCapture(PresentTarget* target, const std::filesystem::path& path,
 		uint32_t width, uint32_t height)
 	{
@@ -1259,38 +1264,148 @@ namespace World
 				WLD_CORE_ERROR("[capture] present readback buffer is not mappable");
 				continue;
 			}
-			std::ofstream file(pending.Path, std::ios::binary | std::ios::trunc);
-			if (!file)
-			{
-				readback->Unmap();
-				WLD_CORE_ERROR("[capture] cannot open {0}", pending.Path.string());
-				continue;
-			}
-			file << "P6\n" << pending.Width << " " << pending.Height << "\n255\n";
-			// 通道顺序:Vulkan 交换链是 B8G8R8A8(实测面板底色被抓成 (33,32,31),
-			// 正确值是 (31,32,33)),必须按源格式把 B/R 换回 PPM 的 R,G,B。
+			std::vector<uint8_t> rgb(static_cast<size_t>(pending.Width) * pending.Height * 3);
 			const Rhi::Format sourceFormat = active.Image->GetDesc().Format;
 			const bool sourceIsBgra = sourceFormat == Rhi::Format::B8G8R8A8_UNORM
 				|| sourceFormat == Rhi::Format::B8G8R8A8_SRGB;
-			std::vector<uint8_t> row(static_cast<size_t>(pending.Width) * 3);
 			for (uint32_t y = 0; y < pending.Height; ++y)
 			{
-				// 行序:Vulkan 的 vkCmdCopyImageToBuffer 第 0 行就是图像**顶部**
-				// (与 OpenGL glReadPixels 的"第 0 行是底部"相反),这里不能翻转。
-				// 历史 bug:此前照 GL 约定多翻一次,导致 Vulkan 抓图整幅纵向镜像
-				// (曾误判为 WUI/投影问题;实测"翻转行序后与 OpenGL 只差 0.013%")。
 				const uint8_t* source = pixels + static_cast<size_t>(y) * pending.Width * 4;
+				uint8_t* dest = rgb.data() + static_cast<size_t>(y) * pending.Width * 3;
 				for (uint32_t x = 0; x < pending.Width; ++x)
 				{
-					row[x * 3 + 0] = sourceIsBgra ? source[x * 4 + 2] : source[x * 4 + 0];
-					row[x * 3 + 1] = source[x * 4 + 1];
-					row[x * 3 + 2] = sourceIsBgra ? source[x * 4 + 0] : source[x * 4 + 2];
+					dest[x * 3 + 0] = sourceIsBgra ? source[x * 4 + 2] : source[x * 4 + 0];
+					dest[x * 3 + 1] = source[x * 4 + 1];
+					dest[x * 3 + 2] = sourceIsBgra ? source[x * 4 + 0] : source[x * 4 + 2];
 				}
-				file.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size()));
 			}
-			readback->Unmap();
+			WriteRgbImage(pending.Path, pending.Width, pending.Height, rgb.data(), false);			readback->Unmap();
 			WLD_CORE_INFO("[capture] wrote present target {0} ({1}x{2})",
 				pending.Path.string(), pending.Width, pending.Height);
+		}
+	}
+
+		namespace
+	{
+		// 截图落盘:`.png` 走自带的 8-bit RGB PNG 编码(无外部依赖),
+		// 其它扩展名保持原来的 PPM。此前 capture.scene 对 .png 路径写的是 PPM 字节,
+		// 模型/查看器拿到的是"扩展名说谎"的文件。
+		uint32_t PngCrc32(const uint8_t* data, size_t length)
+		{
+			uint32_t crc = 0xFFFFFFFFu;
+			for (size_t i = 0; i < length; ++i)
+			{
+				crc ^= data[i];
+				for (int k = 0; k < 8; ++k)
+					crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+			}
+			return ~crc;
+		}
+
+		void PutBE32(std::vector<uint8_t>& out, uint32_t value)
+		{
+			out.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
+			out.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
+			out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+			out.push_back(static_cast<uint8_t>(value & 0xFF));
+		}
+
+		void AppendPngChunk(std::vector<uint8_t>& png, const char type[4], const std::vector<uint8_t>& data)
+		{
+			PutBE32(png, static_cast<uint32_t>(data.size()));
+			const size_t typeStart = png.size();
+			for (int i = 0; i < 4; ++i)
+				png.push_back(static_cast<uint8_t>(type[i]));
+			png.insert(png.end(), data.begin(), data.end());
+			PutBE32(png, PngCrc32(png.data() + typeStart, 4 + data.size()));
+		}
+
+		bool WritePngRgb(const std::filesystem::path& path, uint32_t width, uint32_t height,
+			const uint8_t* rgb, bool bottomUp)
+		{
+			std::vector<uint8_t> raw;
+			raw.reserve((static_cast<size_t>(width) * 3 + 1) * height);
+			for (uint32_t y = 0; y < height; ++y)
+			{
+				const uint32_t sourceRow = bottomUp ? (height - 1 - y) : y;
+				const uint8_t* source = rgb + static_cast<size_t>(sourceRow) * width * 3;
+				raw.push_back(0);
+				raw.insert(raw.end(), source, source + static_cast<size_t>(width) * 3);
+			}
+
+			std::vector<uint8_t> zlib;
+			zlib.push_back(0x78);
+			zlib.push_back(0x01);
+			size_t offset = 0;
+			while (offset < raw.size())
+			{
+				const size_t block = std::min<size_t>(65535, raw.size() - offset);
+				const bool finalBlock = (offset + block) >= raw.size();
+				zlib.push_back(finalBlock ? 1 : 0);
+				zlib.push_back(static_cast<uint8_t>(block & 0xFF));
+				zlib.push_back(static_cast<uint8_t>((block >> 8) & 0xFF));
+				zlib.push_back(static_cast<uint8_t>((~block) & 0xFF));
+				zlib.push_back(static_cast<uint8_t>(((~block) >> 8) & 0xFF));
+				zlib.insert(zlib.end(), raw.begin() + static_cast<std::ptrdiff_t>(offset),
+					raw.begin() + static_cast<std::ptrdiff_t>(offset + block));
+				offset += block;
+			}
+			uint32_t a = 1;
+			uint32_t b = 0;
+			for (uint8_t byte : raw)
+			{
+				a = (a + byte) % 65521u;
+				b = (b + a) % 65521u;
+			}
+			PutBE32(zlib, (b << 16) | a);
+
+			std::vector<uint8_t> png = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+			std::vector<uint8_t> ihdr;
+			PutBE32(ihdr, width);
+			PutBE32(ihdr, height);
+			ihdr.push_back(8);
+			ihdr.push_back(2);
+			ihdr.push_back(0);
+			ihdr.push_back(0);
+			ihdr.push_back(0);
+			AppendPngChunk(png, "IHDR", ihdr);
+			AppendPngChunk(png, "IDAT", zlib);
+			AppendPngChunk(png, "IEND", {});
+
+			std::error_code ec;
+			std::filesystem::create_directories(path.parent_path(), ec);
+			std::ofstream out(path, std::ios::binary | std::ios::trunc);
+			if (!out)
+				return false;
+			out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+			return true;
+		}
+
+		void WriteRgbImage(const std::filesystem::path& path, uint32_t width, uint32_t height,
+			const uint8_t* rgb, bool bottomUp)
+		{
+			if (path.extension() == ".png")
+			{
+				if (WritePngRgb(path, width, height, rgb, bottomUp))
+					return;
+				WLD_CORE_ERROR("[capture] failed to write PNG {0}", path.string());
+			}
+
+			std::error_code ec;
+			std::filesystem::create_directories(path.parent_path(), ec);
+			std::ofstream file(path, std::ios::binary | std::ios::trunc);
+			if (!file)
+			{
+				WLD_CORE_ERROR("[capture] cannot open {0}", path.string());
+				return;
+			}
+			file << "P6\n" << width << " " << height << "\n255\n";
+			for (uint32_t y = 0; y < height; ++y)
+			{
+				const uint32_t sourceRow = bottomUp ? (height - 1 - y) : y;
+				file.write(reinterpret_cast<const char*>(rgb + static_cast<size_t>(sourceRow) * width * 3),
+					static_cast<std::streamsize>(width) * 3);
+			}
 		}
 	}
 
@@ -1344,30 +1459,19 @@ namespace World
 			WLD_CORE_ERROR("[capture] readback buffer is not mappable on this backend");
 			return false;
 		}
-		std::ofstream file(path, std::ios::binary | std::ios::trunc);
-		if (!file)
-		{
-			readback->Unmap();
-			WLD_CORE_ERROR("[capture] cannot open {0}", path.string());
-			return false;
-		}
-		file << "P6\n" << width << " " << height << "\n255\n";
-		// 行序:统一输出成**显示朝向**。场景纹理由 WUI 以 UV {0,1,1,-1} 贴到视口(上下翻转),
-		// 所以附件第 0 行实际显示在画面底部;这里翻一次,截图就是用户看到的方向。
-		// 两个后端用同一个约定(实测 GL/Vulkan 附件逐像素一致),因此双后端基线对比不受影响。
-		std::vector<uint8_t> row(static_cast<size_t>(width) * 3);
+		std::vector<uint8_t> rgb(static_cast<size_t>(width) * height * 3);
 		for (uint32_t y = 0; y < height; ++y)
 		{
 			const uint8_t* source = pixels + static_cast<size_t>(height - 1 - y) * width * 4;
+			uint8_t* dest = rgb.data() + static_cast<size_t>(y) * width * 3;
 			for (uint32_t x = 0; x < width; ++x)
 			{
-				row[x * 3 + 0] = source[x * 4 + 0];
-				row[x * 3 + 1] = source[x * 4 + 1];
-				row[x * 3 + 2] = source[x * 4 + 2];
+				dest[x * 3 + 0] = source[x * 4 + 0];
+				dest[x * 3 + 1] = source[x * 4 + 1];
+				dest[x * 3 + 2] = source[x * 4 + 2];
 			}
-			file.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size()));
 		}
-		readback->Unmap();
+		WriteRgbImage(path, width, height, rgb.data(), false);		readback->Unmap();
 		WLD_CORE_INFO("[capture] wrote texture {0} ({1}x{2})", path.string(), width, height);
 		return true;
 	}

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "World/Ai/CommandRegistry.h"
 #include "World/Agent/WeAgentCore.h"
@@ -24,7 +24,7 @@ namespace World::Mcp
 		EngineBridge();
 		~EngineBridge();
 
-		bool Initialize(uint16_t remotePort = 0, const std::string& projectDir = "", bool allowAutoLaunchHeadless = false);
+		bool Initialize(uint16_t remotePort = 0, const std::string& projectDir = "", bool allowAutoLaunchHeadless = true);
 		bool Dispatch(const std::string& cmd, const std::map<std::string, std::string>& args, std::string& outResult, std::string& outError);
 
 		bool IsConnectedToRemote() const { return m_ConnectedToRemote; }

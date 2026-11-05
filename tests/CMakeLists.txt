@@ -1,4 +1,4 @@
-# P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
+﻿# P2 W1:Luau 运行时封装(沙箱/错误定位),headless 可跑。
 add_executable(WorldLuauVmTests World/LuauVmTests.cpp)
 target_link_libraries(WorldLuauVmTests PRIVATE World)
 target_compile_features(WorldLuauVmTests PRIVATE cxx_std_17)
@@ -2128,6 +2128,29 @@ set_tests_properties(World.AiStudio PROPERTIES
     TIMEOUT 90
 )
 # M1: 物理材质资产系统 (.wphysmat) 单元测试
+# Headless 场景创作与会话落盘往返 (SceneAuthoring + changeset.stage_write)
+add_executable(WorldAiSceneAuthoringTests
+    World/AiSceneAuthoringTests.cpp
+)
+target_link_libraries(WorldAiSceneAuthoringTests PRIVATE World yaml-cpp)
+target_compile_features(WorldAiSceneAuthoringTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldAiSceneAuthoringTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldAiSceneAuthoringTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldAiSceneAuthoringTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.AiSceneAuthoring COMMAND WorldAiSceneAuthoringTests)
+set_tests_properties(World.AiSceneAuthoring PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+
 add_executable(WorldPhysicsMaterialTests World/PhysicsMaterialTests.cpp)
 target_link_libraries(WorldPhysicsMaterialTests PRIVATE World)
 target_compile_features(WorldPhysicsMaterialTests PRIVATE cxx_std_17)

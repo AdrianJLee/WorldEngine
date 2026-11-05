@@ -1,4 +1,4 @@
-#include "World/Agent/WeAgentCore.h"
+﻿#include "World/Agent/WeAgentCore.h"
 #include "World/Ai/CommandRegistry.h"
 #include "World/Ai/SelfValidation.h"
 #include "World/Ai/PlaytestRunner.h"
@@ -207,6 +207,16 @@ int main()
 
 		const std::string diff = tracker.GetChangesetDiff(csId);
 		CHECK(diff.find("hero.luau") != std::string::npos);
+
+		// AI 通道的受审计写入口:必须能通过命令真正落盘
+		std::string wres, werr;
+		CHECK(reg.Dispatch("changeset.stage_write", {
+			{ "id", csId },
+			{ "path", "assets/scripts/hero2.luau" },
+			{ "content", "-- second script\nreturn 2\n" },
+			{ "root", tempProj.string() }
+		}, wres, werr));
+		CHECK(fs::exists(tempProj / "assets" / "scripts" / "hero2.luau"));
 	}
 
 	// 6. 自动化试玩 (playtest.run) 模拟真实场景加载与断言
@@ -232,8 +242,18 @@ int main()
 		auto ptRes = PlaytestRunner::Run(ptCfg, nullptr);
 		CHECK(ptRes.pass);
 		CHECK(ptRes.framesSimulated == 30);
-		CHECK(!ptRes.captures.empty());
-		CHECK(fs::exists(tempProj / "qa" / "snap.ppm"));
+		// headless 没有渲染面:captures 必须为空,并在日志里明确说明,绝不伪造像素。
+		CHECK(ptRes.captures.empty());
+		CHECK(!fs::exists(tempProj / "qa" / "snap.ppm"));
+		bool sawCaptureSkip = false;
+		bool sawSceneReport = false;
+		for (const auto& line : ptRes.logs)
+		{
+			if (line.find("capture skipped") != std::string::npos) sawCaptureSkip = true;
+			if (line.find("scene_report:") != std::string::npos) sawSceneReport = true;
+		}
+		CHECK(sawCaptureSkip);
+		CHECK(sawSceneReport);
 	}
 
 	// 7. 执行与验收分离校验

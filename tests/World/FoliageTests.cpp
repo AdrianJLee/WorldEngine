@@ -765,8 +765,9 @@ static void GenerateSampleDefaultFoliageAsset()
 
 	foliage.PaintFoliageMulti(glm::vec3(50.0f, 0.0f, 50.0f), 30.0f, 3.0f, { 0, 1, 2, 3 }, nullptr);
 
-	std::filesystem::create_directories("projects/default/assets/foliage");
-	foliage.SaveToFile("projects/default/assets/foliage/default.wfoliage");
+	// Tests write under build/ only; the repo root no longer grows a projects/ tree.
+	std::filesystem::create_directories("build/tmp/project-assets/foliage");
+	foliage.SaveToFile("build/tmp/project-assets/foliage/default.wfoliage");
 	std::filesystem::create_directories("templates/project-example/assets/foliage");
 	foliage.SaveToFile("templates/project-example/assets/foliage/default.wfoliage");
 	std::cout << "[PASS] GenerateSampleDefaultFoliageAsset (4 species populated)\n";

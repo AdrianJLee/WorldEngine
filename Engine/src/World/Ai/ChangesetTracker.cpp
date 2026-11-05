@@ -303,6 +303,38 @@ namespace World::Ai
 		};
 		reg.RegisterCommand(std::move(beginCmd));
 
+		// 1b. changeset.stage_write：受审计的文件写入口。
+		// 没有它，模型只能绕开变更集直接手写文件，diff/回滚/权限守卫全部失效。
+		CommandDescriptor stageCmd;
+		stageCmd.name = "changeset.stage_write";
+		stageCmd.description = "Stage and write a UTF-8 text file through the audited changeset (with backup + WriteGuard).";
+		stageCmd.effect = CommandEffect::Write;
+		stageCmd.scope = CommandScope::Both;
+		stageCmd.owner = "engine";
+		stageCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}},\"required\":[\"id\",\"path\",\"content\"]}";
+		stageCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"staged\":{\"type\":\"boolean\"},\"path\":{\"type\":\"string\"},\"bytes\":{\"type\":\"number\"}}}";
+		stageCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string id = args.count("id") ? args.at("id") : "";
+			const std::string path = args.count("path") ? args.at("path") : "";
+			const std::string content = args.count("content") ? args.at("content") : "";
+			const std::string root = args.count("root") ? args.at("root") : "";
+			if (id.empty() || path.empty())
+			{
+				error = "changeset.stage_write requires id and path";
+				return false;
+			}
+			if (!Get().StageFileWrite(id, root, path, content, error))
+				return false;
+
+			JsonValue r; r.type = JsonValue::Type::Object;
+			r.Object.push_back({ "staged", JsonValue::MakeBool(true) });
+			r.Object.push_back({ "path", JsonValue::MakeString(path) });
+			r.Object.push_back({ "bytes", JsonValue::MakeNumber(static_cast<double>(content.size())) });
+			result = r.Dump();
+			return true;
+		};
+		reg.RegisterCommand(std::move(stageCmd));
 		// 2. changeset.apply
 		CommandDescriptor applyCmd;
 		applyCmd.name = "changeset.apply";

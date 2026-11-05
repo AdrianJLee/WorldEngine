@@ -1,10 +1,11 @@
-#pragma once
+﻿#pragma once
 
 #include "McpProtocol.h"
 #include "EngineBridge.h"
 #include <iostream>
 #include <string>
 #include <memory>
+#include <vector>
 
 namespace World::Mcp
 {
@@ -38,5 +39,8 @@ namespace World::Mcp
 		std::string m_CurrentRole;
 		std::string m_CurrentSessionToken;
 		bool m_Initialized = false;
+		// 远端宿主(Editor)的完整创作命令表:首次 tools/list 拉取并缓存,避免每次重连抖动。
+		std::vector<Ai::CommandDescriptor> m_RemoteCommands;
+		bool m_RemoteCommandsLoaded = false;
 	};
 }

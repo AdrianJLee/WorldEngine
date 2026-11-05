@@ -83,7 +83,7 @@ namespace World::Editor
 		// 引擎仓库内的"可丢弃根":这些第一段目录是构建产物 / 本机态 / 约定临时区,其下的
 		// 项目目录允许永久删除。理由逐条与仓库口径对齐:
 		//   build / tmp / local —— 本身就是 .gitignore 里的产物与本机状态目录;
-		//   projects          —— projects/README.md 写明的"想把项目放在仓库里"时的默认容器;
+		//   projects          —— 仓库内的一次性项目容器(.gitignore 忽略);引擎不再自带示例工程。
 		//   scratch / archive —— 仓库约定的临时/归档区。
 		// 入参是相对仓库根的规范化键(小写、`/` 分隔,来自 NormalizedKey),因此比较天然大小写不敏感。
 		bool IsDisposableRepoSubpath(const std::string& relativeKey)
@@ -104,7 +104,7 @@ namespace World::Editor
 		//   * 仓库内的一次性目录(`build/` / `local/` / `tmp/` / `scratch/` / `archive/` 下的)——
 		//     验证脚本与构建产物会把它们当项目打开,于是它们出现在最近列表里,
 		//     看上去和真项目一模一样。
-		// `projects/**` 是刻意放行的例外:仓库文档里写明它是"想把项目放进仓库"时的容器。
+		// `projects/**` 是刻意放行的例外:它不被 git 跟踪,属于"想把项目临时放进仓库"时的容器。
 		// 仓库**外**的路径一律允许(用户自己的项目都住在那儿)。
 		bool IsRecentIneligible(const std::filesystem::path& root)
 		{

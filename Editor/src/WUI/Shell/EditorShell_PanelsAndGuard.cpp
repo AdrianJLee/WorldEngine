@@ -178,7 +178,7 @@ void EditorShell::OpenScriptEditor(const std::string& logicalPath){
 
 std::filesystem::path EditorShell::CurrentProjectRoot() const{
 		// 运行期项目根唯一入口 = World::Paths::ProjectDir();有清单才算"打开着项目"
-		// (启动器的哨兵目录 / 引擎内空的 projects/ 容器都没有清单 → 空)。
+		// (启动器的哨兵目录 / 编译期 build/no-project 哨兵都没有清单 → 空)。
 		std::error_code error;
 		const std::filesystem::path root = World::Paths::ProjectDir();
 		if (root.empty() || !std::filesystem::is_regular_file(root / "project.we.yaml", error))

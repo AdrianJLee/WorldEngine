@@ -149,7 +149,7 @@ namespace World
 		m_ProjectSources.clear();
 		std::error_code error;
 		const std::filesystem::path projectRoot = World::Paths::ProjectDir();
-		// "有当前项目" = 项目根里有清单(启动器的哨兵目录 / 引擎内空的 projects/ 都没有)。
+		// "有当前项目" = 项目根里有清单(启动器的哨兵目录 / 编译期 build/no-project 都没有)。
 		m_HasProject = !projectRoot.empty()
 			&& std::filesystem::is_regular_file(projectRoot / "project.we.yaml", error);
 		if (!m_HasProject)

@@ -104,7 +104,6 @@ namespace World::Audio
 
 		// Load default mixer configuration from disk
 		std::string mixerPath = (World::Paths::AssetRoot() / "audio/main.wmixer").string();
-		if (!std::filesystem::exists(mixerPath)) mixerPath = "projects/assets/audio/main.wmixer";
 		if (!std::filesystem::exists(mixerPath)) mixerPath = "assets/audio/main.wmixer";
 		if (!std::filesystem::exists(mixerPath)) mixerPath = "templates/project-example/assets/audio/main.wmixer";
 		if (std::filesystem::exists(mixerPath))
@@ -1219,9 +1218,6 @@ namespace World::Audio
 			"assets/" + normalizedPath,
 			"assets/audio/events/" + normalizedPath,
 			"assets/audio/events/" + normalizedPath + ".wsound",
-			"projects/default/assets/" + normalizedPath,
-			"projects/default/assets/audio/events/" + normalizedPath,
-			"projects/default/assets/audio/events/" + normalizedPath + ".wsound",
 			"templates/project-example/assets/" + normalizedPath,
 			"templates/project-example/assets/audio/events/" + normalizedPath,
 			"templates/project-example/assets/audio/events/" + normalizedPath + ".wsound"
@@ -1298,7 +1294,6 @@ namespace World::Audio
 			"assets/audio/" + normalizedPath,
 			"Engine/assets/" + normalizedPath,
 			"Editor/assets/" + normalizedPath,
-			"projects/assets/" + normalizedPath,
 			"templates/project-example/assets/" + normalizedPath,
 			"templates/project-example/assets/audio/" + normalizedPath
 		};

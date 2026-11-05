@@ -10,6 +10,7 @@
 #include "World/Core/StringPool.h"
 #include "World/Command/CommandHistory.h"
 #include "World/Scene/Components.h"
+#include "World/Utils/Paths.h"
 
 #include <algorithm>
 #include <cmath>
@@ -277,7 +278,11 @@ namespace World
 					
 					host.MarkDocumentDirty();
 					CreateDefaultTerrain(res, res, cell);
-					SaveTerrain("projects/assets/terrains/default.wterrain");
+					{
+						std::error_code ec;
+						std::filesystem::create_directories(World::Paths::AssetRoot() / "terrains", ec);
+						SaveTerrain((World::Paths::AssetRoot() / "terrains/default.wterrain").generic_string());
+					}
 					m_StatusFeedback = "已成功创建 3D 地貌实体。";
 				}
 			}
@@ -805,7 +810,11 @@ namespace World
 		// 资产持久化
 		if (Wui::Button(ctx, Wui::HashId("terrain.save.asset"), { startX, currentY, contentWidth, 28.0f }, "保存到 default.wterrain 资产", theme))
 		{
-			SaveTerrain("projects/assets/terrains/default.wterrain");
+			{
+				std::error_code ec;
+				std::filesystem::create_directories(World::Paths::AssetRoot() / "terrains", ec);
+				SaveTerrain((World::Paths::AssetRoot() / "terrains/default.wterrain").generic_string());
+			}
 		}
 		currentY += 34.0f;
 	}

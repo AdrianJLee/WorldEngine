@@ -1,4 +1,4 @@
-#include "wldpch.h"
+﻿#include "wldpch.h"
 #include "World/Core/StringPool.h"
 
 #include "App/EditorLayer.h"
@@ -18,7 +18,9 @@
 #include "WUI/Panels/TerrainPanel.h"
 #include "World/NavMesh/NavMesh.h"
 #include "World/Terrain/TerrainRenderer.h"
+#include "World/Level/Authoring/LevelPackage.h"
 #include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
 #include "World/Schema/SchemaRegistry.h"
 #include "World/Script/Runtime/ComponentPropertyModel.h"
 #include "World/WUI/WuiAccessibility.h"
@@ -1165,6 +1167,11 @@ namespace World
 		addCmd("scene.open", "Open scene file by path.", CommandEffect::Write, CommandScope::Both);
 		addCmd("scene.save", "Save active scene.", CommandEffect::Write, CommandScope::Both);
 		addCmd("scene.query", "Query entities by component predicate.", CommandEffect::Read, CommandScope::Both);
+		addCmd("scene.create_entity", "Create a real entity with Tag/UUID/Transform.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"location\":{\"type\":\"string\"},\"rotation\":{\"type\":\"string\"},\"scale\":{\"type\":\"string\"}}}");
+		addCmd("scene.delete_entity", "Delete an entity by handle or name.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("scene.add_component", "Add a schema component to an entity.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("scene.remove_component", "Remove a non-core schema component from an entity.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("scene.create_level", "Create a new .wlevel package and open it.", CommandEffect::Write, CommandScope::EditorOnly);
 
 		// 材质族
 		addCmd("material.get", "Get material parameters by path.", CommandEffect::Read, CommandScope::Both);
@@ -2386,7 +2393,162 @@ namespace World
 			}
 			result = message;
 			return true;
-		}		if (cmd == "scene.open")
+		}
+
+		// ---- 创作动词:AI 必须能在编辑器活动场景里真正建/删实体、加/删组件 ----
+		// 没有这些,模型只能调 scene.set 改已有对象,或者绕开 Editor 去写文件。
+		if (cmd == "scene.create_entity")
+		{
+			if (!m_ActiveScene) { error = "no active scene"; return false; }
+			if (m_SceneState != SceneState::Edit) { error = "scene is read-only in Play/Simulate; exit Play first"; return false; }
+			std::string name = arg("name");
+			if (name.empty()) name = "Entity";
+			glm::vec3 location { 0.0f }, rotation { 0.0f }, scale { 1.0f };
+			if (!arg("location").empty() && !ParseFloat3(arg("location"), &location)) { error = "location must be 'x,y,z'"; return false; }
+			if (!arg("rotation").empty() && !ParseFloat3(arg("rotation"), &rotation)) { error = "rotation must be 'x,y,z'"; return false; }
+			if (!arg("scale").empty() && !ParseFloat3(arg("scale"), &scale)) { error = "scale must be 'x,y,z'"; return false; }
+
+			Entity entity = m_ActiveScene->CreateEntityShell(name);
+			entity.AddComponent<TransformComponent>(location, rotation, scale);
+			MarkDocumentDirty();
+			m_Shell.SetSelectedEntity(entity);
+			m_SelectedEntity = entity;
+
+			std::ostringstream out;
+			out << "{\"handle\":" << static_cast<uint32_t>(static_cast<entt::entity>(entity))
+				<< ",\"name\":\"" << JsonEscape(name) << "\"}";
+			result = out.str();
+			return true;
+		}
+		if (cmd == "scene.delete_entity")
+		{
+			if (!m_ActiveScene) { error = "no active scene"; return false; }
+			if (m_SceneState != SceneState::Edit) { error = "scene is read-only in Play/Simulate; exit Play first"; return false; }
+			Entity target {};
+			if (!arg("handle").empty())
+				target = Entity(m_ActiveScene.get(), static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10)));
+			else if (!arg("name").empty())
+			{
+				auto& registry = m_ActiveScene->GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+					if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == arg("name"))
+					{
+						target = Entity(m_ActiveScene.get(), handle);
+						break;
+					}
+			}
+			if (!target.IsValid()) { error = "entity not found (need handle= or name=)"; return false; }
+			Entity::DestroyEntity(m_ActiveScene.get(), target);
+			m_ActiveScene->FlushStructuralChanges();
+			m_SelectedEntity = Entity {};
+			MarkDocumentDirty();
+			result = "deleted entity";
+			return true;
+		}
+		if (cmd == "scene.add_component")
+		{
+			if (!m_ActiveScene) { error = "no active scene"; return false; }
+			if (m_SceneState != SceneState::Edit) { error = "scene is read-only in Play/Simulate; exit Play first"; return false; }
+			Entity target {};
+			if (!arg("handle").empty())
+				target = Entity(m_ActiveScene.get(), static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10)));
+			else if (!arg("name").empty())
+			{
+				auto& registry = m_ActiveScene->GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+					if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == arg("name"))
+					{
+						target = Entity(m_ActiveScene.get(), handle);
+						break;
+					}
+			}
+			if (!target.IsValid()) { error = "entity not found (need handle= or name=)"; return false; }
+
+			const std::string componentName = arg("component");
+			if (componentName.empty()) { error = "missing component"; return false; }
+			const Schema::TypeSchema* schema = FindComponentSchema(m_ActiveScene->GetContext().Schemas(), componentName);
+			if (!schema || !schema->Storage) { error = "unknown component type: " + componentName; return false; }
+			if (target.HasComponent(schema->Storage->ComponentId))
+			{
+				result = "already present: " + schema->Id.Name;
+				return true;
+			}
+			target.AddComponent(schema->Storage->ComponentId);
+			MarkDocumentDirty();
+			result = "added " + schema->Id.Name;
+			return true;
+		}
+		if (cmd == "scene.remove_component")
+		{
+			if (!m_ActiveScene) { error = "no active scene"; return false; }
+			if (m_SceneState != SceneState::Edit) { error = "scene is read-only in Play/Simulate; exit Play first"; return false; }
+			Entity target {};
+			if (!arg("handle").empty())
+				target = Entity(m_ActiveScene.get(), static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10)));
+			else if (!arg("name").empty())
+			{
+				auto& registry = m_ActiveScene->GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+					if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == arg("name"))
+					{
+						target = Entity(m_ActiveScene.get(), handle);
+						break;
+					}
+			}
+			if (!target.IsValid()) { error = "entity not found (need handle= or name=)"; return false; }
+
+			const std::string componentName = arg("component");
+			const Schema::TypeSchema* schema = FindComponentSchema(m_ActiveScene->GetContext().Schemas(), componentName);
+			if (!schema || !schema->Storage) { error = "unknown component type: " + componentName; return false; }
+			if (schema->Core) { error = "component '" + schema->Id.Name + "' is core and cannot be removed"; return false; }
+			std::string reason;
+			if (!target.CanRemoveComponent(schema->Storage->ComponentId, &reason)) { error = "cannot remove component: " + reason; return false; }
+			target.RemoveComponent(schema->Storage->ComponentId);
+			MarkDocumentDirty();
+			result = "removed " + schema->Id.Name;
+			return true;
+		}
+		if (cmd == "scene.create_level")
+		{
+			if (!m_ActiveScene) { error = "no active scene"; return false; }
+			std::string levelId = arg("id").empty() ? arg("name") : arg("id");
+			if (levelId.empty()) levelId = "NewLevel";
+			std::filesystem::path entry;
+			if (arg("path").empty())
+				entry = World::Paths::AssetRoot() / "scenes" / (levelId + ".wlevel");
+			else
+			{
+				entry = std::filesystem::u8path(arg("path"));
+				if (entry.is_absolute())
+				{
+					// keep as-is
+				}
+				else if (entry.parent_path().empty())
+				{
+					// 裸名字 = 关卡 Id:落在内容根的 scenes/ 下(与 LevelPanel 的新建行为一致)
+					entry = World::Paths::AssetRoot() / "scenes" / entry;
+				}
+				else
+				{
+					entry = World::Paths::ProjectDir() / entry;
+				}
+				if (!entry.has_extension())
+					entry += ".wlevel";
+			}
+			std::error_code ec;
+			std::filesystem::create_directories(entry.parent_path(), ec);
+			std::string createError;
+			if (!World::Level::LevelPackage::CreateEmpty(m_ActiveScene->GetContext(), entry, levelId, &createError))
+			{
+				error = createError.empty() ? "failed to create level" : createError;
+				return false;
+			}
+			DoOpenScene(entry);
+			result = "created " + entry.string();
+			return true;
+		}
+
+		if (cmd == "scene.open")
 		{
 			const std::string path = arg("path");
 			if (path.empty())
@@ -2394,7 +2556,7 @@ namespace World
 				error = "missing path";
 				return false;
 			}
-			OpenScene(std::filesystem::path(path));
+			DoOpenScene(std::filesystem::path(path));
 			result = "opened " + path;
 			return true;
 		}
