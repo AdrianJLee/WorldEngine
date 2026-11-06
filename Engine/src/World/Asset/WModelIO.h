@@ -242,5 +242,9 @@ namespace World::Asset
 		// P4-U11:只解析 header + meta(几何不读,GPU/内存都不碰)。编辑器与 cook 判断
 		// "这份 .wmodel 是不是这个源的产物 / 用了什么导入设置"时用它,不必加载整个模型。
 		WLD_API bool ReadMeta(const std::string& path, WModelData::MetaData& out, std::string* error);
+		// P4-perf: 快速只读文件头部与包围盒 (Header + Meta + Bounds)。
+		// 仅读取文件头部 <=4096 字节，完全不触碰顶点与索引大块，供缩略图、视口快速估算与空间预筛选使用。
+		WLD_API bool ReadHeaderAndBounds(const std::string& path, WModelBounds& outBounds,
+			WModelData::MetaData* outMeta = nullptr, std::string* error = nullptr);
 	}
 }

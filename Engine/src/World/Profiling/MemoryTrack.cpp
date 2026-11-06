@@ -364,6 +364,17 @@ namespace World::Profiling
 	// 全局堆记录
 	// ---------------------------------------------------------------------------
 
+	bool MemoryTrack::ShouldSampleSite() noexcept
+	{
+		MemoryTrackState& state = State();
+		if (!state.Enabled || SymbolResolver::Suppressed())
+			return false;
+		const uint32_t rate = state.SiteSampling.load(std::memory_order_relaxed);
+		if (rate == 0)
+			return false;
+		return (state.SiteSampleCounter.fetch_add(1, std::memory_order_relaxed) % rate) == 0;
+	}
+
 	void MemoryTrack::RecordAllocate(void* ptr, size_t size, void* origin) noexcept
 	{
 		MemoryTrackState& state = State();

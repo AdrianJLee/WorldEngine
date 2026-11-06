@@ -56,7 +56,7 @@ namespace World::Rhi::OpenGL
 				return 0;
 			}
 
-			WLD_CORE_INFO("[gl-spirv] {0}: stage ingested via glShaderBinary + glSpecializeShader "
+			WLD_CORE_TRACE("[gl-spirv] {0}: stage ingested via glShaderBinary + glSpecializeShader "
 				"(entry \"{1}\", {2} bytes, program={3})",
 				debugName, kEntryPoint, spirv.size(), program);
 			return shader;

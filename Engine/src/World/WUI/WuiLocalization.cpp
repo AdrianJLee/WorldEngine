@@ -375,7 +375,7 @@ namespace World::Wui
 				sources[key] = label;
 				++count;
 			}
-			WLD_CORE_INFO("本地化文件已加载: {0}({1} 条)", input.Path.string(), count);
+			WLD_CORE_TRACE("本地化文件已加载: {0}({1} 条)", input.Path.string(), count);
 		}
 
 		// 取文件的盘面戳(大小 + 最后写入时间);不存在/取不到 → false。

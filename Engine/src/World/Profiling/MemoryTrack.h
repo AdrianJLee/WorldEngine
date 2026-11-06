@@ -105,6 +105,9 @@ namespace World::Profiling
 		// ---- 全局堆(operator new/delete 钩子调用) ----
 		// origin 由 hook 在其**自己的帧**里用 _ReturnAddress() 取 —— 只有在那一帧
 		// 取到的才是真正的调用点(在本函数里取会退化成 RecordAllocate 自己)。
+		// P4-perf: 快速判断当前分配是否命中站点采样 (避免未命中时无谓调用昂贵的栈回溯 CaptureStackBackTrace)
+		static bool ShouldSampleSite() noexcept;
+
 		static void RecordAllocate(void* ptr, size_t size, void* origin = nullptr) noexcept;
 		static void RecordDeallocate(void* ptr) noexcept;
 

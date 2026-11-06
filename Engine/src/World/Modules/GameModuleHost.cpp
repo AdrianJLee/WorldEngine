@@ -67,10 +67,10 @@ namespace World::Modules
 
 		const std::string besideExeSearchText = besideExeSearchDir.empty() ? std::string("(exe path unavailable)") : besideExeSearchDir.string();
 		const std::string besideExeText = besideExe.empty() ? std::string("(no Game.dll found)") : besideExe.string();
-		WLD_CORE_INFO("[game-module] candidate 0 (project build): {0}",
+		WLD_CORE_TRACE("[game-module] candidate 0 (project build): {0}",
 			projectBuilt.empty() ? std::string("(none)") : projectBuilt.string());
-		WLD_CORE_INFO("[game-module] candidate 1 (beside exe): searched {0} -> {1}", besideExeSearchText, besideExeText);
-		WLD_CORE_INFO("[game-module] candidate 2 (repo-root anchored): {0}", anchored.string());
+		WLD_CORE_TRACE("[game-module] candidate 1 (beside exe): searched {0} -> {1}", besideExeSearchText, besideExeText);
+		WLD_CORE_TRACE("[game-module] candidate 2 (repo-root anchored): {0}", anchored.string());
 
 		std::vector<std::filesystem::path> candidates;
 		if (!projectBuilt.empty())

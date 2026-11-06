@@ -225,6 +225,7 @@ namespace World::Editor
 
 	void EditorPreferences::Apply() const
 	{
+		ApplyDiagnosticEnvironment();
 		Wui::SetLanguage(m_Data.Language);
 		Wui::SetThemeMode(m_Data.Theme);
 		Wui::SetUiScale(m_Data.UiScale);

@@ -732,7 +732,9 @@ namespace World
 		color.Samples = previewSamples;
 		color.Load = Rhi::LoadOp::Clear;
 		color.Store = Rhi::StoreOp::Store;
-		color.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		// P4-vulkan: Clear/DontCare 操作的附件 InitialLayout 必须为 Undefined，
+		// 避免帧间附件转为 ShaderReadOnly 后进入下一帧引发 VUID-vkCmdDraw-None-09600 布局校验错误。
+		color.InitialLayout = Rhi::AttachmentLayout::Undefined;
 		color.FinalLayout = Rhi::AttachmentLayout::ShaderReadOnly;
 		color.Clear.Color = { 0.12f, 0.13f, 0.15f, 1.0f };
 
@@ -741,7 +743,7 @@ namespace World
 		entityId.Samples = previewSamples;
 		entityId.Load = Rhi::LoadOp::Clear;
 		entityId.Store = Rhi::StoreOp::Store;
-		entityId.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		entityId.InitialLayout = Rhi::AttachmentLayout::Undefined;
 		entityId.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
 		const int minusOne = -1;
 		std::memcpy(&entityId.Clear.Color, &minusOne, sizeof(int));
@@ -751,7 +753,7 @@ namespace World
 		depth.Samples = previewSamples;
 		depth.Load = Rhi::LoadOp::Clear;
 		depth.Store = Rhi::StoreOp::Store;
-		depth.InitialLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		depth.InitialLayout = Rhi::AttachmentLayout::Undefined;
 		depth.FinalLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
 		depth.Clear.IsDepthStencil = true;
 		depth.Clear.DepthStencil.Depth = 1.0f;
@@ -772,14 +774,14 @@ namespace World
 			colorResolve.Samples = Rhi::SampleCount::Count1;
 			colorResolve.Load = Rhi::LoadOp::DontCare;   // resolve 会整体覆盖
 			colorResolve.Store = Rhi::StoreOp::Store;
-			colorResolve.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			colorResolve.InitialLayout = Rhi::AttachmentLayout::Undefined;
 			colorResolve.FinalLayout = Rhi::AttachmentLayout::ShaderReadOnly;
 			Rhi::RenderPassAttachment entityResolve;
 			entityResolve.Format = Rhi::Format::R32_SINT;
 			entityResolve.Samples = Rhi::SampleCount::Count1;
 			entityResolve.Load = Rhi::LoadOp::DontCare;
 			entityResolve.Store = Rhi::StoreOp::Store;
-			entityResolve.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+			entityResolve.InitialLayout = Rhi::AttachmentLayout::Undefined;
 			entityResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
 			passDesc.Attachments.push_back(colorResolve);    // 3
 			passDesc.Attachments.push_back(entityResolve);   // 4

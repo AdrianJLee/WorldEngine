@@ -317,7 +317,8 @@ namespace World
 		std::filesystem::create_directories(std::filesystem::path(WLD_LOCAL_DIR));
 		World::Editor::EditorPreferences::Get().Load(
 			std::filesystem::path(WLD_LOCAL_DIR) / "editor-prefs.json");
-		// P4-UX7:AI 控制通道端口 —— 命令行 `--ai-control=<port>` 优先(自动化脚本),
+		World::Editor::EditorPreferences::Get().Apply();
+				// P4-UX7:AI 控制通道端口 —— 命令行 `--ai-control=<port>` 优先(自动化脚本),
 		// 没给命令行时用编辑器偏好里的端口(面板可见、重启生效)。
 		if (World::Editor::AiControlPort() <= 0)
 		{

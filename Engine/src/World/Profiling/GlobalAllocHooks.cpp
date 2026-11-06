@@ -73,7 +73,7 @@ void* operator new(size_t size)
 	{
 		HookGuard guard;
 		if (guard.ShouldRecord())
-			World::Profiling::MemoryTrack::RecordAllocate(memory, size, CaptureCallerFrame());
+			World::Profiling::MemoryTrack::RecordAllocate(memory, size, World::Profiling::MemoryTrack::ShouldSampleSite() ? CaptureCallerFrame() : nullptr);
 		return memory;
 	}
 	throw std::bad_alloc();
@@ -91,7 +91,7 @@ void* operator new(size_t size, const std::nothrow_t&) noexcept
 		return nullptr;
 	HookGuard guard;
 	if (guard.ShouldRecord())
-		World::Profiling::MemoryTrack::RecordAllocate(memory, size, CaptureCallerFrame());
+		World::Profiling::MemoryTrack::RecordAllocate(memory, size, World::Profiling::MemoryTrack::ShouldSampleSite() ? CaptureCallerFrame() : nullptr);
 	return memory;
 }
 

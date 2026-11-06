@@ -1034,7 +1034,7 @@ namespace World::Asset::WModelIO
 		// 路径解析必须与材质/脚本同一条口径:**VFS 优先、磁盘回退**(ReadFile / ReadMeta 共用)。
 		// 网格引用是"相对内容根"的逻辑路径(如 models/x.wmodel),而编辑器/Runtime 的 CWD 都不是
 		// 内容根;直接 ifstream(逻辑路径) 只会在 CWD 恰好是内容根时成功。
-		bool ReadBytes(const std::string& path, std::vector<uint8_t>& bytes, std::string* error)
+		bool ReadBytesLimit(const std::string& path, std::vector<uint8_t>& bytes, size_t maxBytes, std::string* error)
 		{
 			if (path.empty())
 			{
@@ -1046,6 +1046,8 @@ namespace World::Asset::WModelIO
 				std::error_code vfsError;
 				if (Application::Get().GetContext().Vfs().Read(path, bytes, vfsError) && !bytes.empty())
 				{
+					if (maxBytes > 0 && bytes.size() > maxBytes)
+						bytes.resize(maxBytes);
 					if (error) error->clear();
 					return true;
 				}
@@ -1060,7 +1062,7 @@ namespace World::Asset::WModelIO
 				std::ifstream directFile(path, std::ios::binary);
 				if (directFile)
 				{
-					bytes.assign(std::istreambuf_iterator<char>(directFile), std::istreambuf_iterator<char>());
+					if (maxBytes > 0) { bytes.resize(maxBytes); directFile.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(maxBytes)); bytes.resize(static_cast<size_t>(directFile.gcount())); } else { bytes.assign(std::istreambuf_iterator<char>(directFile), std::istreambuf_iterator<char>()); }
 					if (!bytes.empty())
 					{
 						if (error) error->clear();
@@ -1078,7 +1080,7 @@ namespace World::Asset::WModelIO
 				std::ifstream file(candidate, std::ios::binary);
 				if (!file)
 					continue;
-				bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+				if (maxBytes > 0) { bytes.resize(maxBytes); file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(maxBytes)); bytes.resize(static_cast<size_t>(file.gcount())); } else { bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()); }
 				if (bytes.empty())
 					continue;
 				if (error) error->clear();
@@ -1086,6 +1088,11 @@ namespace World::Asset::WModelIO
 			}
 			if (error) *error = "cannot open '" + path + "'";
 			return false;
+		}
+
+		bool ReadBytes(const std::string& path, std::vector<uint8_t>& bytes, std::string* error)
+		{
+			return ReadBytesLimit(path, bytes, 0, error);
 		}
 	}
 
@@ -1437,13 +1444,95 @@ namespace World::Asset::WModelIO
 		return Parse(bytes.data(), bytes.size(), out, error);
 	}
 
-	// P4-U11:只读 meta(同 ReadFile 的 VFS → 磁盘解析顺序,但不解析几何)。
+	bool ParseHeaderAndBoundsImpl(const uint8_t* bytes, size_t size, WModelBounds& outBounds,
+		WModelData::MetaData* outMeta, std::string& error)
+	{
+		WModelData::MetaData meta{};
+		if (bytes == nullptr || size < kHeaderSize)
+		{
+			error = "truncated: file is smaller than the .wmodel header";
+			return false;
+		}
+		Reader reader { bytes, static_cast<uint64_t>(size), 0, {} };
+		char magic[4] = { 0, 0, 0, 0 };
+		reader.ReadRaw(magic, sizeof(magic), "magic");
+		if (std::memcmp(magic, kMagic, sizeof(kMagic)) != 0)
+		{
+			error = "bad magic: expected 'WMDL'";
+			return false;
+		}
+		uint32_t version = 0;
+		reader.ReadU32(version, "version");
+		if (version != kFormatVersion)
+		{
+			error = "unsupported .wmodel version " + std::to_string(version);
+			return false;
+		}
+		for (int index = 0; index < 3 + 8; ++index)
+		{
+			uint32_t skipped = 0;
+			reader.ReadU32(skipped, "header");
+		}
+		if (reader.Failed())
+		{
+			error = reader.Error;
+			return false;
+		}
+		if (!ReadMetaBlock(reader, meta, error))
+			return false;
+		if (outMeta)
+			*outMeta = meta;
+		if (!reader.ReadVec3(outBounds.Min, "bounds.min") || !reader.ReadVec3(outBounds.Max, "bounds.max"))
+		{
+			error = reader.Error;
+			return false;
+		}
+		return true;
+	}
+
+	// P4-U11:只读 meta(优化为优先定长 4KB 轻量读取，避免全量读盘几何与索引)。
 	bool ReadMeta(const std::string& path, WModelData::MetaData& out, std::string* error)
 	{
 		std::vector<uint8_t> bytes;
+		std::string localError;
+		if (ReadBytesLimit(path, bytes, 4096, &localError))
+		{
+			if (ParseMetaImpl(bytes.data(), bytes.size(), out, localError))
+			{
+				if (error) error->clear();
+				return true;
+			}
+		}
+		bytes.clear();
 		if (!ReadBytes(path, bytes, error))
 			return false;
 		return ParseMetaOnly(bytes.data(), bytes.size(), out, error);
+	}
+
+	// P4-perf: 快速只读文件头部与包围盒 (Header + Meta + Bounds)。
+	bool ReadHeaderAndBounds(const std::string& path, WModelBounds& outBounds,
+		WModelData::MetaData* outMeta, std::string* error)
+	{
+		std::vector<uint8_t> bytes;
+		std::string localError;
+		if (ReadBytesLimit(path, bytes, 4096, &localError))
+		{
+			if (ParseHeaderAndBoundsImpl(bytes.data(), bytes.size(), outBounds, outMeta, localError))
+			{
+				if (error) error->clear();
+				return true;
+			}
+		}
+		bytes.clear();
+		if (!ReadBytes(path, bytes, error))
+			return false;
+		if (ParseHeaderAndBoundsImpl(bytes.data(), bytes.size(), outBounds, outMeta, localError))
+		{
+			if (error) error->clear();
+			return true;
+		}
+		if (error) *error = localError;
+		return false;
 	}
 }
 

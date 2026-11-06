@@ -55,8 +55,28 @@ namespace World::Rhi::Vulkan
 		info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		info.preTransform = capabilities.currentTransform;
 		info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-		info.presentMode = desc.Present == PresentMode::Immediate ? VK_PRESENT_MODE_IMMEDIATE_KHR
-			: desc.Present == PresentMode::Mailbox ? VK_PRESENT_MODE_MAILBOX_KHR : VK_PRESENT_MODE_FIFO_KHR;
+		uint32_t modeCount = 0;
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device.GetPhysicalDevice(), m_Surface, &modeCount, nullptr);
+		std::vector<VkPresentModeKHR> availableModes(modeCount);
+		if (modeCount > 0)
+			vkGetPhysicalDeviceSurfacePresentModesKHR(device.GetPhysicalDevice(), m_Surface, &modeCount, availableModes.data());
+		auto isModeSupported = [&](VkPresentModeKHR mode) {
+			for (auto m : availableModes)
+				if (m == mode) return true;
+			return false;
+		};
+		VkPresentModeKHR chosenMode = VK_PRESENT_MODE_FIFO_KHR;
+		if (desc.Present == PresentMode::Immediate)
+		{
+			if (isModeSupported(VK_PRESENT_MODE_IMMEDIATE_KHR)) chosenMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+			else if (isModeSupported(VK_PRESENT_MODE_MAILBOX_KHR)) chosenMode = VK_PRESENT_MODE_MAILBOX_KHR;
+		}
+		else if (desc.Present == PresentMode::Mailbox)
+		{
+			if (isModeSupported(VK_PRESENT_MODE_MAILBOX_KHR)) chosenMode = VK_PRESENT_MODE_MAILBOX_KHR;
+			else if (isModeSupported(VK_PRESENT_MODE_IMMEDIATE_KHR)) chosenMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+		}
+		info.presentMode = chosenMode;
 		info.clipped = VK_TRUE;
 		vkCreateSwapchainKHR(device.GetNativeDevice(), &info, nullptr, &m_Swapchain);
 

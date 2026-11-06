@@ -66,6 +66,8 @@ namespace World
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(Application::OnEvent));
 
 		// 内容挂载必须早于渲染器初始化:发行形态下管线创建即解析着色器烘焙产物。
+		JobSystem::Init();
+
 		Asset::MountProjectContent(m_Context);
 
 		Renderer::Init();
@@ -136,7 +138,8 @@ namespace World
 	{
 		WLD_TRACE_FUNCTION();
 		if (m_Shutdown) return;
-		JobSystem::Init();    // 再启动线程池
+		if (!JobSystem::IsRunning())
+			JobSystem::Init();    // 防御性确保线程池运行
 		Profiling::Telemetry::Init();    // 遥测:帧统计常开、作用域追踪按需
 
 		while (m_Running)

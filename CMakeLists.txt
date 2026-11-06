@@ -33,6 +33,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #   构建必须要么整体成功、要么明确失败,不能悄悄留下混合树。
 if(MSVC)
     add_compile_options(/FS "/utf-8")
+    # P4-perf: 允许在 Debug 模式下展开 inline 标注函数(消除数万次标量跳转开销)
+    add_compile_options("$<$<CONFIG:Debug>:/Ob1>")
 endif()
 
 # --- 查找 Vulkan SDK(可选):headers+volk 已 vendor,SDK 仅用于可选验证层

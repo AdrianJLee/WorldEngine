@@ -542,23 +542,14 @@ namespace World::Editor
 			{
 				CachedMeshWireframe cached;
 				const std::filesystem::path fullPath = ResolveAssetDiskPath(logicalPath);
-				Asset::WModelData modelData;
+				Asset::WModelBounds bounds;
 				std::string err;
-				cached.Loaded = Asset::WModelIO::ReadFile(fullPath.string(), modelData, &err);
+				// P4-perf: 缩略图线框仅需模型的真实包围盒，严禁在主渲染线程全量反序列化整个几十兆的 .wmodel 二进制大文件
+				cached.Loaded = Asset::WModelIO::ReadHeaderAndBounds(fullPath.string(), bounds, nullptr, &err);
 				if (cached.Loaded)
 				{
-					cached.Center = (modelData.Bounds.Min + modelData.Bounds.Max) * 0.5f;
-					cached.Extents = glm::max(glm::vec3(0.01f), (modelData.Bounds.Max - modelData.Bounds.Min) * 0.5f);
-					if (!modelData.Vertices.empty())
-					{
-						const size_t vCount = modelData.Vertices.size();
-						const size_t step = std::max<size_t>(1, vCount / 12);
-						for (size_t i = 0; i + step < vCount && i < step * 10; i += step)
-						{
-							cached.SampleVertices.push_back(modelData.Vertices[i].Position);
-							cached.SampleVertices.push_back(modelData.Vertices[i + step].Position);
-						}
-					}
+					cached.Center = (bounds.Min + bounds.Max) * 0.5f;
+					cached.Extents = glm::max(glm::vec3(0.01f), (bounds.Max - bounds.Min) * 0.5f);
 				}
 				it = s_MeshWireframeCache.emplace(logicalPath, std::move(cached)).first;
 			}

@@ -104,8 +104,19 @@ namespace World
 			}
 			std::abort();
 		});
+		spdlog::level::level_enum defaultLevel = spdlog::level::info;
+		if (const char* envLevel = std::getenv("WLD_LOG_LEVEL"))
+		{
+			std::string val = envLevel;
+			if (val == "trace") defaultLevel = spdlog::level::trace;
+			else if (val == "debug") defaultLevel = spdlog::level::debug;
+			else if (val == "info") defaultLevel = spdlog::level::info;
+			else if (val == "warn") defaultLevel = spdlog::level::warn;
+			else if (val == "err" || val == "error") defaultLevel = spdlog::level::err;
+		}
+
 		s_CoreLogger = spdlog::stdout_color_mt("WE");
-		s_CoreLogger->set_level(spdlog::level::trace);
+		s_CoreLogger->set_level(defaultLevel);
 		s_CoreLogger->sinks().push_back(recent);
 		// 断言/错误立即落盘:崩溃与断言对话框场景下 FIFO 缓冲会吞掉最后的日志。
 		// P4-UX3a:警告也立即落盘 —— 字体缺失/回退这类关键线索常以 warn 出现,
@@ -113,7 +124,7 @@ namespace World
 		s_CoreLogger->flush_on(spdlog::level::warn);
 
 		s_ClientLogger = spdlog::stdout_color_mt("APP");
-		s_ClientLogger->set_level(spdlog::level::trace);
+		s_ClientLogger->set_level(defaultLevel);
 		s_ClientLogger->flush_on(spdlog::level::err);
 
 		// P4-UX2f:**默认写日志文件** —— 偶发 device lost / 崩溃时用户往往只看到控制台最后一行,
