@@ -1,6 +1,7 @@
 #include "wldpch.h"
 #include "World/UI/UiCommandRouter.h"
 
+#include "World/Core/Application.h"
 #include "World/Gameplay/Framework/EventBus.h"
 
 #include <algorithm>
@@ -32,7 +33,7 @@ namespace World::UI
 
 		bool IsNavigationCommand(const std::string& command)
 		{
-			return command == "ui.close" || command == "ui.back";
+			return command == "ui.close" || command == "ui.back" || command == "app.quit" || command == "game.quit";
 		}
 	}
 
@@ -59,7 +60,12 @@ namespace World::UI
 			const std::string commandText = TrimAscii(command.Command);
 			if (!IsNavigationCommand(commandText))
 				continue;
-			if (commandText == "ui.close")
+			if (commandText == "app.quit" || commandText == "game.quit")
+			{
+				if (Application::HasInstance())
+					Application::Get().Close();
+			}
+			else if (commandText == "ui.close")
 			{
 				if (navigator->ModalCount() > 0)
 					navigator->PopModal();

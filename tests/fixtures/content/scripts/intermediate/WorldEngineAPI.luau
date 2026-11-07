@@ -398,6 +398,10 @@ function Input:SetCursorLocked(enabled) end
 ---@return boolean
 function Input:CursorLocked() end
 
+---Request the application to close gracefully; returns true if the close request was issued.
+---@return boolean
+function Input:Quit() end
+
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.
 ---@class Level
@@ -462,6 +466,10 @@ function Level:SetDataLayerActive(layer, active) end
 ---@param layer number|string Layer mask number or layer name string.
 ---@return boolean
 function Level:IsDataLayerActive(layer) end
+
+---Request the application to close gracefully; returns true if the close request was issued.
+---@return boolean
+function Level:Quit() end
 
 -- Global service table 'Save': read-only; there is no runtime constructor.
 ---Read-only save service table; migrations, traits and paths are not exposed.
@@ -531,6 +539,19 @@ function Time:FixedStepCount() end
 ---Current time scale applied to Delta; 1 = real time.
 ---@return number
 function Time:TimeScale() end
+
+-- Global service table 'App': read-only; there is no runtime constructor.
+---Application lifecycle service table; manages graceful shutdown and process lifecycle.
+---@class App
+App = {}
+
+---Request the application to close gracefully; returns true if the close request was issued.
+---@return boolean
+function App:Quit() end
+
+---Alias of App.Quit(); requests the application to close gracefully.
+---@return boolean
+function App:Close() end
 
 -- Global service table 'Audio': read-only; there is no runtime constructor.
 ---Read-only audio service table for sound events, playback control, bus volumes, and snapshots.

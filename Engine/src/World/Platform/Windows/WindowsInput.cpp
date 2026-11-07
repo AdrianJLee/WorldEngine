@@ -1,4 +1,7 @@
 ﻿#include "wldpch.h"
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include "World/Core/Input.h"
 #include "World/Core/Application.h"
 
@@ -9,8 +12,21 @@ namespace World
 	bool Input::IsKeyPressed(int keycode)
 	{
 		auto window = static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow());
-		auto state = glfwGetKey(window, keycode);
-		return state == GLFW_PRESS;
+		if (window && glfwGetKey(window, keycode) == GLFW_PRESS)
+			return true;
+
+		if (Application::HasInstance() && Application::Get().GetWindow().IsFocused())
+		{
+			int vk = -1;
+			if (keycode >= 65 && keycode <= 90) vk = keycode;
+			else if (keycode >= 48 && keycode <= 57) vk = keycode;
+			else if (keycode == 32) vk = VK_SPACE;
+			else if (keycode == 256) vk = VK_ESCAPE;
+			else if (keycode == 257) vk = VK_RETURN;
+			if (vk >= 0 && (::GetAsyncKeyState(vk) & 0x8000))
+				return true;
+		}
+		return false;
 	}
 	bool Input::IsMouseButtonPressed(int button)
 	{

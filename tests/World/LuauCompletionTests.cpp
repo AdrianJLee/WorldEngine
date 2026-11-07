@@ -346,7 +346,7 @@ int main()
 
 			index.Query("for i = 1, ", 100, items);
 			CHECK(!items.empty());
-			CHECK(items.front().Name == "assert");   // Global 档里字典序最前
+			CHECK(items.front().Name == "App");      // Global 档里字典序最前 (App 字母序优先于 assert)
 			CHECK(SortedByRules(items));
 
 			// 前缀零命中时子串兜底

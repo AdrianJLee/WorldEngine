@@ -925,6 +925,18 @@ namespace World
 			return ScriptValue::Boolean(false);
 		}
 
+		ScriptValue AppQuitImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			if (Application::HasInstance())
+			{
+				Application::Get().Close();
+				return ScriptValue::Boolean(true);
+			}
+			return ScriptValue::Boolean(false);
+		}
+
 const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 	{
 		// 方法描述是纯数据;方法体是独立函数,因此可以在描述表里直接引用、无需数组自引用。
@@ -1057,6 +1069,11 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 				return InputCursorLockedImpl(args, count);
 			}, nullptr, 0, 0, "boolean",
 				"Whether the cursor is locked for mouse-look." },
+			{ "Quit", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppQuitImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Request the application to close gracefully; returns true if the close request was issued." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。
@@ -1181,6 +1198,11 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 				return LevelIsDataLayerActiveImpl(args, count);
 			}, levelIsLayer, 1, 1, "boolean",
 				"Check if a data layer is currently active by mask number or name." },
+			{ "Quit", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppQuitImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Request the application to close gracefully; returns true if the close request was issued." },
 		};
 
 		static const ScriptServiceParam saveSlot[] = {
@@ -1234,11 +1256,24 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 			}, nullptr, 0, 0, "string",
 				"Last save/load error; empty when the last operation succeeded." },
 		};
+		static const ScriptServiceMethod appMethods[] = {
+			{ "Quit", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppQuitImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Request the application to close gracefully; returns true if the close request was issued." },
+			{ "Close", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppQuitImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Alias of App.Quit(); requests the application to close gracefully." },
+		};
 		static const ScriptServiceBinding services[] = {
 			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, sizeof(inputMethods) / sizeof(inputMethods[0]) },
 			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, sizeof(levelMethods) / sizeof(levelMethods[0]) },
 			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, sizeof(saveMethods) / sizeof(saveMethods[0]) },
 			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, sizeof(timeMethods) / sizeof(timeMethods[0]) },
+			{ "App", "Application lifecycle service table; manages graceful shutdown and process lifecycle.", appMethods, sizeof(appMethods) / sizeof(appMethods[0]) },
 		};
 		if (count)
 			*count = sizeof(services) / sizeof(services[0]);
