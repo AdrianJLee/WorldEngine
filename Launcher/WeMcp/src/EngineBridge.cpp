@@ -1,4 +1,4 @@
-﻿#include "EngineBridge.h"
+#include "EngineBridge.h"
 #include "World/Plugins/PluginManager.h"
 #include "World/Core/WorldContext.h"
 #include "World/WUI/WuiJson.h"
@@ -56,6 +56,69 @@ namespace World::Mcp
 				s_Init = true;
 			}
 		}
+
+#if defined(_WIN32)
+		// 使用非阻塞 connect + select 控制本地回环探测超时，避免 Windows 默认 2 秒 SYN 超时拖慢握手
+		SOCKET ConnectLoopbackWithTimeout(uint16_t port, int timeoutMs)
+		{
+			SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+			if (s == INVALID_SOCKET)
+				return INVALID_SOCKET;
+
+			u_long nonBlocking = 1;
+			ioctlsocket(s, FIONBIO, &nonBlocking);
+
+			sockaddr_in addr {};
+			addr.sin_family = AF_INET;
+			addr.sin_port = htons(port);
+			inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+			int rc = connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+			if (rc == SOCKET_ERROR)
+			{
+				int err = WSAGetLastError();
+				if (err != WSAEWOULDBLOCK && err != WSAEINPROGRESS)
+				{
+					closesocket(s);
+					return INVALID_SOCKET;
+				}
+
+				fd_set writeSet;
+				fd_set errSet;
+				FD_ZERO(&writeSet);
+				FD_ZERO(&errSet);
+				FD_SET(s, &writeSet);
+				FD_SET(s, &errSet);
+
+				timeval tv {};
+				tv.tv_sec = timeoutMs / 1000;
+				tv.tv_usec = (timeoutMs % 1000) * 1000;
+
+				int sel = select(0, nullptr, &writeSet, &errSet, &tv);
+				if (sel <= 0 || FD_ISSET(s, &errSet) || !FD_ISSET(s, &writeSet))
+				{
+					closesocket(s);
+					return INVALID_SOCKET;
+				}
+
+				int soErr = 0;
+				int soErrLen = sizeof(soErr);
+				if (getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soErr), &soErrLen) != 0 || soErr != 0)
+				{
+					closesocket(s);
+					return INVALID_SOCKET;
+				}
+			}
+
+			nonBlocking = 0;
+			ioctlsocket(s, FIONBIO, &nonBlocking);
+
+			DWORD rwTimeoutMs = 5000;
+			setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rwTimeoutMs), sizeof(rwTimeoutMs));
+			setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&rwTimeoutMs), sizeof(rwTimeoutMs));
+			return s;
+		}
+#endif
 	}
 
 	EngineBridge::EngineBridge()
@@ -79,11 +142,32 @@ namespace World::Mcp
 			CloseHandle(hProc);
 			m_LaunchedProcessHandle = 0;
 		}
+		if (m_JobHandle != 0)
+		{
+			CloseHandle(reinterpret_cast<HANDLE>(m_JobHandle));
+			m_JobHandle = 0;
+		}
 #endif
 
 		if (m_PluginManager)
 		{
 			World::Agent::WeAgentCore::Get().ResetToMinimalPolicy();
+		}
+	}
+
+	void EngineBridge::ConfigureLazy(uint16_t remotePort, const std::string& projectDir, bool allowAutoLaunchHeadless)
+	{
+		m_LazyConfigured = true;
+		m_ConfiguredPort = remotePort;
+		m_ConfiguredProjectDir = projectDir;
+		m_ConfiguredAutoLaunch = allowAutoLaunchHeadless;
+	}
+
+	void EngineBridge::EnsureInitialized()
+	{
+		if (m_LazyConfigured && !m_Initialized)
+		{
+			Initialize(m_ConfiguredPort, m_ConfiguredProjectDir, m_ConfiguredAutoLaunch);
 		}
 	}
 
@@ -115,30 +199,21 @@ namespace World::Mcp
 
 	bool EngineBridge::TryConnectSocket(uint16_t port)
 	{
-		SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#if defined(_WIN32)
+		SOCKET s = ConnectLoopbackWithTimeout(port, 150);
 		if (s == INVALID_SOCKET)
 			return false;
 
-		// 设置收发超时防止挂死
-		DWORD timeoutMs = 5000;
-		setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
-		setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
-
-		sockaddr_in addr {};
-		addr.sin_family = AF_INET;
-		addr.sin_port = htons(port);
-		inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-
-		if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR)
-		{
-			closesocket(s);
-			return false;
-		}
-
-		m_Socket = static_cast<uintptr_t>(s);
+		// 探测成功后立即释放连接，避免单客户端长连接独占 AiControlServer::ListenLoop
+		closesocket(s);
+		m_Socket = ~0ull;
 		m_RemotePort = port;
 		m_ConnectedToRemote = true;
 		return true;
+#else
+		(void)port;
+		return false;
+#endif
 	}
 
 	bool EngineBridge::TryLaunchHeadlessHost(uint16_t port, const std::string& projectDir)
@@ -148,8 +223,6 @@ namespace World::Mcp
 			? fs::path(WLD_REPO_ROOT)
 			: fs::current_path();
 
-		// Editor 才是完整创作面的宿主(scene/material/asset/capture.*);
-		// Runtime 目前没有 --ai-control 服务端,放在后面只作未来兜底。
 		std::vector<fs::path> hostCandidates = {
 			fs::path(WLD_BINARY_ROOT) / "Editor" / WLD_BUILD_TYPE / "Editor.exe",
 			fs::path(WLD_BINARY_ROOT) / "Editor" / "Debug" / "Editor.exe",
@@ -193,22 +266,50 @@ namespace World::Mcp
 			nullptr,
 			nullptr,
 			FALSE,
-			CREATE_NO_WINDOW,
+			CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB,
 			nullptr,
 			repoRoot.string().c_str(),
 			&si,
 			&pi))
 		{
-			return false;
+			// 若父进程 Job 不允许 breakaway，则回退普通 CREATE_NO_WINDOW
+			if (!CreateProcessA(
+				nullptr,
+				mutableCmd.data(),
+				nullptr,
+				nullptr,
+				FALSE,
+				CREATE_NO_WINDOW,
+				nullptr,
+				repoRoot.string().c_str(),
+				&si,
+				&pi))
+			{
+				return false;
+			}
 		}
 
 		CloseHandle(pi.hThread);
 		m_LaunchedProcessHandle = reinterpret_cast<uintptr_t>(pi.hProcess);
 
-		// 轮询等待 Headless 宿主端口就绪
-		for (int attempt = 0; attempt < 40; ++attempt)
+		// 绑定 Windows Job Object (KILL_ON_JOB_CLOSE)，保证 WeMcp.exe 退出时自动回收无头 Editor 进程
+		if (m_JobHandle == 0)
 		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(250));
+			HANDLE hJob = CreateJobObjectA(nullptr, nullptr);
+			if (hJob)
+			{
+				JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli {};
+				jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+				SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+				AssignProcessToJobObject(hJob, pi.hProcess);
+				m_JobHandle = reinterpret_cast<uintptr_t>(hJob);
+			}
+		}
+
+		// 轮询等待 Headless 宿主端口就绪
+		for (int attempt = 0; attempt < 30; ++attempt)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(150));
 			if (TryConnectSocket(port))
 				return true;
 		}
@@ -221,6 +322,7 @@ namespace World::Mcp
 
 	bool EngineBridge::Initialize(uint16_t remotePort, const std::string& projectDir, bool allowAutoLaunchHeadless)
 	{
+		m_Initialized = true;
 		if (!projectDir.empty())
 		{
 			Paths::SetProjectDirOverride(std::filesystem::u8path(projectDir));
@@ -257,7 +359,6 @@ namespace World::Mcp
 		}
 
 		m_ConnectedToRemote = false;
-		// 若本地 WeAgentCore 规则内核正常工作则可使用内嵌 Headless 模式；若策略为空则降级为只读模式 (§3.5)
 		m_ReadOnlyFallback = (World::Agent::WeAgentCore::Get().GetPolicy() == nullptr);
 		return true;
 	}
@@ -269,8 +370,16 @@ namespace World::Mcp
 		std::string& outError)
 	{
 		outCommandOk = false;
-		if (!m_ConnectedToRemote || m_Socket == ~0ull)
+		if (!m_ConnectedToRemote || m_RemotePort == 0)
 			return false;
+
+#if defined(_WIN32)
+		SOCKET s = ConnectLoopbackWithTimeout(m_RemotePort, 500);
+		if (s == INVALID_SOCKET)
+		{
+			m_ConnectedToRemote = false;
+			return false;
+		}
 
 		using namespace World::Wui;
 		JsonValue req;
@@ -282,12 +391,10 @@ namespace World::Mcp
 		}
 
 		std::string reqStr = req.Dump() + "\n";
-		SOCKET s = static_cast<SOCKET>(m_Socket);
 
 		if (send(s, reqStr.data(), static_cast<int>(reqStr.size()), 0) == SOCKET_ERROR)
 		{
 			closesocket(s);
-			m_Socket = ~0ull;
 			m_ConnectedToRemote = false;
 			return false;
 		}
@@ -303,7 +410,6 @@ namespace World::Mcp
 				if (respLine.empty())
 				{
 					closesocket(s);
-					m_Socket = ~0ull;
 					m_ConnectedToRemote = false;
 					return false;
 				}
@@ -315,6 +421,9 @@ namespace World::Mcp
 				break;
 		}
 
+		// 立即关闭短连接，确保多客户端并发访问 Editor 控制通道互不阻塞
+		closesocket(s);
+
 		const size_t newlinePos = respLine.find('\n');
 		if (newlinePos != std::string::npos)
 			respLine.resize(newlinePos);
@@ -324,7 +433,7 @@ namespace World::Mcp
 		{
 			outError = "Malformed JSON from remote host: " + respLine;
 			outCommandOk = false;
-			return true; // 传输完成但远端返回格式错误，不重跑本地
+			return true;
 		}
 
 		const auto* okVal = jsonOpt->Find("ok");
@@ -349,10 +458,19 @@ namespace World::Mcp
 		}
 
 		return true;
+#else
+		(void)cmd;
+		(void)args;
+		(void)outResult;
+		(void)outError;
+		return false;
+#endif
 	}
 
 	bool EngineBridge::Dispatch(const std::string& cmd, const std::map<std::string, std::string>& args, std::string& outResult, std::string& outError)
 	{
+		EnsureInitialized();
+
 		// §3.5 只读降级保护：当无受控宿主时，严禁放行任何 Write / Exec 命令
 		if (m_ReadOnlyFallback)
 		{
@@ -369,12 +487,11 @@ namespace World::Mcp
 			bool remoteCmdOk = false;
 			if (SendSocketCommand(cmd, args, remoteCmdOk, outResult, outError))
 			{
-				// 远端已明确响应 (无论成功或业务报错)，直接返回，绝不静默穿透到本地重跑
 				return remoteCmdOk;
 			}
 		}
 
-		if (!m_PluginManager)
+		if (!m_PluginManager && m_LazyConfigured)
 		{
 			LoadHeadlessPlugins();
 		}

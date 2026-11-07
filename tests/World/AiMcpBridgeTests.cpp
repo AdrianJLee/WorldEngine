@@ -120,6 +120,41 @@ int main()
 		CHECK(json->Find("result") != nullptr);
 		}
 
+
+	// 6. 验证 JSON-RPC 2.0 整型 ID 保真 (Codex / rmcp 客户端发送 "id": 1 时必须返回数字 1 而非字符串 "1")
+	{
+		const std::string intIdReq = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}";
+		const std::string intIdResp = server.HandleMessage(intIdReq);
+		auto json = JsonValue::Parse(intIdResp, nullptr);
+		CHECK(json.has_value());
+		const auto* idNode = json->Find("id");
+		CHECK(idNode != nullptr && idNode->type == JsonValue::Type::Number);
+		CHECK(static_cast<int>(idNode->AsNumber()) == 1);
+	}
+
+	// 7. 验证所有暴露工具的 inputSchema 均包含 type="object" 与 properties
+	{
+		server.SetCurrentRole("producer");
+		const std::string listReq = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}";
+		const std::string listResp = server.HandleMessage(listReq);
+		auto json = JsonValue::Parse(listResp, nullptr);
+		CHECK(json.has_value());
+		const auto* tools = json->Find("result")->Find("tools");
+		CHECK(tools != nullptr && !tools->Array.empty());
+		bool foundAssetImport = false;
+		for (const auto& t : tools->Array)
+		{
+			const auto* schema = t.Find("inputSchema");
+			CHECK(schema != nullptr && schema->type == JsonValue::Type::Object);
+			const auto* typeField = schema->Find("type");
+			CHECK(typeField != nullptr && typeField->AsString() == "object");
+			CHECK(schema->Find("properties") != nullptr);
+			if (t.Find("name")->AsString() == "asset.import")
+				foundAssetImport = true;
+		}
+		CHECK(foundAssetImport);
+	}
+
 	std::printf("WorldAiMcpBridgeTests PASSED.\n"); fflush(stdout);
 	std::quick_exit(0);
 	return 0;

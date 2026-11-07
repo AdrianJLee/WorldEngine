@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "World/Ai/CommandRegistry.h"
 #include "World/Agent/WeAgentCore.h"
@@ -24,6 +24,9 @@ namespace World::Mcp
 		EngineBridge();
 		~EngineBridge();
 
+		void ConfigureLazy(uint16_t remotePort = 0, const std::string& projectDir = "", bool allowAutoLaunchHeadless = true);
+		void EnsureInitialized();
+
 		bool Initialize(uint16_t remotePort = 0, const std::string& projectDir = "", bool allowAutoLaunchHeadless = true);
 		bool Dispatch(const std::string& cmd, const std::map<std::string, std::string>& args, std::string& outResult, std::string& outError);
 
@@ -41,11 +44,18 @@ namespace World::Mcp
 		bool SendSocketCommand(const std::string& cmd, const std::map<std::string, std::string>& args, bool& outCommandOk, std::string& outResult, std::string& outError);
 		void LoadHeadlessPlugins();
 
+		bool m_LazyConfigured = false;
+		bool m_Initialized = false;
+		uint16_t m_ConfiguredPort = 0;
+		std::string m_ConfiguredProjectDir;
+		bool m_ConfiguredAutoLaunch = true;
+
 		bool m_ConnectedToRemote = false;
 		bool m_ReadOnlyFallback = false;
 		uint16_t m_RemotePort = 0;
 		uintptr_t m_Socket = ~0ull; // INVALID_SOCKET
 		uintptr_t m_LaunchedProcessHandle = 0;
+		uintptr_t m_JobHandle = 0;
 
 		std::unique_ptr<World::WorldContext> m_Context;
 		std::unique_ptr<World::Plugins::PluginManager> m_PluginManager;

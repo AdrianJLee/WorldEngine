@@ -35,6 +35,9 @@ int main()
 		CHECK(registry.HasCommand("schema.list"));
 		CHECK(registry.HasCommand("schema.describe"));
 		CHECK(registry.HasCommand("api.luau_stubs"));
+		CHECK(registry.HasCommand("docs.search"));
+		CHECK(registry.HasCommand("datatable.compile"));
+		CHECK(registry.HasCommand("asset.import"));
 	}
 
 	// 2. 验证 schema.list 与 schema.describe

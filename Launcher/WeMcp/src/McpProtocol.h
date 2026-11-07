@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/WUI/WuiJson.h"
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -9,7 +10,7 @@ namespace World::Mcp
 	struct McpRequest
 	{
 		std::string jsonrpc = "2.0";
-		std::string id;
+		Wui::JsonValue id;
 		std::string method;
 		Wui::JsonValue params;
 	};
@@ -17,7 +18,7 @@ namespace World::Mcp
 	struct McpResponse
 	{
 		std::string jsonrpc = "2.0";
-		std::string id;
+		Wui::JsonValue id;
 		Wui::JsonValue result;
 		bool isError = false;
 		int errorCode = 0;
@@ -29,7 +30,7 @@ namespace World::Mcp
 			JsonValue root;
 			root.type = JsonValue::Type::Object;
 			root.Object.push_back({ "jsonrpc", JsonValue::MakeString(jsonrpc) });
-			root.Object.push_back({ "id", JsonValue::MakeString(id) });
+			root.Object.push_back({ "id", id });
 
 			if (isError)
 			{

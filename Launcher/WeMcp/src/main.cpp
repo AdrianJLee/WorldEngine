@@ -27,7 +27,7 @@ int main(int argc, char* argv[])
 	}
 
 	auto bridge = std::make_shared<World::Mcp::EngineBridge>();
-	bridge->Initialize(remotePort, projectDir);
+	bridge->ConfigureLazy(remotePort, projectDir);
 
 	World::Mcp::McpServer server;
 	if (!initialRole.empty())

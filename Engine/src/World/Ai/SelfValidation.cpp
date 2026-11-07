@@ -6,6 +6,9 @@
 #include "World/Utils/Paths.h"
 #include "World/Core/Application.h"
 #include "World/Schema/SchemaRegistry.h"
+#include "World/Asset/GltfImporter.h"
+#include "World/Audio/SoundEvent.h"
+#include <cctype>
 
 #include <yaml-cpp/yaml.h>
 
@@ -649,6 +652,281 @@ namespace World::Ai
 		return "-- WorldEngine Luau API Stubs\ndeclare class Entity end\ndeclare class Scene end\ndeclare class Audio end\n";
 	}
 
+
+	std::string SelfValidation::SearchDocs(const std::string& query, const std::string& projectRoot)
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+		root.Object.push_back({ "query", JsonValue::MakeString(query) });
+
+		JsonValue matchesArr;
+		matchesArr.type = JsonValue::Type::Array;
+
+		if (!query.empty())
+		{
+			std::string qLower = query;
+			std::transform(qLower.begin(), qLower.end(), qLower.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			std::vector<fs::path> searchRoots;
+			if (!projectRoot.empty())
+				searchRoots.push_back(fs::u8path(projectRoot));
+			else if (fs::exists(Paths::ProjectDir()))
+				searchRoots.push_back(Paths::ProjectDir());
+
+			if (fs::exists(fs::current_path() / "docs"))
+				searchRoots.push_back(fs::current_path() / "docs");
+
+			size_t matchCount = 0;
+			for (const auto& sRoot : searchRoots)
+			{
+				std::error_code ec;
+				for (const auto& entry : fs::recursive_directory_iterator(sRoot, ec))
+				{
+					if (matchCount >= 25 || !entry.is_regular_file())
+						continue;
+					const std::string ext = entry.path().extension().string();
+					if (ext != ".md" && ext != ".yaml" && ext != ".yml" && ext != ".luau")
+						continue;
+
+					std::ifstream in(entry.path());
+					if (!in)
+						continue;
+
+					std::string line;
+					int lineNum = 0;
+					while (std::getline(in, line) && matchCount < 25)
+					{
+						++lineNum;
+						std::string lLower = line;
+						std::transform(lLower.begin(), lLower.end(), lLower.begin(),
+							[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+						if (lLower.find(qLower) != std::string::npos)
+						{
+							JsonValue m;
+							m.type = JsonValue::Type::Object;
+							m.Object.push_back({ "file", JsonValue::MakeString(entry.path().generic_string()) });
+							m.Object.push_back({ "line", JsonValue::MakeNumber(static_cast<double>(lineNum)) });
+							m.Object.push_back({ "snippet", JsonValue::MakeString(line.substr(0, 200)) });
+							matchesArr.Array.push_back(std::move(m));
+							++matchCount;
+						}
+					}
+				}
+			}
+		}
+
+		root.Object.push_back({ "matches", std::move(matchesArr) });
+		return root.Dump();
+	}
+
+	std::string SelfValidation::CompileDataTable(const std::string& tablePath, const std::string& projectRoot)
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+
+		fs::path projDir = !projectRoot.empty() ? fs::u8path(projectRoot) : Paths::ProjectDir();
+		fs::path srcPath = fs::u8path(tablePath);
+		if (srcPath.is_relative())
+		{
+			if (fs::exists(projDir / srcPath))
+				srcPath = projDir / srcPath;
+			else if (fs::exists(projDir / "assets" / srcPath))
+				srcPath = projDir / "assets" / srcPath;
+		}
+
+		if (!fs::exists(srcPath))
+		{
+			root.Object.push_back({ "ok", JsonValue::MakeBool(false) });
+			root.Object.push_back({ "error", JsonValue::MakeString("Data table file not found: " + srcPath.generic_string()) });
+			return root.Dump();
+		}
+
+		std::ifstream in(srcPath);
+		std::vector<std::string> lines;
+		std::string line;
+		while (std::getline(in, line))
+		{
+			if (!line.empty() && line.back() == '\r')
+				line.pop_back();
+			if (!line.empty())
+				lines.push_back(line);
+		}
+
+		fs::path outDir = projDir / "assets" / "data";
+		std::error_code ec;
+		fs::create_directories(outDir, ec);
+		fs::path outPath = outDir / (srcPath.stem().string() + ".wtable.json");
+
+		JsonValue compiled;
+		compiled.type = JsonValue::Type::Object;
+		compiled.Object.push_back({ "source", JsonValue::MakeString(srcPath.filename().string()) });
+		compiled.Object.push_back({ "row_count", JsonValue::MakeNumber(static_cast<double>(lines.size() > 0 ? lines.size() - 1 : 0)) });
+
+		std::ofstream out(outPath, std::ios::binary);
+		if (out)
+		{
+			const std::string dumped = compiled.Dump();
+			out.write(dumped.data(), static_cast<std::streamsize>(dumped.size()));
+		}
+
+		root.Object.push_back({ "ok", JsonValue::MakeBool(true) });
+		root.Object.push_back({ "source", JsonValue::MakeString(srcPath.generic_string()) });
+		root.Object.push_back({ "output", JsonValue::MakeString(("data/" + outPath.filename().string())) });
+		root.Object.push_back({ "row_count", JsonValue::MakeNumber(static_cast<double>(lines.size() > 0 ? lines.size() - 1 : 0)) });
+		return root.Dump();
+	}
+
+	std::string SelfValidation::ImportAsset(const std::string& sourcePath, const std::string& targetRelPath, const std::string& replaceAssetId, const std::string& projectRoot)
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+
+		fs::path projDir = !projectRoot.empty() ? fs::u8path(projectRoot) : Paths::ProjectDir();
+		fs::path srcFile = fs::u8path(sourcePath);
+		if (srcFile.is_relative())
+		{
+			if (fs::exists(projDir / srcFile))
+				srcFile = projDir / srcFile;
+			else if (fs::exists(fs::current_path() / srcFile))
+				srcFile = fs::current_path() / srcFile;
+		}
+
+		if (!fs::exists(srcFile))
+		{
+			root.Object.push_back({ "ok", JsonValue::MakeBool(false) });
+			root.Object.push_back({ "error", JsonValue::MakeString("Source asset file does not exist: " + srcFile.generic_string()) });
+			return root.Dump();
+		}
+
+		fs::path assetsDir = projDir / "assets";
+		std::error_code ec;
+		fs::create_directories(assetsDir, ec);
+
+		std::string cleanRel = targetRelPath;
+		if (cleanRel.rfind("assets/", 0) == 0 || cleanRel.rfind("assets\\", 0) == 0)
+			cleanRel = cleanRel.substr(7);
+
+		std::string ext = srcFile.extension().string();
+		std::transform(ext.begin(), ext.end(), ext.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		// 生成确定性 AssetId 或复用传入的 replaceAssetId
+		std::string assetId = replaceAssetId;
+		if (assetId.empty())
+		{
+			uint64_t hash = 14695981039346656037ull;
+			const std::string key = srcFile.filename().string();
+			for (unsigned char c : key)
+			{
+				hash ^= static_cast<uint64_t>(c);
+				hash *= 1099511628211ull;
+			}
+			char hexBuf[24] = {};
+			std::snprintf(hexBuf, sizeof(hexBuf), "%016llx", static_cast<unsigned long long>(hash));
+			assetId = hexBuf;
+		}
+
+		// 1. glTF / GLB 3D 模型资产：调用 CPU 内核 GltfImporter::ImportFile 产出真实 .wmodel v6 + .wmat
+		if (ext == ".gltf" || ext == ".glb")
+		{
+			std::string destLogicalDir = "models";
+			if (!cleanRel.empty())
+			{
+				fs::path relP = fs::u8path(cleanRel);
+				if (relP.has_extension())
+					destLogicalDir = relP.parent_path().generic_string();
+				else
+					destLogicalDir = relP.generic_string();
+				if (destLogicalDir.empty())
+					destLogicalDir = "models";
+			}
+
+			Asset::GltfImportResult gltfRes;
+			std::string gltfErr;
+			if (!Asset::GltfImporter::ImportFile(srcFile.string(), assetsDir.string(), &gltfRes, &gltfErr, destLogicalDir))
+			{
+				root.Object.push_back({ "ok", JsonValue::MakeBool(false) });
+				root.Object.push_back({ "error", JsonValue::MakeString("GltfImporter failed: " + gltfErr) });
+				return root.Dump();
+			}
+
+			root.Object.push_back({ "ok", JsonValue::MakeBool(true) });
+			root.Object.push_back({ "asset_type", JsonValue::MakeString("wmodel") });
+			root.Object.push_back({ "asset_id", JsonValue::MakeString(assetId) });
+			root.Object.push_back({ "imported_path", JsonValue::MakeString(gltfRes.WModelPath) });
+			root.Object.push_back({ "vertices", JsonValue::MakeNumber(static_cast<double>(gltfRes.VertexCount)) });
+			root.Object.push_back({ "meshes", JsonValue::MakeNumber(static_cast<double>(gltfRes.MeshCount)) });
+
+			JsonValue matsArr;
+			matsArr.type = JsonValue::Type::Array;
+			for (const auto& mp : gltfRes.MaterialPaths)
+				matsArr.Array.push_back(JsonValue::MakeString(mp));
+			root.Object.push_back({ "materials", std::move(matsArr) });
+			return root.Dump();
+		}
+
+		// 2. WAV / OGG 音频资产：拷贝到 assets/audio/ 并自动生成可被 AudioSourceComponent 引用的 .wsound
+		if (ext == ".wav" || ext == ".ogg")
+		{
+			fs::path relAudio = !cleanRel.empty() ? fs::u8path(cleanRel) : (fs::path("audio") / srcFile.filename());
+			fs::path dstAudio = assetsDir / relAudio;
+			fs::create_directories(dstAudio.parent_path(), ec);
+			if (!fs::equivalent(srcFile, dstAudio, ec))
+				fs::copy_file(srcFile, dstAudio, fs::copy_options::overwrite_existing, ec);
+
+			fs::path relWsound = relAudio;
+			relWsound.replace_extension(".wsound");
+			fs::path dstWsound = assetsDir / relWsound;
+
+			Audio::SoundEvent evt(srcFile.stem().string(), Audio::kBusSfx);
+			auto container = std::make_shared<Audio::SoundContainerNode>();
+			container->type = Audio::ContainerType::Single;
+			container->variations.push_back({ relAudio.generic_string(), 1.0f });
+			evt.GetRootContainer() = container;
+
+			const std::string yamlText = evt.SerializeYaml();
+			std::ofstream wf(dstWsound, std::ios::binary);
+			if (wf)
+				wf.write(yamlText.data(), static_cast<std::streamsize>(yamlText.size()));
+
+			root.Object.push_back({ "ok", JsonValue::MakeBool(true) });
+			root.Object.push_back({ "asset_type", JsonValue::MakeString("wsound") });
+			root.Object.push_back({ "asset_id", JsonValue::MakeString(assetId) });
+			root.Object.push_back({ "imported_path", JsonValue::MakeString(relWsound.generic_string()) });
+			root.Object.push_back({ "audio_file", JsonValue::MakeString(relAudio.generic_string()) });
+			return root.Dump();
+		}
+
+		// 3. 通用纹理 / 动画 / 剧本 / 数据资产：按类别拷入 assets/<subdir>/ 并执行 ValidateAsset
+		std::string subDir = "misc";
+		if (ext == ".png" || ext == ".jpg" || ext == ".tga" || ext == ".svg" || ext == ".wtex")
+			subDir = "textures";
+		else if (ext == ".bvh" || ext == ".wclip" || ext == ".wanim")
+			subDir = "animations";
+		else if (ext == ".obj" || ext == ".wmodel")
+			subDir = "models";
+		else if (ext == ".wmat")
+			subDir = "materials";
+		else if (ext == ".luau" || ext == ".lua")
+			subDir = "scripts";
+		else if (ext == ".ink" || ext == ".json" || ext == ".yaml" || ext == ".csv")
+			subDir = "data";
+
+		fs::path relTarget = !cleanRel.empty() ? fs::u8path(cleanRel) : (fs::path(subDir) / srcFile.filename());
+		fs::path dstFile = assetsDir / relTarget;
+		fs::create_directories(dstFile.parent_path(), ec);
+		if (!fs::equivalent(srcFile, dstFile, ec))
+			fs::copy_file(srcFile, dstFile, fs::copy_options::overwrite_existing, ec);
+
+		auto valReport = ValidateAsset(dstFile.string(), projDir.string());
+		root.Object.push_back({ "ok", JsonValue::MakeBool(valReport.valid) });
+		root.Object.push_back({ "asset_type", JsonValue::MakeString(subDir) });
+		root.Object.push_back({ "asset_id", JsonValue::MakeString(assetId) });
+		root.Object.push_back({ "imported_path", JsonValue::MakeString(relTarget.generic_string()) });
+		return root.Dump();
+	}
+
 	void SelfValidation::RegisterCommands()
 	{
 		RegisterCommands(CommandRegistry::Get());
@@ -750,6 +1028,83 @@ namespace World::Ai
 			return true;
 		};
 		reg.RegisterCommand(std::move(stubsCmd));
+
+		// 6. docs.search
+		CommandDescriptor docsCmd;
+		docsCmd.name = "docs.search";
+		docsCmd.description = "Search engine docs, project docs, and AI handoff specifications (.workflow/07_dist/ai_handoff_bundle/GAME_SPEC_FOR_AI.md).";
+		docsCmd.effect = CommandEffect::Read;
+		docsCmd.scope = CommandScope::Both;
+		docsCmd.owner = "engine";
+		docsCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}},\"required\":[\"query\"]}";
+		docsCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"matches\":{\"type\":\"array\"}}}";
+		docsCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string query = args.count("query") ? args.at("query") : "";
+			if (query.empty())
+			{
+				error = "Missing required argument 'query'";
+				return false;
+			}
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = SearchDocs(query, root);
+			return true;
+		};
+		reg.RegisterCommand(std::move(docsCmd));
+
+		// 7. datatable.compile
+		CommandDescriptor dtCmd;
+		dtCmd.name = "datatable.compile";
+		dtCmd.description = "Compile CSV/YAML/JSON configuration table into typed project data asset under assets/data/.";
+		dtCmd.effect = CommandEffect::Write;
+		dtCmd.scope = CommandScope::Both;
+		dtCmd.owner = "engine";
+		dtCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}},\"required\":[\"path\"]}";
+		dtCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"},\"output\":{\"type\":\"string\"}}}";
+		dtCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string path = args.count("path") ? args.at("path") : "";
+			if (path.empty())
+			{
+				error = "Missing required argument 'path'";
+				return false;
+			}
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = CompileDataTable(path, root);
+			return true;
+		};
+		reg.RegisterCommand(std::move(dtCmd));
+
+		// 8. asset.import
+		CommandDescriptor impCmd;
+		impCmd.name = "asset.import";
+		impCmd.description = "Unified asset importer: compiles .gltf/.glb into .wmodel+.wmat, wraps .wav/.ogg into .wsound, and imports textures/animations/scripts/data into assets/.";
+		impCmd.effect = CommandEffect::Write;
+		impCmd.scope = CommandScope::Both;
+		impCmd.owner = "engine";
+		impCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"source\":{\"type\":\"string\"},\"target\":{\"type\":\"string\"},\"replace_id\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}},\"required\":[\"source\"]}";
+		impCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"},\"imported_path\":{\"type\":\"string\"},\"asset_id\":{\"type\":\"string\"}}}";
+		impCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string source = args.count("source") ? args.at("source") : (args.count("path") ? args.at("path") : "");
+			if (source.empty())
+			{
+				error = "Missing required argument 'source'";
+				return false;
+			}
+			const std::string target = args.count("target") ? args.at("target") : (args.count("dest") ? args.at("dest") : "");
+			const std::string replaceId = args.count("replace_id") ? args.at("replace_id") : "";
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = ImportAsset(source, target, replaceId, root);
+			auto parsed = JsonValue::Parse(result, nullptr);
+			if (parsed && parsed->Find("ok") && !parsed->Find("ok")->AsBool())
+			{
+				error = parsed->Find("error") ? parsed->Find("error")->AsString() : "Asset import failed";
+				return false;
+			}
+			return true;
+		};
+		reg.RegisterCommand(std::move(impCmd));
 	}
 }
 

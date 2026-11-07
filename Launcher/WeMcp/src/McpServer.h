@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "McpProtocol.h"
 #include "EngineBridge.h"
@@ -31,9 +31,9 @@ namespace World::Mcp
 		void RunStdioLoop(std::istream& in = std::cin, std::ostream& out = std::cout);
 
 	private:
-		std::string HandleInitialize(const std::string& id, const Wui::JsonValue& params);
-		std::string HandleToolsList(const std::string& id);
-		std::string HandleToolsCall(const std::string& id, const Wui::JsonValue& params, bool* outShouldNotifyListChanged);
+		std::string HandleInitialize(const Wui::JsonValue& id, const Wui::JsonValue& params);
+		std::string HandleToolsList(const Wui::JsonValue& id);
+		std::string HandleToolsCall(const Wui::JsonValue& id, const Wui::JsonValue& params, bool* outShouldNotifyListChanged);
 
 		std::shared_ptr<EngineBridge> m_Bridge;
 		std::string m_CurrentRole;

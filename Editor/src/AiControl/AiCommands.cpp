@@ -1096,7 +1096,7 @@ namespace World
 
 		auto addCmd = [&](const std::string& name, const std::string& desc,
 			World::Ai::CommandEffect effect, World::Ai::CommandScope scope,
-			const std::string& paramsSchema = "{}", const std::string& resultSchema = "{}")
+			const std::string& paramsSchema = "{\"type\":\"object\",\"properties\":{}}", const std::string& resultSchema = "{\"type\":\"object\"}")
 		{
 			World::Ai::CommandDescriptor d;
 			d.name = name;
@@ -1147,7 +1147,7 @@ namespace World
 		addCmd("ui.activate", "Activate a tab or panel in shell.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("viewport.set_tool_mode", "Set editor tool mode (select, landscape, foliage).", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"mode\":{\"type\":\"string\"}}}");
 		addCmd("terrain.set_tab", "Set terrain panel active tab (sculpt, paint, settings).", CommandEffect::Write, CommandScope::EditorOnly);
-		addCmd("viewport.set_camera", "Set viewport 3D camera target, distance, yaw and pitch.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("viewport.set_camera", "Set viewport 3D camera target, distance, yaw and pitch.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\"},\"distance\":{\"type\":\"number\"},\"yaw\":{\"type\":\"number\"},\"pitch\":{\"type\":\"number\"}}}");
 		addCmd("ui.layout.get", "Get current WUI dock layout json.", CommandEffect::Read, CommandScope::EditorOnly);
 		addCmd("ui.popup", "Open a popup by name (e.g. viewport.view.popup, viewport.show.popup).", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}");
 
@@ -1161,21 +1161,21 @@ namespace World
 
 		// 场景与实体族
 		addCmd("scene.list", "List entities in current scene.", CommandEffect::Read, CommandScope::Both);
-		addCmd("scene.select", "Select entity by id or name.", CommandEffect::Write, CommandScope::EditorOnly);
-		addCmd("scene.get", "Get entity component values.", CommandEffect::Read, CommandScope::Both);
-		addCmd("scene.set", "Set component field value on an entity.", CommandEffect::Write, CommandScope::Both);
-		addCmd("scene.open", "Open scene file by path.", CommandEffect::Write, CommandScope::Both);
-		addCmd("scene.save", "Save active scene.", CommandEffect::Write, CommandScope::Both);
-		addCmd("scene.query", "Query entities by component predicate.", CommandEffect::Read, CommandScope::Both);
+		addCmd("scene.select", "Select entity by id or name.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"handle\":{\"type\":\"string\"},\"uuid\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"}}}");
+		addCmd("scene.get", "Get entity component values.", CommandEffect::Read, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"handle\":{\"type\":\"string\"},\"uuid\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"component\":{\"type\":\"string\"},\"property\":{\"type\":\"string\"}}}");
+		addCmd("scene.set", "Set component field value on an entity.", CommandEffect::Write, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"handle\":{\"type\":\"string\"},\"uuid\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"component\":{\"type\":\"string\"},\"property\":{\"type\":\"string\"},\"value\":{\"type\":\"string\"}},\"required\":[\"property\",\"value\"]}");
+		addCmd("scene.open", "Open scene file by path.", CommandEffect::Write, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
+		addCmd("scene.save", "Save active scene.", CommandEffect::Write, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}");
+		addCmd("scene.query", "Query entities by component predicate.", CommandEffect::Read, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"component\":{\"type\":\"string\"}},\"required\":[\"component\"]}");
 		addCmd("scene.create_entity", "Create a real entity with Tag/UUID/Transform.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"location\":{\"type\":\"string\"},\"rotation\":{\"type\":\"string\"},\"scale\":{\"type\":\"string\"}}}");
-		addCmd("scene.delete_entity", "Delete an entity by handle or name.", CommandEffect::Write, CommandScope::EditorOnly);
-		addCmd("scene.add_component", "Add a schema component to an entity.", CommandEffect::Write, CommandScope::EditorOnly);
-		addCmd("scene.remove_component", "Remove a non-core schema component from an entity.", CommandEffect::Write, CommandScope::EditorOnly);
-		addCmd("scene.create_level", "Create a new .wlevel package and open it.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("scene.delete_entity", "Delete an entity by handle or name.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"handle\":{\"type\":\"string\"},\"uuid\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"}}}");
+		addCmd("scene.add_component", "Add a schema component to an entity.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"handle\":{\"type\":\"string\"},\"uuid\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"component\":{\"type\":\"string\"}},\"required\":[\"component\"]}");
+		addCmd("scene.remove_component", "Remove a non-core schema component from an entity.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"handle\":{\"type\":\"string\"},\"uuid\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"component\":{\"type\":\"string\"}},\"required\":[\"component\"]}");
+		addCmd("scene.create_level", "Create a new .wlevel package and open it.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"id\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
 
 		// 材质族
-		addCmd("material.get", "Get material parameters by path.", CommandEffect::Read, CommandScope::Both);
-		addCmd("material.set", "Set material property by path and field name.", CommandEffect::Write, CommandScope::Both);
+		addCmd("material.get", "Get material parameters by path.", CommandEffect::Read, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
+		addCmd("material.set", "Set material property by path and field name.", CommandEffect::Write, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"property\":{\"type\":\"string\"},\"value\":{\"type\":\"string\"}},\"required\":[\"path\",\"property\",\"value\"]}");
 
 		// 资产族
 		addCmd("asset.create_atlas", "Create sprite atlas asset.", CommandEffect::Write, CommandScope::EditorOnly);
@@ -1185,7 +1185,7 @@ namespace World
 		addCmd("asset.open_material", "Open material in editor.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.open_animgraph", "Open an animation graph in the Anim Graph editor.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}");
 		addCmd("asset.open_physmat", "Open physics material in editor.", CommandEffect::Write, CommandScope::EditorOnly);
-		addCmd("asset.import_gltf", "Import glTF model into project.", CommandEffect::Write, CommandScope::EditorOnly);
+		addCmd("asset.import_gltf", "Import glTF model into project.", CommandEffect::Write, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"dest\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
 		addCmd("asset.create_prefab", "Create prefab asset from entity selection.", CommandEffect::Write, CommandScope::Both);
 		addCmd("asset.open_prefab", "Open prefab asset for inspection.", CommandEffect::Write, CommandScope::EditorOnly);
 		addCmd("asset.edit_prefab", "Edit prefab entity component.", CommandEffect::Write, CommandScope::EditorOnly);
@@ -1199,7 +1199,7 @@ namespace World
 		addCmd("play.resume", "Resume play simulation.", CommandEffect::Exec, CommandScope::EditorOnly);
 
 		// 音频族
-		addCmd("audio.post", "Post a sound event by name.", CommandEffect::Exec, CommandScope::Both);
+		addCmd("audio.post", "Post a sound event by name.", CommandEffect::Exec, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"event\":{\"type\":\"string\"}},\"required\":[\"event\"]}");
 		addCmd("audio.post_combo", "Post a sound event with combo pitch escalation.", CommandEffect::Exec, CommandScope::Both);
 		addCmd("audio.stop_all", "Stop all active audio voices.", CommandEffect::Exec, CommandScope::Both);
 		addCmd("audio.list_events", "List all registered sound events.", CommandEffect::Read, CommandScope::Both);
@@ -1209,8 +1209,8 @@ namespace World
 
 
 		// 截屏与遥测
-		addCmd("capture.screen", "Capture entire editor window frame.", CommandEffect::Read, CommandScope::EditorOnly);
-		addCmd("capture.scene", "Capture viewport scene color buffer.", CommandEffect::Read, CommandScope::Both);
+		addCmd("capture.screen", "Capture entire editor window frame.", CommandEffect::Read, CommandScope::EditorOnly, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
+		addCmd("capture.scene", "Capture viewport scene color buffer.", CommandEffect::Read, CommandScope::Both, "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
 		addCmd("capture.float", "Capture specific floating window frame.", CommandEffect::Read, CommandScope::EditorOnly);
 		addCmd("capture.texture", "Capture asset preview texture buffer.", CommandEffect::Read, CommandScope::EditorOnly);
 		addCmd("state.dump", "Dump full editor and scene state JSON.", CommandEffect::Read, CommandScope::Both);
