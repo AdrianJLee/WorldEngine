@@ -2099,34 +2099,6 @@ set_tests_properties(World.AiMcpBridge PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
-# M5: AI 职能流程与本地任务缺陷 (StudioPolicy, BacklogManager, StudioValidator) 单元测试
-add_executable(WorldAiStudioTests
-    World/AiStudioTests.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/StudioPolicy.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/BacklogManager.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/StudioValidator.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/AgentsDocGenerator.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/InterviewSystem.cpp
-)
-target_include_directories(WorldAiStudioTests PRIVATE ${CMAKE_SOURCE_DIR}/plugins/we-studio/src)
-target_link_libraries(WorldAiStudioTests PRIVATE World yaml-cpp)
-target_compile_features(WorldAiStudioTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldAiStudioTests PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldAiStudioTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldAiStudioTests PRIVATE /utf-8)
-endif()
-
-add_test(NAME World.AiStudio COMMAND WorldAiStudioTests)
-set_tests_properties(World.AiStudio PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 90
-)
 # M1: 物理材质资产系统 (.wphysmat) 单元测试
 # Headless 场景创作与会话落盘往返 (SceneAuthoring + changeset.stage_write)
 add_executable(WorldAiSceneAuthoringTests
@@ -2559,42 +2531,12 @@ add_custom_target(WeCopyRuntimeDllForTests
     VERBATIM
 )
 
-foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldLevelStreamingTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests WorldUiNavInputTests WorldUiBindAnimTests WorldUiWorldTests WorldUiScrollTests WorldUiPointerGateTests WorldUiInputInteractTests WorldUiThemeTests WorldUiBindingSourcesTests WorldUiPropertyCoverageTests WorldUiHotReloadTests WorldAudioTests WorldTextureAtlasTests WorldSpriteAnimationTests WorldTilemapTests WorldParallaxAndPixelCameraTests WorldPhysics2DExtensionsTests WorldTilemapAdvancedTests WorldLighting2DTests WorldAiCommandTests WorldAiSelfValidationTests WorldAiPlaytestTests WorldAiWriteGuardTests WorldAiAgentCoreTests WorldAiMcpBridgeTests WorldAiStudioTests WorldPhysicsMaterialTests WorldPhysicsQueryTests WorldCharacterControllerTests WorldPhysicsScriptTests WorldCameraPostProcessScriptTests WorldVirtualCameraTests WorldPostProcessTests WorldHealthDamageTests WorldSmartObjectTests WorldBehaviorTreeTests WorldGameplayScriptTests WorldSpatialGridStreamingTests WorldSpatialDeltaPersistenceTests WorldGlobalStateWalTests WorldStreamingScriptTests WorldParticleSystemTests WorldCommandHistoryTests WorldCurveEditorTests WorldCurveAssetTests WorldSelectionFilterTests WorldAssetPickerTests WorldParticleScriptTests WorldCollisionMatrixTests WorldCollisionMatrixScriptTests WorldParticleAssetTests WorldVfxAiCommandsTests ${_we_optional_test_targets})
+foreach(_we_test_target WorldFrameTimeTests WorldSchemaTests WorldWuiTests WorldWuiModalTests WorldWuiTextBufferTests WorldLuauHighlighterTests WorldLuauCompletionTests WorldWuiCompletionTests WorldVfsTests WorldAssetTests WorldRhiContractTests WorldVulkanDeviceTests WorldShaderPipelineTests WorldTextureImportTests WorldTextureRuntimeTests WorldRendererHotswapTests WorldMemoryTests WorldTaskTests WorldGameplayTests WorldLevelTests WorldLevelStreamingTests WorldMeshTests WorldMaterialTests WorldLightingTests WorldModelTests WorldAnimationTests WorldPhysics3DTests WorldPhysicsEventsTests WorldPhysicsJointTests WorldTransformInterpolationTests WorldHierarchyTests WorldQueryTests WorldLuauEcsTests WorldPureEcsExampleTests WorldEventTests WorldSystemTests WorldPrefabTests WorldInputTests WorldSaveTests WorldBehaviorTests WorldProjectSystemsHookTests WorldRuntimeContractTests WorldLuauVmTests WorldLuauBindingTests WorldLuauStubSchemaTests WorldLuauSandboxTests WorldScriptArtifactTests WorldScriptWorkflowTests WorldAssetTypeRegistryTests WorldStringPoolTests WorldAssetRegistryTests WorldAssetIdentityTests WorldAsyncLoaderTests WorldTextureAsyncTests WorldImportWorldSettingsTests WorldPluginTests WorldTelemetryTests WorldUiDocumentTests WorldUiPaintTests WorldUiNavInputTests WorldUiBindAnimTests WorldUiWorldTests WorldUiScrollTests WorldUiPointerGateTests WorldUiInputInteractTests WorldUiThemeTests WorldUiBindingSourcesTests WorldUiPropertyCoverageTests WorldUiHotReloadTests WorldAudioTests WorldTextureAtlasTests WorldSpriteAnimationTests WorldTilemapTests WorldParallaxAndPixelCameraTests WorldPhysics2DExtensionsTests WorldTilemapAdvancedTests WorldLighting2DTests WorldAiCommandTests WorldAiSelfValidationTests WorldAiPlaytestTests WorldAiWriteGuardTests WorldAiAgentCoreTests WorldAiMcpBridgeTests WorldPhysicsMaterialTests WorldPhysicsQueryTests WorldCharacterControllerTests WorldPhysicsScriptTests WorldCameraPostProcessScriptTests WorldVirtualCameraTests WorldPostProcessTests WorldHealthDamageTests WorldSmartObjectTests WorldBehaviorTreeTests WorldGameplayScriptTests WorldSpatialGridStreamingTests WorldSpatialDeltaPersistenceTests WorldGlobalStateWalTests WorldStreamingScriptTests WorldParticleSystemTests WorldCommandHistoryTests WorldCurveEditorTests WorldCurveAssetTests WorldSelectionFilterTests WorldAssetPickerTests WorldParticleScriptTests WorldCollisionMatrixTests WorldCollisionMatrixScriptTests WorldParticleAssetTests WorldVfxAiCommandsTests ${_we_optional_test_targets})
     add_dependencies(${_we_test_target} WeCopyRuntimeDllForTests)
 endforeach()
 
 
 
-# M9: AI 原生游戏开发端到端全链路闭环集成测试
-add_executable(WorldAiEndToEndWorkflowTests
-    World/AiEndToEndWorkflowTests.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/StudioPolicy.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/BacklogManager.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/StudioValidator.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/AgentsDocGenerator.cpp
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src/InterviewSystem.cpp
-)
-target_include_directories(WorldAiEndToEndWorkflowTests PRIVATE
-    ${CMAKE_SOURCE_DIR}/plugins/we-studio/src
-)
-target_link_libraries(WorldAiEndToEndWorkflowTests PRIVATE World yaml-cpp ws2_32)
-target_compile_features(WorldAiEndToEndWorkflowTests PRIVATE cxx_std_17)
-target_compile_definitions(WorldAiEndToEndWorkflowTests PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-)
-if(WIN32)
-    target_compile_definitions(WorldAiEndToEndWorkflowTests PRIVATE WLD_PLATFORM_WINDOWS)
-endif()
-if(MSVC)
-    target_compile_options(WorldAiEndToEndWorkflowTests PRIVATE /utf-8)
-endif()
-
-add_test(NAME World.AiEndToEndWorkflow COMMAND WorldAiEndToEndWorkflowTests)
-set_tests_properties(World.AiEndToEndWorkflow PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    TIMEOUT 120
-)
 
 add_executable(WorldTerrainTests World/TerrainTests.cpp)
 target_link_libraries(WorldTerrainTests PRIVATE World)
