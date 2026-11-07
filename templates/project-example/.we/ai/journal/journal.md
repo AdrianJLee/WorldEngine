@@ -1,2 +1,0 @@
-# AI Workflow Session Journal
-

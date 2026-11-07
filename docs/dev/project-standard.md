@@ -35,6 +35,8 @@
                               #   由项目构建收集(存在性判断;没有 plugins/ = 零行为变化);
                               #   创建入口:File ▸ New Plugin…(见 plugin-framework.md)
   .vscode/  .luau-lsp/        # 可选:Lua IDE 配置
+  .we/                        # 内部元数据:引擎关联与本地 AI 沙箱(.we/engine-root.txt 记录关联引擎根;
+                              #   .we/ai/{writes,changesets} 为 MCP/WriteGuard 审计与备份目录)
 ```
 
 清单字段(与 `ProjectManifest` 同源;由引擎 writer 生成):
@@ -46,6 +48,7 @@
 
 - 把构建产物(`.lib/.obj/.pdb/.exe/.dll`)写进项目根(构建目录只放 `build/**` 或项目自己的忽略目录);
 - 在 `assets/**` 里放 C++ 源码(`.h/.cpp` 属于 `src/**`);
+- 在项目根散落 `art/` 等非标准资产目录(所有内容资产必须进入 `assets/**` 内容根);
 - 空白项目里出现示例内容(脚本名含 `Example`/`StressTest` 等;示例内容见 `templates/project-example/**`)。
 
 ## 3. 创建方式(标准流程)

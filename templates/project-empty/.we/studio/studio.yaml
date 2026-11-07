@@ -1,5 +1,0 @@
-extends: default
-collaboration_mode: managed
-unattributed_changes: block
-forbid_dark_patterns: true
-on_engine_gap: report_and_workaround
