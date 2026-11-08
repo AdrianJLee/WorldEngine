@@ -585,6 +585,64 @@ namespace World::Ai
 		Input::ClearSimulatedKeys();
 		ScriptEngine::ClearScriptErrors();
 
+		// [物理硬门禁] 探测受控玩家实体与 2D/3D 模式，记录初始空间位置
+		Entity playerEntity;
+		glm::vec3 playerStartPos { 0.0f };
+		bool playerFound = false;
+		bool is2DScene = false;
+
+		auto toLowerStr = [](std::string s) {
+			for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			return s;
+		};
+
+		// 检查正交相机或 2D 场景标志
+		for (auto handle : targetScene->GetRegistry().view<CameraComponent>())
+		{
+			const auto& cam = targetScene->GetRegistry().get<CameraComponent>(handle);
+			if (cam.Primary && cam.Camera.m_ProjectionType == CameraSettings::ProjectionType::Orthographic)
+			{
+				is2DScene = true;
+				break;
+			}
+		}
+		if (!is2DScene)
+		{
+			const auto& reg = targetScene->GetRegistry();
+			if (!reg.view<SpriteComponent>().empty() && reg.view<MeshRendererComponent>().empty())
+				is2DScene = true;
+		}
+
+		// 寻找玩家受控角色实体
+		for (auto handle : targetScene->GetRegistry().view<TagComponent, TransformComponent>())
+		{
+			const auto& tagComp = targetScene->GetRegistry().get<TagComponent>(handle);
+			const std::string tagName = toLowerStr(StringPool::Get().NameOf(tagComp.Tag));
+			const bool hasListener = targetScene->GetRegistry().all_of<AudioListenerComponent>(handle);
+			if (hasListener || tagName.find("player") != std::string::npos ||
+				tagName.find("char_") != std::string::npos || tagName.find("hero") != std::string::npos)
+			{
+				playerEntity = Entity(targetScene, handle);
+				playerStartPos = targetScene->GetRegistry().get<TransformComponent>(handle).Location;
+				playerFound = true;
+				break;
+			}
+		}
+
+		// 统计移动按键帧数
+		int movementInputFrames = 0;
+		for (const auto& inp : config.inputs)
+		{
+			std::string k = toLowerStr(inp.key);
+			if (k == "w" || k == "a" || k == "s" || k == "d" ||
+				k == "up" || k == "down" || k == "left" || k == "right" ||
+				k == "moveleft" || k == "moveright" || k == "moveup" || k == "movedown")
+			{
+				if (inp.type == "key_down" || inp.type == "press" || inp.type == "keydown")
+					movementInputFrames++;
+			}
+		}
+
 		const auto start = std::chrono::high_resolution_clock::now();
 
 		try
@@ -743,6 +801,55 @@ namespace World::Ai
 			result.logs.push_back("scene_report: " + report.Dump());
 		}
 
+		// [物理硬门禁 1] 渲染实体退化零尺寸硬检 (Degenerate zero scale check)
+		for (auto handle : targetScene->GetRegistry().view<TagComponent, TransformComponent>())
+		{
+			const bool isRenderable = targetScene->GetRegistry().any_of<SpriteComponent, MeshRendererComponent>(handle);
+			if (!isRenderable)
+				continue;
+
+			const auto& tagComp = targetScene->GetRegistry().get<TagComponent>(handle);
+			const std::string tagName = toLowerStr(StringPool::Get().NameOf(tagComp.Tag));
+			if (tagName.find("marker") != std::string::npos || tagName.find("dummy") != std::string::npos ||
+				tagName.find("hidden") != std::string::npos || tagName.find("debug") != std::string::npos)
+				continue;
+
+			const auto& tc = targetScene->GetRegistry().get<TransformComponent>(handle);
+			if (std::abs(tc.Scale.x) < 1e-4f || std::abs(tc.Scale.y) < 1e-4f || std::abs(tc.Scale.z) < 1e-4f)
+			{
+				result.failures.push_back("Assertion failed: Renderable entity '" + StringPool::Get().NameOf(tagComp.Tag) +
+					"' has degenerate zero scale: [" + std::to_string(tc.Scale.x) + ", " +
+					std::to_string(tc.Scale.y) + ", " + std::to_string(tc.Scale.z) + "]. Visual scale must be non-zero.");
+				result.pass = false;
+			}
+		}
+
+		// [物理硬门禁 2] 输入-位移因果因变硬断言 (Input-Kinematics Causality Assertion)
+		if (playerFound && movementInputFrames >= 10 && playerEntity.IsValid())
+		{
+			const glm::vec3 playerEndPos = playerEntity.GetComponent<TransformComponent>().Location;
+			const glm::vec3 delta = playerEndPos - playerStartPos;
+			const float totalDist = glm::length(delta);
+			const float planarDist = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+			const float zDist = std::abs(delta.z);
+
+			if (totalDist < 0.05f)
+			{
+				result.failures.push_back("Assertion failed: Player entity '" + StringPool::Get().NameOf(playerEntity.GetComponent<TagComponent>().Tag) +
+					"' remained stationary (delta = " + std::to_string(totalDist) + "m) despite " +
+					std::to_string(movementInputFrames) + " active movement input frames. Kinematics or input mapping is broken. " +
+					"(HINT: in Luau, assign full Vector3 to transform.Location = MakeVec3(x, y, z); direct assignment to transform.Location.x modifies a temporary value).");
+				result.pass = false;
+			}
+			else if (is2DScene && zDist > 0.05f && planarDist < 0.01f)
+			{
+				result.failures.push_back("Assertion failed: 2D player entity '" + StringPool::Get().NameOf(playerEntity.GetComponent<TagComponent>().Tag) +
+					"' moved along camera depth Z-axis (deltaZ = " + std::to_string(zDist) +
+					"m) instead of 2D XY plane. Check movement coordinates in gameplay systems.");
+				result.pass = false;
+			}
+		}
+
 		for (const auto& assertStr : config.asserts)
 		{
 			if (assertStr == "no_script_errors" || assertStr == "assert:no_script_errors")
@@ -874,6 +981,40 @@ namespace World::Ai
 			else if (assertStr == "no_crashes")
 			{
 				// Handled by simulation try-catch
+			}
+			else if (assertStr == "player_moved" || assertStr == "assert:player_moved")
+			{
+				if (!playerFound || !playerEntity.IsValid())
+				{
+					result.failures.push_back("Assertion failed: player_moved (no player entity found in scene)");
+					result.pass = false;
+				}
+				else
+				{
+					const glm::vec3 playerEndPos = playerEntity.GetComponent<TransformComponent>().Location;
+					if (glm::length(playerEndPos - playerStartPos) < 0.05f)
+					{
+						result.failures.push_back("Assertion failed: player_moved (player entity remained stationary)");
+						result.pass = false;
+					}
+				}
+			}
+			else if (assertStr == "2d_planar" || assertStr == "assert:2d_planar")
+			{
+				if (playerFound && playerEntity.IsValid())
+				{
+					const glm::vec3 playerEndPos = playerEntity.GetComponent<TransformComponent>().Location;
+					const glm::vec3 delta = playerEndPos - playerStartPos;
+					if (std::abs(delta.z) > 0.05f && std::sqrt(delta.x * delta.x + delta.y * delta.y) < 0.01f)
+					{
+						result.failures.push_back("Assertion failed: 2d_planar (motion deviated into depth Z-axis)");
+						result.pass = false;
+					}
+				}
+			}
+			else if (assertStr == "valid_scales" || assertStr == "assert:valid_scales")
+			{
+				// Handled by default scale check
 			}
 			else if (assertStr.rfind("luau:", 0) == 0)
 			{

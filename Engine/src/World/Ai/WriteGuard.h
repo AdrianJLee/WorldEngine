@@ -34,6 +34,9 @@ namespace World::Ai
 			const WritePermission* perm,
 			std::string& outReason) const;
 
+		// 根据角色 ID 获取默认权限配置（白名单与黑名单，空角色或未受限角色保持全开）
+		static WritePermission GetDefaultPermissionForRole(const std::string& roleId);
+
 		// 记录合法的通道写入到 <projectRoot>/.we/ai/writes/<sessionId>.jsonl
 		bool RecordWrite(const std::string& targetPath,
 			const std::string& projectRoot,

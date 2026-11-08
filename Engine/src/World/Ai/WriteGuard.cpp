@@ -166,4 +166,87 @@ namespace World::Ai
 
 		return true;
 	}
+
+	WritePermission WriteGuard::GetDefaultPermissionForRole(const std::string& roleId)
+	{
+		WritePermission perm;
+		perm.roleId = roleId;
+
+		if (roleId.empty())
+			return perm;
+
+		std::string lowerRole = roleId;
+		for (char& c : lowerRole)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+		// 1. 策划、总监、制作人、叙事、音效等非程序员角色：绝对禁止写入脚本与源码
+		if (lowerRole == "producer" || lowerRole == "executive_producer" ||
+			lowerRole == "game_director" || lowerRole == "creative_director" ||
+			lowerRole == "lead_designer" || lowerRole == "game_designer" ||
+			lowerRole == "level_designer" || lowerRole == "narrative" ||
+			lowerRole == "writer" || lowerRole == "sound_designer" ||
+			lowerRole == "composer" || lowerRole == "audio_designer")
+		{
+			perm.deniedGlobs = {
+				"assets/scripts/**",
+				"assets/scripts/*.luau",
+				"assets/scripts/*.lua",
+				"src/**",
+				"*.cpp",
+				"*.h",
+				"CMakeLists.txt"
+			};
+			perm.allowedGlobs = {
+				"design/**",
+				"assets/data/**",
+				"assets/audio/**",
+				"assets/scenes/**",
+				"assets/levels/**",
+				".workflow/**",
+				"project.we.yaml",
+				"README.md",
+				"CLAUDE.md",
+				"AGENTS.md"
+			};
+		}
+		// 2. 美术角色：仅允许写入贴图、模型、材质、预制体、特效
+		else if (lowerRole == "2d_artist" || lowerRole == "3d_artist" ||
+			lowerRole == "artist" || lowerRole == "animator" || lowerRole == "vfx_artist")
+		{
+			perm.deniedGlobs = {
+				"assets/scripts/**",
+				"src/**",
+				"*.cpp",
+				"*.h",
+				"CMakeLists.txt"
+			};
+			perm.allowedGlobs = {
+				"assets/textures/**",
+				"assets/materials/**",
+				"assets/models/**",
+				"assets/prefabs/**",
+				"assets/shaders/**",
+				".workflow/**"
+			};
+		}
+		// 3. 程序员角色：允许写入脚本与源码
+		else if (lowerRole == "gameplay_programmer" || lowerRole == "programmer" ||
+			lowerRole == "engineer" || lowerRole == "tech_lead" ||
+			lowerRole == "we_engine" || lowerRole == "we_gameplay")
+		{
+			perm.allowedGlobs = {
+				"assets/scripts/**",
+				"assets/data/**",
+				"assets/scenes/**",
+				"assets/levels/**",
+				"src/**",
+				"CMakeLists.txt",
+				"project.we.yaml",
+				".workflow/**",
+				"README.md"
+			};
+		}
+
+		return perm;
+	}
 }

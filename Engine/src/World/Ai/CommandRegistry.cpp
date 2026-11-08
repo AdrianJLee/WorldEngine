@@ -228,8 +228,7 @@ namespace World::Ai
 					if (!pathArg.empty())
 					{
 						std::string guardReason;
-						WritePermission perm;
-						perm.roleId = sess->roleId;
+						WritePermission perm = WriteGuard::GetDefaultPermissionForRole(sess->roleId);
 						if (!WriteGuard::Get().CanWrite(pathArg, sess->projectRoot, &perm, guardReason))
 						{
 							error = guardReason;

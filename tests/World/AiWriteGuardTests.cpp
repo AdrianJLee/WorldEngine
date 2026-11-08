@@ -160,6 +160,42 @@ int main()
 		CHECK(json->Find("changeset_id") != nullptr);
 	}
 
+	// 6. 验证基于角色的物理权限沙箱硬隔离 (GetDefaultPermissionForRole & ChangesetTracker)
+	{
+		auto& guard = WriteGuard::Get();
+		std::string reason;
+
+		// 6.1 验证 producer 角色默认权限：禁止写入脚本与 C++
+		const WritePermission prodPerm = WriteGuard::GetDefaultPermissionForRole("producer");
+		CHECK(prodPerm.roleId == "producer");
+		CHECK(guard.CanWrite("design/gdd.md", tempProj.string(), &prodPerm, reason));
+		CHECK(guard.CanWrite("assets/data/loot.json", tempProj.string(), &prodPerm, reason));
+		CHECK(!guard.CanWrite("assets/scripts/systems/GameplaySystems.luau", tempProj.string(), &prodPerm, reason));
+		CHECK(!guard.CanWrite("src/GameProject.cpp", tempProj.string(), &prodPerm, reason));
+
+		// 6.2 验证 2d_artist 角色默认权限：允许贴图，禁止脚本
+		const WritePermission artPerm = WriteGuard::GetDefaultPermissionForRole("2d_artist");
+		CHECK(guard.CanWrite("assets/textures/sprites/hero.png", tempProj.string(), &artPerm, reason));
+		CHECK(!guard.CanWrite("assets/scripts/Player.luau", tempProj.string(), &artPerm, reason));
+
+		// 6.3 验证 gameplay_programmer 角色默认权限：允许脚本
+		const WritePermission progPerm = WriteGuard::GetDefaultPermissionForRole("gameplay_programmer");
+		CHECK(guard.CanWrite("assets/scripts/systems/GameplaySystems.luau", tempProj.string(), &progPerm, reason));
+		CHECK(guard.CanWrite("src/GameProject.cpp", tempProj.string(), &progPerm, reason));
+
+		// 6.4 验证 ChangesetTracker 物理联动：producer 角色开启变更集时，写代码物理拦截
+		auto& tracker = ChangesetTracker::Get();
+		tracker.Clear();
+		const std::string prodCsId = tracker.BeginChangeset(tempProj.string(), "producer", "Producer attempt code fix");
+		std::string csError;
+		CHECK(!tracker.StageFileWrite(prodCsId, tempProj.string(), "assets/scripts/GameplaySystems.luau", "-- cheat code\n", csError));
+		CHECK(csError.find("Forbidden") != std::string::npos);
+
+		// programmer 角色开启变更集时，写代码成功
+		const std::string progCsId = tracker.BeginChangeset(tempProj.string(), "gameplay_programmer", "Programmer legit fix");
+		CHECK(tracker.StageFileWrite(progCsId, tempProj.string(), "assets/scripts/GameplaySystems.luau", "-- legit code\n", csError));
+	}
+
 	fs::remove_all(tempProj, ec);
 
 	std::printf("WorldAiWriteGuardTests PASSED.\n");

@@ -1,4 +1,4 @@
-﻿#include "World/Ai/PlaytestRunner.h"
+#include "World/Ai/PlaytestRunner.h"
 #include "World/Scene/Scene.h"
 #include "World/Core/WorldContext.h"
 #include "World/Core/WorldContext.h"
@@ -239,6 +239,68 @@ int main()
 		CHECK(jsonPkg->Find("success") && jsonPkg->Find("success")->AsBool());
 
 		fs::remove_all(tempProj, ec);
+	}
+
+	// 5. 验证物理硬门禁：退化零尺寸拦截与输入位移因果因变硬断言
+	{
+		WorldContext context;
+		Scene scene(context);
+
+		// 5.1 退化零尺寸拦截 (Degenerate Scale)
+		const entt::entity dummy = scene.GetRegistry().create();
+		scene.GetRegistry().emplace<TagComponent>(dummy, "FakeBoss");
+		scene.GetRegistry().emplace<SpriteComponent>(dummy);
+		auto& tc = scene.GetRegistry().emplace<TransformComponent>(dummy);
+		tc.Scale = glm::vec3(0.0f, 0.0f, 0.0f); // 零尺寸
+
+		PlaytestConfig cfgScale;
+		cfgScale.frames = 10;
+		auto resScale = PlaytestRunner::Run(cfgScale, &scene);
+		CHECK(!resScale.pass);
+		bool foundScaleError = false;
+		for (const auto& f : resScale.failures) {
+			if (f.find("degenerate zero scale") != std::string::npos) foundScaleError = true;
+		}
+		CHECK(foundScaleError);
+
+		// 修正尺寸为正常
+		tc.Scale = glm::vec3(1.0f, 1.0f, 1.0f);
+
+		// 5.2 输入位移因果硬断言：有移动输入但角色原地不动，强制判负
+		const entt::entity pEnt = scene.GetRegistry().create();
+		scene.GetRegistry().emplace<TagComponent>(pEnt, "char_hero");
+		scene.GetRegistry().emplace<SpriteComponent>(pEnt);
+		scene.GetRegistry().emplace<AudioListenerComponent>(pEnt);
+		auto& pTc = scene.GetRegistry().emplace<TransformComponent>(pEnt);
+		pTc.Location = glm::vec3(0.0f, 0.0f, 0.0f);
+		pTc.Scale = glm::vec3(1.0f, 1.0f, 1.0f);
+
+		PlaytestConfig cfgMove;
+		cfgMove.frames = 30;
+		// 注入 15 帧的移动按键
+		for (int f = 0; f < 15; ++f) {
+			PlaytestInputEvent inp;
+			inp.frame = f;
+			inp.type = "key_down";
+			inp.key = "D";
+			cfgMove.inputs.push_back(inp);
+		}
+
+		// 此时没有挂载移动系统，角色原地不动 (delta = 0)，物理硬断言必须判负！
+		auto resMoveFail = PlaytestRunner::Run(cfgMove, &scene);
+		CHECK(!resMoveFail.pass);
+		bool foundStationaryError = false;
+		for (const auto& f : resMoveFail.failures) {
+			if (f.find("remained stationary") != std::string::npos) foundStationaryError = true;
+		}
+		CHECK(foundStationaryError);
+
+		// 5.3 显式断言 player_moved 拦截
+		PlaytestConfig cfgExplicit;
+		cfgExplicit.frames = 10;
+		cfgExplicit.asserts.push_back("player_moved");
+		auto resExplicit = PlaytestRunner::Run(cfgExplicit, &scene);
+		CHECK(!resExplicit.pass);
 	}
 
 	std::printf("WorldAiPlaytestTests PASSED.\n");

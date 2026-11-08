@@ -92,9 +92,8 @@ namespace World::Ai
 		auto& cs = it->second;
 		const fs::path root = fs::u8path(projectRoot.empty() ? cs.projectRoot : projectRoot);
 
-		// 1. WriteGuard 安全检查
-		WritePermission perm;
-		perm.roleId = cs.role;
+		// 1. WriteGuard 安全检查（按角色默认白名单与黑名单严格执行物理隔离）
+		WritePermission perm = WriteGuard::GetDefaultPermissionForRole(cs.role);
 		if (!WriteGuard::Get().CanWrite(relativePath, root.string(), &perm, outError))
 		{
 			return false;
