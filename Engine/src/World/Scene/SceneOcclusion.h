@@ -129,6 +129,9 @@ namespace World
 		// 1. 3D 网格模型 (MeshRendererComponent)
 		for (auto [h, xf, mr] : registry.view<TransformComponent, MeshRendererComponent>().each())
 		{
+			// 白盒物体与样条网格具备专属几何生成逻辑与独立尺寸，必须交由专用循环提取真实包围盒
+			if (registry.any_of<WhiteboxComponent, SplineComponent>(h))
+				continue;
 			if (mr.Primitive == MeshRendererComponent::PrimitiveShape::Plane && !mr.Mesh.HasPath() && !mr.Mesh.Identity.IsValid())
 				continue;
 
@@ -155,7 +158,8 @@ namespace World
 			glm::vec3 worldMin, worldMax;
 			TransformAabb(world, localMin, localMax, worldMin, worldMax);
 			const glm::vec3 ext = (worldMax - worldMin) * 0.5f;
-			if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
+			// 仅跳过贴地大跨度水平地面薄板(如纯平地砖/地面基座，Y<=0.25m且双轴大跨度)，不可误杀空中的高架桥、连廊、楼梯与挑空平台
+			if (worldMax.y <= 0.25f && ext.y <= 0.25f && ext.x >= 4.0f && ext.z >= 4.0f)
 				continue;
 			if (ext.x < 0.10f && ext.y < 0.10f && ext.z < 0.10f)
 				continue;
@@ -205,7 +209,8 @@ namespace World
 			glm::vec3 worldMin, worldMax;
 			TransformAabb(world, localMin, localMax, worldMin, worldMax);
 			const glm::vec3 ext = (worldMax - worldMin) * 0.5f;
-			if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
+			// 仅跳过贴地大跨度水平地面薄板(如纯平地砖/地面基座，Y<=0.25m且双轴大跨度)，不可误杀空中的高架桥、连廊、楼梯与挑空平台
+			if (worldMax.y <= 0.25f && ext.y <= 0.25f && ext.x >= 4.0f && ext.z >= 4.0f)
 				continue;
 			if (ext.x < 0.10f && ext.y < 0.10f && ext.z < 0.10f)
 				continue;
@@ -316,7 +321,8 @@ namespace World
 			glm::vec3 worldMin, worldMax;
 			TransformAabb(world, localMin, localMax, worldMin, worldMax);
 			const glm::vec3 ext = (worldMax - worldMin) * 0.5f;
-			if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
+			// 仅跳过贴地大跨度水平地面薄板(如纯平地砖/地面基座，Y<=0.25m且双轴大跨度)，不可误杀空中的高架桥、连廊、楼梯与挑空平台
+			if (worldMax.y <= 0.25f && ext.y <= 0.25f && ext.x >= 4.0f && ext.z >= 4.0f)
 				continue;
 			if (ext.x < 0.10f && ext.y < 0.10f && ext.z < 0.10f)
 				continue;
@@ -350,7 +356,8 @@ namespace World
 			glm::vec3 worldMin, worldMax;
 			TransformAabb(world, localMin, localMax, worldMin, worldMax);
 			const glm::vec3 ext = (worldMax - worldMin) * 0.5f;
-			if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
+			// 仅跳过贴地大跨度水平地面薄板(如纯平地砖/地面基座，Y<=0.25m且双轴大跨度)，不可误杀空中的高架桥、连廊、楼梯与挑空平台
+			if (worldMax.y <= 0.25f && ext.y <= 0.25f && ext.x >= 4.0f && ext.z >= 4.0f)
 				continue;
 			if (ext.x < 0.10f && ext.y < 0.10f && ext.z < 0.10f)
 				continue;
@@ -442,7 +449,8 @@ namespace World
 			glm::vec3 worldMin, worldMax;
 			TransformAabb(world, localMin, localMax, worldMin, worldMax);
 			const glm::vec3 ext = (worldMax - worldMin) * 0.5f;
-			if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
+			// 仅跳过贴地大跨度水平地面薄板(如纯平地砖/地面基座，Y<=0.25m且双轴大跨度)，不可误杀空中的高架桥、连廊、楼梯与挑空平台
+			if (worldMax.y <= 0.25f && ext.y <= 0.25f && ext.x >= 4.0f && ext.z >= 4.0f)
 				continue;
 			if (ext.x < 0.10f && ext.y < 0.10f && ext.z < 0.10f)
 				continue;

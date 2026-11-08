@@ -868,11 +868,30 @@ static void TestNavMeshAndGizmoOcclusionInvariants()
 	capComp.HalfHeight = 1.0f;
 	capComp.Offset = glm::vec3(0.0f, 0.0f, 0.0f);
 
+	// 7. 白盒楼梯原型遮挡不变量：拥有 MeshRendererComponent 与 WhiteboxComponent 时必须按真实 Dimensions 提取包围盒
+	const entt::entity wbStairsEnt = registry.create();
+	auto& xfWb = registry.emplace<TransformComponent>(wbStairsEnt);
+	xfWb.Location = glm::vec3(70.0f, 1.5f, 0.0f);
+	auto& wbComp = registry.emplace<WhiteboxComponent>(wbStairsEnt);
+	wbComp.Shape = 2; // Stairs
+	wbComp.Dimensions = glm::vec3(4.0f, 3.0f, 8.0f);
+	auto& mrWb = registry.emplace<MeshRendererComponent>(wbStairsEnt);
+	mrWb.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
+
+	// 8. 空中高架桥/薄板障碍物不变量：位于空中的薄板(Y=4.0m)绝不得被误杀为地面薄板
+	const entt::entity bridgeEnt = registry.create();
+	auto& xfBridge = registry.emplace<TransformComponent>(bridgeEnt);
+	xfBridge.Location = glm::vec3(80.0f, 4.0f, 0.0f);
+	xfBridge.Scale = glm::vec3(8.0f, 0.4f, 3.0f);
+	auto& mrBridge = registry.emplace<MeshRendererComponent>(bridgeEnt);
+	mrBridge.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
+
 	auto occluders = CollectSceneOccluders(registry);
 
 	// 验证收集结果：必须包含 modelEnt, spriteEnt, obbEnt，且必须正确跳过 floorEnt 薄板
 	bool hasModel = false, hasSprite = false, hasObb = false, hasFloor = false;
 	bool hasSphere = false, hasCapsule = false;
+	bool hasWbStairs = false, hasBridge = false;
 	for (const auto& occ : occluders)
 	{
 		if (occ.Owner == modelEnt) hasModel = true;
@@ -881,6 +900,8 @@ static void TestNavMeshAndGizmoOcclusionInvariants()
 		if (occ.Owner == floorEnt) hasFloor = true;
 		if (occ.Owner == sphereEnt) hasSphere = true;
 		if (occ.Owner == capsuleEnt) hasCapsule = true;
+		if (occ.Owner == wbStairsEnt) hasWbStairs = true;
+		if (occ.Owner == bridgeEnt) hasBridge = true;
 	}
 	assert(hasModel && "Model must be collected in occluders");
 	assert(hasSprite && "Sprite image must be collected in occluders");
@@ -888,6 +909,8 @@ static void TestNavMeshAndGizmoOcclusionInvariants()
 	assert(!hasFloor && "Thin floor slab must be skipped from occluders");
 	assert(hasSphere && "Sphere collider must be collected in occluders");
 	assert(hasCapsule && "Capsule collider must be collected in occluders");
+	assert(hasWbStairs && "Whitebox stairs must be collected in occluders with real dimensions");
+	assert(hasBridge && "Elevated bridge obstacle must be collected in occluders");
 
 	// 测试 1: 模型遮挡验证
 	const glm::vec3 camPosModel(0.0f, 1.0f, 5.0f);
@@ -937,6 +960,20 @@ static void TestNavMeshAndGizmoOcclusionInvariants()
 	assert(testOccluded(camPosCapsule, ptBehindCapsule) == true && "Point behind CapsuleCollider3D must be occluded");
 	assert(testOccluded(camPosCapsule, ptInFrontCapsule) == false && "Point in front of CapsuleCollider3D must not be occluded");
 	assert(testOccluded(camPosCapsule, ptBehindCapsule, capsuleEnt) == false && "CapsuleCollider3D wireframe must not self-occlude when ignoreEntity is handle");
+
+	// 测试 6: 白盒楼梯真实尺寸遮挡验证 (中心在 (70, 1.5, 0)，宽度 4，高度 3，深度 8)
+	const glm::vec3 camPosWb(70.0f, 1.5f, 6.0f);
+	const glm::vec3 ptBehindWb(70.0f, 1.5f, -3.5f);
+	const glm::vec3 ptInFrontWb(70.0f, 1.5f, 5.0f);
+	assert(testOccluded(camPosWb, ptBehindWb) == true && "Point behind Whitebox stairs must be occluded by its 4x3x8 volume");
+	assert(testOccluded(camPosWb, ptInFrontWb) == false && "Point in front of Whitebox stairs must not be occluded");
+
+	// 测试 7: 空中高架桥遮挡验证 (Y=4.0m, Scale=[8, 0.4, 3])
+	const glm::vec3 camPosBridge(80.0f, 6.0f, 4.0f);
+	const glm::vec3 ptUnderBridge(80.0f, 1.0f, -2.0f);
+	const glm::vec3 ptAboveBridge(80.0f, 5.5f, 0.0f);
+	assert(testOccluded(camPosBridge, ptUnderBridge) == true && "Point under/behind elevated bridge must be occluded");
+	assert(testOccluded(camPosBridge, ptAboveBridge) == false && "Point above bridge must not be occluded");
 
 	std::cout << "[PASS] TestNavMeshAndGizmoOcclusionInvariants\n";
 }
