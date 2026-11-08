@@ -564,6 +564,7 @@ int main()
 			std::filesystem::create_directories(systemsDir);
 			const std::filesystem::path goodScript = systemsDir / "M55UiProbe.luau";
 			const std::filesystem::path badScript = systemsDir / "M55UiBad.luau";
+			const std::filesystem::path colonScript = systemsDir / "M55UiColon.luau";
 			{
 				std::ofstream out(goodScript, std::ios::binary | std::ios::trunc);
 				out << "ui.onDraw(function()\n"
@@ -576,6 +577,12 @@ int main()
 				std::ofstream out(badScript, std::ios::binary | std::ios::trunc);
 				out << "ui.onDraw(function()\n"
 					<< "    error(\"probe failure\")\n"
+					<< "end)\n";
+			}
+			{
+				std::ofstream out(colonScript, std::ios::binary | std::ios::trunc);
+				out << "ui:onDraw(function()\n"
+					<< "    ui.text(50, 50, \"colon_probe\", 16)\n"
 					<< "end)\n";
 			}
 

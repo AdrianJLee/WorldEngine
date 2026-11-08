@@ -119,6 +119,7 @@ namespace World::Wui
 	void WuiRhiBackend::FeedMouseButton(int button, bool down) { s_Input.OnMouseButton(button, down); }
 	void WuiRhiBackend::FeedMouseMove(float x, float y) { s_Input.OnMouseMove(x, y); }
 	void WuiRhiBackend::FeedMouseScroll(float dx, float dy) { s_Input.OnMouseScroll(dx, dy); }
+	void WuiRhiBackend::ResetMouseState() { s_Input.ResetMouseState(); }
 
 	bool WuiRhiBackend::BeginFrame(WuiInputState& input)
 	{

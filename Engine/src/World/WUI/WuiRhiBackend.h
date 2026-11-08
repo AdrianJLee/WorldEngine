@@ -28,6 +28,7 @@ namespace World::Wui
 		static void FeedMouseButton(int button, bool down);
 		static void FeedMouseMove(float x, float y);
 		static void FeedMouseScroll(float dx, float dy);
+		static void ResetMouseState();
 
 		// ---- 独立窗口支持:本实例单独收集输入与视口,不与主窗口共享 ----
 		void UseLocalInput(glm::vec2 viewport);
@@ -46,6 +47,7 @@ namespace World::Wui
 		void LocalMouseButton(int button, bool down) { m_LocalInput.OnMouseButton(button, down); }
 		void LocalMouseMove(float x, float y) { m_LocalInput.OnMouseMove(x, y); }
 		void LocalMouseScroll(float dx, float dy) { m_LocalInput.OnMouseScroll(dx, dy); }
+		void LocalResetMouseState() { m_LocalInput.ResetMouseState(); }
 
 		bool BeginFrame(WuiInputState& input) override;
 		void Render(const std::vector<WuiDrawCommand>& commands, const std::vector<WuiDrawCommand>& overlayCommands) override;

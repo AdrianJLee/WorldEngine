@@ -33,6 +33,7 @@
 #include "World/Renderer/MeshLOD.h"
 #include "World/Renderer/MeshletBuilder.h"
 #include <glm/gtc/matrix_inverse.hpp>
+#include "World/Scene/SceneOcclusion.h"
 #include "World/Scene/SceneOctree.h"
 #include "World/Scene/Scene.h"
 #include "World/Asset/WModelIO.h"
@@ -2860,118 +2861,7 @@ namespace World
 		// 旧实现是 SceneRenderer 里用 Renderer2D 按实体 Transform 画的一个 2D 方块 ——
 		// 在 3D 视口里看着就是"一个跟方块无关的方形,位置还不对"(用户 2026-09-16 反馈)。
 
-		// ---- 相机可视化:选中相机的视锥线框(带方向指示) ----
-		// 只有**选中相机实体**时才画(用户 2026-09-16:"编辑器中的相机范围区域也是")。
-		// 方向指示:近面亮 / 远面淡 + 从相机原点指向远面中心的**中轴**与远端十字 ——
-		// 正交(2D)相机因此也能一眼看出朝向(旧版只有两个矩形,用户反馈"不知道方向")。
-		Entity selectedCamera;
-		if (selected.IsValid() && selected.HasComponent<CameraComponent>() &&
-			selected.HasComponent<TransformComponent>())
-			selectedCamera = selected;
-		if (!play && m_Host.HasRenderedScene() && selectedCamera.IsValid())
-		{
-			const Wui::GizmoCamera frustumCamera = m_Host.GetGizmoCamera();
-			const Ref<Scene> frustumScene = m_Host.GetActiveScene();
-			const entt::registry& frustumRegistry = static_cast<const Scene*>(frustumScene.get())->GetRegistry();
-			int frustumCount = 0;
-			glm::vec2 frustumMin { 1e30f, 1e30f };
-			glm::vec2 frustumMax { -1e30f, -1e30f };
-			{
-				// P1c-W3.4:裁剪作用域走库件 Wui::ClipScope(RAII):进口一条 ClipPush、出口一条 ClipPop
-				// (与手写命令逐字段等价,含 rect),并把 ctx 的裁剪栈同进同出。本作用域里不含控件绘制,
-				// 所以 ClipAllows(焦点环/条目剔除)没有可作用的调用点 —— 像素后果应当为 0。
-				Wui::ClipScope frustumClip(ctx, sceneRect);
-				for (const entt::entity handle : frustumRegistry.view<CameraComponent, TransformComponent>())
-				{
-					if (static_cast<entt::entity>(selectedCamera) != handle)
-						continue;   // 只画选中的那台相机
-					// PECS(相机):直接读权威参数字段;有效宽高比优先取 CameraSystem 缓存下来的
-					// LastAspectRatio(与投影/拾取同一口径),没有缓存时回退到参数里的值。
-					const CameraSettings& camera = frustumRegistry.get<CameraComponent>(handle).Camera;
-					const auto* cameraView = frustumRegistry.try_get<CameraViewComponent>(handle);
-					const float aspectRatio = (cameraView && cameraView->Valid)
-						? cameraView->LastAspectRatio : camera.m_AspectRatio;
-					glm::mat4 world = frustumRegistry.get<TransformComponent>(handle).GetLocalMatrix();
-					if (const auto* worldTransform = frustumRegistry.try_get<WorldTransformComponent>(handle))
-						world = worldTransform->Matrix;
-					// 相机看向 -Z(与 glm::perspective / glm::ortho 的约定一致)。
-					float hNear = 0.0f, wNear = 0.0f, hFar = 0.0f, wFar = 0.0f, zNear = 0.0f, zFar = 0.0f;
-					if (camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective)
-					{
-						const float tanHalf = std::tan(glm::radians(camera.m_PerspectiveFOV) * 0.5f);
-						zNear = -camera.m_PerspectiveNearClip;
-						zFar = -camera.m_PerspectiveFarClip;
-						hNear = tanHalf * std::abs(zNear);
-						wNear = hNear * aspectRatio;
-						hFar = tanHalf * std::abs(zFar);
-						wFar = hFar * aspectRatio;
-					}
-					else
-					{
-						zNear = -camera.m_OrthographicNearClip;
-						zFar = -camera.m_OrthographicFarClip;
-						hNear = hFar = camera.m_OrthographicZoom;
-						wNear = wFar = camera.m_OrthographicZoom * aspectRatio;
-					}
-					const glm::vec3 corners[8] = {
-						{ -wNear, -hNear, zNear }, { wNear, -hNear, zNear }, { wNear, hNear, zNear }, { -wNear, hNear, zNear },
-						{ -wFar, -hFar, zFar }, { wFar, -hFar, zFar }, { wFar, hFar, zFar }, { -wFar, hFar, zFar },
-					};
-					glm::vec4 clip[8];
-					for (int i = 0; i < 8; ++i)
-						clip[i] = frustumCamera.ViewProjection * (world * glm::vec4 { corners[i], 1.0f });
-					const Wui::WuiColor nearColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.95f };
-					const Wui::WuiColor farColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.38f };
-					const Wui::WuiColor axisColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.85f };
-					for (int i = 0; i < 4; ++i)
-					{
-						PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[(i + 1) % 4],
-							nearColor, 2.4f, &frustumMin, &frustumMax);
-						PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[4 + i], clip[4 + (i + 1) % 4],
-							farColor, 1.2f, &frustumMin, &frustumMax);
-						PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, clip[i], clip[4 + i],
-							nearColor, 1.6f, &frustumMin, &frustumMax);
-					}
-					// 中轴:相机原点 → 远面中心;远端画一个小十字,远处也看得出"这是朝向哪儿"。
-					const glm::vec4 eye = frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.0f, 0.0f, 1.0f });
-					const glm::vec4 farCenter = frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.0f, zFar, 1.0f });
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect, eye, farCenter,
-						axisColor, 2.2f, &frustumMin, &frustumMax);
-					const float crossSize = std::max(0.08f * std::max(wFar, hFar), 0.02f);
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-						frustumCamera.ViewProjection * (world * glm::vec4 { crossSize, 0.0f, zFar, 1.0f }), farCenter,
-						axisColor, 1.8f, &frustumMin, &frustumMax);
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-						frustumCamera.ViewProjection * (world * glm::vec4 { -crossSize, 0.0f, zFar, 1.0f }), farCenter,
-						axisColor, 1.8f, &frustumMin, &frustumMax);
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-						frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, crossSize, zFar, 1.0f }), farCenter,
-						axisColor, 1.8f, &frustumMin, &frustumMax);
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-						frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, -crossSize, zFar, 1.0f }), farCenter,
-						axisColor, 1.8f, &frustumMin, &frustumMax);
-					// 相机位置标记:原点 → 上方 0.25(相机本地 +Y)一小段,便于找到相机实体。
-					PushProjectedSegment(ctx, frustumCamera.ViewProjection, sceneRect,
-						eye,
-						frustumCamera.ViewProjection * (world * glm::vec4 { 0.0f, 0.25f, 0.0f, 1.0f }),
-						nearColor, 2.8f, &frustumMin, &frustumMax);
-					++frustumCount;
-				}
-			}
-			if (frustumCount > 0 && std::getenv("WLD_TRACE_UI"))
-			{
-				// 每 ~2 秒打一行(帧号节流):自动化/人工都能核对"视锥覆盖范围"。
-				static uint64_t lastFrustumLog = ~0ull;
-				const uint64_t stamp = ctx.Frame() / 120;
-				if (stamp != lastFrustumLog)
-				{
-					lastFrustumLog = stamp;
-					WLD_CORE_INFO("[ui] camera frustum count={0} bbox=({1},{2},{3},{4}) viewport=({5},{6},{7},{8})",
-						frustumCount, frustumMin.x, frustumMin.y, frustumMax.x - frustumMin.x, frustumMax.y - frustumMin.y,
-						sceneRect.X, sceneRect.Y, sceneRect.W, sceneRect.H);
-				}
-			}
-		}
+		// ---- 相机可视化: 已移入下方 P4-U6 范围覆盖层统一执行逐段深度遮挡 ----
 
 		// ---- P4-U6:范围可视化(光源范围 + 碰撞体轮廓) ----
 		//
@@ -3029,75 +2919,7 @@ namespace World
 					return true;
 				};
 
-				struct StaticAABB { glm::vec3 Min; glm::vec3 Max; entt::entity Owner = entt::null; };
-				std::vector<StaticAABB> occluderBoxes;
-				for (auto [h, xf, box] : registry.view<TransformComponent, BoxCollider3DComponent>().each())
-				{
-					if (h == selectedHandle)
-						continue;
-					const glm::vec3 s = glm::abs(xf.Scale);
-					const glm::vec3 ext = s * box.HalfExtents;
-					if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
-						continue;
-					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
-					{
-						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext, h });
-					}
-				}
-				for (auto [h, xf, wb] : registry.view<TransformComponent, WhiteboxComponent>().each())
-				{
-					if (h == selectedHandle)
-						continue;
-					const glm::vec3 s = glm::abs(xf.Scale);
-					const glm::vec3 ext = s * wb.Dimensions * 0.5f;
-					if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
-						continue;
-					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
-					{
-						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext, h });
-					}
-				}
-				for (auto [h, xf, mr] : registry.view<TransformComponent, MeshRendererComponent>().each())
-				{
-					if (h == selectedHandle)
-						continue;
-					if (registry.try_get<NavMeshObstacleComponent>(h) || registry.try_get<NavMeshAreaModifierComponent>(h))
-						continue;
-					if (mr.Primitive == MeshRendererComponent::PrimitiveShape::Plane)
-						continue;
-					const glm::vec3 s = glm::abs(xf.Scale);
-					const glm::vec3 ext = s * 0.5f;
-					if (ext.y < 0.6f && (ext.x > 4.0f || ext.z > 4.0f))
-						continue;
-					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
-					{
-						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext, h });
-					}
-				}
-
-				auto rayHitsAABB = [](const glm::vec3& orig, const glm::vec3& dir, float maxDist, const glm::vec3& bMin, const glm::vec3& bMax) -> bool
-				{
-					float tmin = 0.0f;
-					float tmax = maxDist;
-					for (int a = 0; a < 3; ++a)
-					{
-						if (std::abs(dir[a]) < 1e-6f)
-						{
-							if (orig[a] < bMin[a] || orig[a] > bMax[a]) return false;
-						}
-						else
-						{
-							const float ood = 1.0f / dir[a];
-							float t1 = (bMin[a] - orig[a]) * ood;
-							float t2 = (bMax[a] - orig[a]) * ood;
-							if (t1 > t2) std::swap(t1, t2);
-							tmin = std::max(tmin, t1);
-							tmax = std::min(tmax, t2);
-							if (tmin > tmax) return false;
-						}
-					}
-					return tmin > 0.05f && tmin < maxDist - 0.05f;
-				};
+				const std::vector<SceneOccluder> occluderBoxes = CollectSceneOccluders(registry, selectedHandle);
 
 				auto isOccluded = [&](const glm::vec3& targetPt, bool isSurface = false, float extraThreshold = 0.0f, entt::entity ignoreEntity = entt::null) -> bool
 				{
@@ -3137,28 +2959,11 @@ namespace World
 						}
 					}
 
-					if (!occluderBoxes.empty() && dist > 0.5f)
+					if (dist > 0.5f)
 					{
 						const glm::vec3 normDir = toTarget / dist;
-						for (const auto& box : occluderBoxes)
-						{
-							if (ignoreEntity != entt::null && box.Owner == ignoreEntity)
-								continue;
-
-							if (targetPt.x >= box.Min.x && targetPt.x <= box.Max.x &&
-								targetPt.y >= box.Min.y && targetPt.y <= box.Max.y &&
-								targetPt.z >= box.Min.z && targetPt.z <= box.Max.z)
-							{
-								const bool camInside = (cameraPos.x >= box.Min.x && cameraPos.x <= box.Max.x &&
-									cameraPos.y >= box.Min.y && cameraPos.y <= box.Max.y &&
-									cameraPos.z >= box.Min.z && cameraPos.z <= box.Max.z);
-								if (!camInside)
-									return true;
-								continue;
-							}
-							if (rayHitsAABB(cameraPos, normDir, dist, box.Min, box.Max))
-								return true;
-						}
+						if (RayHitsSceneOccluders(occluderBoxes, cameraPos, normDir, dist, targetPt, ignoreEntity))
+							return true;
 					}
 					return false;
 				};
@@ -3252,6 +3057,42 @@ namespace World
 							color, lineWidth);
 					}
 				};
+				auto PushOccludedWorldSegmentLocal = [&](const glm::mat4& worldMatrix, const glm::vec3& from, const glm::vec3& to,
+					const Wui::WuiColor& color, float lineWidth, entt::entity ignoreEntity = entt::null)
+				{
+					const glm::vec3 p0 = glm::vec3(worldMatrix * glm::vec4(from, 1.0f));
+					const glm::vec3 p1 = glm::vec3(worldMatrix * glm::vec4(to, 1.0f));
+					PushOccludedWorldSegment(p0, p1, color, lineWidth, ignoreEntity);
+				};
+
+				auto PushOccludedWorldCircle = [&](const glm::mat4& worldMatrix, const glm::vec3& center, float radius,
+					int axis, const Wui::WuiColor& color, float lineWidth, entt::entity ignoreEntity = entt::null, int segments = 24)
+				{
+					if (radius <= 0.0f)
+						return;
+					constexpr float kTwoPi = 6.28318530718f;
+					const int numSegs = std::clamp(segments, 8, 36);
+					glm::vec3 prevWorldPt(0.0f);
+					for (int i = 0; i <= numSegs; ++i)
+					{
+						const float angle = kTwoPi * static_cast<float>(i) / static_cast<float>(numSegs);
+						glm::vec3 offset(0.0f);
+						if (axis == 0)
+							offset = { std::cos(angle) * radius, std::sin(angle) * radius, 0.0f };
+						else if (axis == 1)
+							offset = { std::cos(angle) * radius, 0.0f, std::sin(angle) * radius };
+						else
+							offset = { 0.0f, std::cos(angle) * radius, std::sin(angle) * radius };
+
+						const glm::vec3 curWorldPt = glm::vec3(worldMatrix * glm::vec4(center + offset, 1.0f));
+						if (i > 0)
+						{
+							PushOccludedWorldSegment(prevWorldPt, curWorldPt, color, lineWidth, ignoreEntity);
+						}
+						prevWorldPt = curWorldPt;
+					}
+				};
+
 
 				// 平行光箭头长度:按场景实体位置的包围盒对角线取 25%(下限 1.0,上限 50),
 				// 这样小场景大场景都看得清;没有实体时退回 2.0。
@@ -3280,6 +3121,66 @@ namespace World
 				{
 					// P1c-W3.4:范围覆盖层(光源/碰撞体)的裁剪走库件 Wui::ClipScope(同相机视锥那条)。
 					Wui::ClipScope overlayClip(ctx, sceneRect);
+
+					// ---- 相机可视化: 选中相机的视锥线框 (带方向指示与逐段深度遮挡) ----
+					if (selected.IsValid() && selected.HasComponent<CameraComponent>() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						const entt::entity camHandle = static_cast<entt::entity>(selected);
+						const CameraSettings& camera = registry.get<CameraComponent>(camHandle).Camera;
+						const auto* cameraView = registry.try_get<CameraViewComponent>(camHandle);
+						const float aspectRatio = (cameraView && cameraView->Valid)
+							? cameraView->LastAspectRatio : camera.m_AspectRatio;
+						glm::mat4 world = registry.get<TransformComponent>(camHandle).GetLocalMatrix();
+						if (const auto* worldTransform = registry.try_get<WorldTransformComponent>(camHandle))
+							world = worldTransform->Matrix;
+
+						float hNear = 0.0f, wNear = 0.0f, hFar = 0.0f, wFar = 0.0f, zNear = 0.0f, zFar = 0.0f;
+						if (camera.m_ProjectionType == CameraSettings::ProjectionType::Perspective)
+						{
+							const float tanHalf = std::tan(glm::radians(camera.m_PerspectiveFOV) * 0.5f);
+							zNear = -camera.m_PerspectiveNearClip;
+							zFar = -camera.m_PerspectiveFarClip;
+							hNear = tanHalf * std::abs(zNear);
+							wNear = hNear * aspectRatio;
+							hFar = tanHalf * std::abs(zFar);
+							wFar = hFar * aspectRatio;
+						}
+						else
+						{
+							zNear = -camera.m_OrthographicNearClip;
+							zFar = -camera.m_OrthographicFarClip;
+							hNear = hFar = camera.m_OrthographicZoom;
+							wNear = wFar = camera.m_OrthographicZoom * aspectRatio;
+						}
+						const glm::vec3 localCorners[8] = {
+							{ -wNear, -hNear, zNear }, { wNear, -hNear, zNear }, { wNear, hNear, zNear }, { -wNear, hNear, zNear },
+							{ -wFar, -hFar, zFar }, { wFar, -hFar, zFar }, { wFar, hFar, zFar }, { -wFar, hFar, zFar },
+						};
+						glm::vec3 worldCorners[8];
+						for (int i = 0; i < 8; ++i)
+							worldCorners[i] = glm::vec3(world * glm::vec4 { localCorners[i], 1.0f });
+
+						const Wui::WuiColor nearColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.95f };
+						const Wui::WuiColor farColor { theme.Warning.R, theme.Warning.G, theme.Warning.B, 0.38f };
+						const Wui::WuiColor axisColor { theme.Accent.R, theme.Accent.G, theme.Accent.B, 0.85f };
+						for (int i = 0; i < 4; ++i)
+						{
+							PushOccludedWorldSegment(worldCorners[i], worldCorners[(i + 1) % 4], nearColor, 2.4f, camHandle);
+							PushOccludedWorldSegment(worldCorners[4 + i], worldCorners[4 + (i + 1) % 4], farColor, 1.2f, camHandle);
+							PushOccludedWorldSegment(worldCorners[i], worldCorners[4 + i], nearColor, 1.6f, camHandle);
+						}
+						const glm::vec3 eye = glm::vec3(world * glm::vec4 { 0.0f, 0.0f, 0.0f, 1.0f });
+						const glm::vec3 farCenter = glm::vec3(world * glm::vec4 { 0.0f, 0.0f, zFar, 1.0f });
+						PushOccludedWorldSegment(eye, farCenter, axisColor, 2.2f, camHandle);
+
+						const float crossSize = std::max(0.08f * std::max(wFar, hFar), 0.02f);
+						PushOccludedWorldSegment(glm::vec3(world * glm::vec4 { crossSize, 0.0f, zFar, 1.0f }),
+							glm::vec3(world * glm::vec4 { -crossSize, 0.0f, zFar, 1.0f }), axisColor, 1.8f, camHandle);
+						PushOccludedWorldSegment(glm::vec3(world * glm::vec4 { 0.0f, crossSize, zFar, 1.0f }),
+							glm::vec3(world * glm::vec4 { 0.0f, -crossSize, zFar, 1.0f }), axisColor, 1.8f, camHandle);
+						PushOccludedWorldSegment(eye, glm::vec3(world * glm::vec4 { 0.0f, 0.25f, 0.0f, 1.0f }), nearColor, 2.8f, camHandle);
+					}
 
 					// ---- 光源 ----
 					for (const entt::entity handle : registry.view<TransformComponent>())
@@ -3461,16 +3362,13 @@ namespace World
 								c + glm::vec3 { -hx, -hy, 0.0f }, c + glm::vec3 { hx, -hy, 0.0f },
 								c + glm::vec3 { hx, hy, 0.0f }, c + glm::vec3 { -hx, hy, 0.0f } };
 							for (int i = 0; i < 4; ++i)
-								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									corners[i], corners[(i + 1) % 4], color, thickness, &overlayMin, &overlayMax);
+								PushOccludedWorldSegmentLocal(world, corners[i], corners[(i + 1) % 4], color, thickness, handle);
 							drew = true;
 						}
 						if (const auto* circle2d = registry.try_get<CircleCollider2DComponent>(handle))
 						{
 							if (circle2d->Radius > 0.0f)
-								PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
-									{ circle2d->Offset.x, circle2d->Offset.y, 0.0f }, circle2d->Radius, 0,
-									color, thickness, &overlayMin, &overlayMax);
+								PushOccludedWorldCircle(world, { circle2d->Offset.x, circle2d->Offset.y, 0.0f }, circle2d->Radius, 0, color, thickness, handle);
 							drew = true;
 						}
 						if (const auto* box3d = registry.try_get<BoxCollider3DComponent>(handle))
@@ -3533,8 +3431,7 @@ namespace World
 						{
 							if (sphere->Radius > 0.0f)
 								for (int axis = 0; axis < 3; ++axis)
-									PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world, sphere->Offset,
-										sphere->Radius, axis, color, thickness, &overlayMin, &overlayMax);
+									PushOccludedWorldCircle(world, sphere->Offset, sphere->Radius, axis, color, thickness, handle);
 							drew = true;
 						}
 						if (const auto* capsule = registry.try_get<CapsuleCollider3DComponent>(handle))
@@ -3547,19 +3444,23 @@ namespace World
 								const glm::vec3 base = capsule->Offset;
 								for (int axis = 0; axis < 3; ++axis)
 								{
-									PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										base + glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,
-										&overlayMin, &overlayMax);
-									PushWorldCircle(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										base - glm::vec3 { 0.0f, half, 0.0f }, radius, axis, color, thickness,
-										&overlayMin, &overlayMax);
+									PushOccludedWorldCircle(world, base + glm::vec3 { 0.0f, half, 0.0f },
+										radius, axis, color, thickness, handle);
+									PushOccludedWorldCircle(world, base - glm::vec3 { 0.0f, half, 0.0f },
+										radius, axis, color, thickness, handle);
 								}
-								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+								PushOccludedWorldSegmentLocal(world,
 									base + glm::vec3 { radius, -half, 0.0f }, base + glm::vec3 { radius, half, 0.0f },
-									color, thickness, &overlayMin, &overlayMax);
-								PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
+									color, thickness, handle);
+								PushOccludedWorldSegmentLocal(world,
 									base + glm::vec3 { -radius, -half, 0.0f }, base + glm::vec3 { -radius, half, 0.0f },
-									color, thickness, &overlayMin, &overlayMax);
+									color, thickness, handle);
+								PushOccludedWorldSegmentLocal(world,
+									base + glm::vec3 { 0.0f, -half, radius }, base + glm::vec3 { 0.0f, half, radius },
+									color, thickness, handle);
+								PushOccludedWorldSegmentLocal(world,
+									base + glm::vec3 { 0.0f, -half, -radius }, base + glm::vec3 { 0.0f, half, -radius },
+									color, thickness, handle);
 							}
 							drew = true;
 						}
@@ -3587,8 +3488,7 @@ namespace World
 									const float a1 = kPi * static_cast<float>(i + 1) / static_cast<float>(kHalfSegments);
 									const glm::vec3 p0 = cTop + glm::vec3(std::cos(a0) * r, std::sin(a0) * r, 0.0f);
 									const glm::vec3 p1 = cTop + glm::vec3(std::cos(a1) * r, std::sin(a1) * r, 0.0f);
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										p0, p1, color, thickness, &overlayMin, &overlayMax);
+									PushOccludedWorldSegmentLocal(world, p0, p1, color, thickness, handle);
 								}
 								for (int i = 0; i < kHalfSegments; ++i)
 								{
@@ -3596,8 +3496,7 @@ namespace World
 									const float a1 = kPi * (1.0f + static_cast<float>(i + 1) / static_cast<float>(kHalfSegments));
 									const glm::vec3 p0 = cBottom + glm::vec3(std::cos(a0) * r, std::sin(a0) * r, 0.0f);
 									const glm::vec3 p1 = cBottom + glm::vec3(std::cos(a1) * r, std::sin(a1) * r, 0.0f);
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										p0, p1, color, thickness, &overlayMin, &overlayMax);
+									PushOccludedWorldSegmentLocal(world, p0, p1, color, thickness, handle);
 								}
 							}
 							else // 水平胶囊体 (Horizontal)
@@ -3616,8 +3515,7 @@ namespace World
 									const float a1 = -kPi * 0.5f + kPi * static_cast<float>(i + 1) / static_cast<float>(kHalfSegments);
 									const glm::vec3 p0 = cRight + glm::vec3(std::cos(a0) * r, std::sin(a0) * r, 0.0f);
 									const glm::vec3 p1 = cRight + glm::vec3(std::cos(a1) * r, std::sin(a1) * r, 0.0f);
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										p0, p1, color, thickness, &overlayMin, &overlayMax);
+									PushOccludedWorldSegmentLocal(world, p0, p1, color, thickness, handle);
 								}
 								for (int i = 0; i < kHalfSegments; ++i)
 								{
@@ -3625,8 +3523,7 @@ namespace World
 									const float a1 = kPi * 0.5f + kPi * static_cast<float>(i + 1) / static_cast<float>(kHalfSegments);
 									const glm::vec3 p0 = cLeft + glm::vec3(std::cos(a0) * r, std::sin(a0) * r, 0.0f);
 									const glm::vec3 p1 = cLeft + glm::vec3(std::cos(a1) * r, std::sin(a1) * r, 0.0f);
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										p0, p1, color, thickness, &overlayMin, &overlayMax);
+									PushOccludedWorldSegmentLocal(world, p0, p1, color, thickness, handle);
 								}
 							}
 							drew = true;
@@ -3642,8 +3539,7 @@ namespace World
 								{
 									const glm::vec3 p0 = offset + glm::vec3(pts[i].x, pts[i].y, 0.0f);
 									const glm::vec3 p1 = offset + glm::vec3(pts[(i + 1) % ptCount].x, pts[(i + 1) % ptCount].y, 0.0f);
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										p0, p1, color, thickness, &overlayMin, &overlayMax);
+									PushOccludedWorldSegmentLocal(world, p0, p1, color, thickness, handle);
 								}
 								drew = true;
 							}
@@ -3660,8 +3556,7 @@ namespace World
 								{
 									const glm::vec3 p0 = offset + glm::vec3(pts[i].x, pts[i].y, 0.0f);
 									const glm::vec3 p1 = offset + glm::vec3(pts[(i + 1) % ptCount].x, pts[(i + 1) % ptCount].y, 0.0f);
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										p0, p1, color, thickness, &overlayMin, &overlayMax);
+									PushOccludedWorldSegmentLocal(world, p0, p1, color, thickness, handle);
 								}
 								drew = true;
 							}
@@ -3689,8 +3584,7 @@ namespace World
 								{
 									for (const auto& edge : hull.Edges)
 									{
-										PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-											edge.first, edge.second, color, thickness, &overlayMin, &overlayMax);
+										PushOccludedWorldSegmentLocal(world, edge.first, edge.second, color, thickness, handle);
 									}
 								}
 								drew = true;
@@ -3726,14 +3620,11 @@ namespace World
 										{
 											const int other = i ^ (1 << axis);
 											if (other > i)
-												PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-													corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+												PushOccludedWorldSegmentLocal(world, corners[i], corners[other], color, thickness, handle);
 										}
 									}
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										corners[0], corners[7], color, thickness * 0.7f, &overlayMin, &overlayMax);
-									PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-										corners[1], corners[6], color, thickness * 0.7f, &overlayMin, &overlayMax);
+									PushOccludedWorldSegmentLocal(world, corners[0], corners[7], color, thickness * 0.7f, handle);
+									PushOccludedWorldSegmentLocal(world, corners[1], corners[6], color, thickness * 0.7f, handle);
 								}
 								else
 								{
@@ -3765,8 +3656,7 @@ namespace World
 											{
 												const int other = i ^ (1 << axis);
 												if (other > i)
-													PushWorldSegment(ctx, overlayCamera.ViewProjection, sceneRect, world,
-														corners[i], corners[other], color, thickness, &overlayMin, &overlayMax);
+													PushOccludedWorldSegmentLocal(world, corners[i], corners[other], color, thickness, handle);
 											}
 										}
 									}
@@ -4351,68 +4241,182 @@ namespace World
 					}
 				}
 					// ---- 选中网格模型立体线框盒 (MeshRendererComponent): 逐段遮挡绘制，杜绝穿透建筑物/山体/地表 ----
+					auto drawWireframeBox = [&](const glm::mat4& world, const glm::vec3& bMin, const glm::vec3& bMax, bool isPlane, const Wui::WuiColor& color, entt::entity handle)
+					{
+						const glm::vec3 corners[8] = {
+							{ bMin.x, isPlane ? 0.0f : bMin.y, bMin.z },
+							{ bMax.x, isPlane ? 0.0f : bMin.y, bMin.z },
+							{ bMax.x, isPlane ? 0.0f : bMin.y, bMin.z },
+							{ bMin.x, isPlane ? 0.0f : bMax.y, bMin.z },
+							{ bMin.x, isPlane ? 0.0f : bMin.y, bMax.z },
+							{ bMax.x, isPlane ? 0.0f : bMin.y, bMax.z },
+							{ bMax.x, isPlane ? 0.0f : bMax.y, bMax.z },
+							{ bMin.x, isPlane ? 0.0f : bMax.y, bMax.z },
+						};
+						glm::vec3 worldCorners[8];
+						for (int i = 0; i < 8; ++i)
+							worldCorners[i] = glm::vec3(world * glm::vec4(corners[i], 1.0f));
+
+						if (isPlane)
+						{
+							const int planeEdges[4][2] = { { 0, 1 }, { 1, 5 }, { 5, 4 }, { 4, 0 } };
+							for (const auto& edge : planeEdges)
+							{
+								PushOccludedWorldSegment(worldCorners[edge[0]], worldCorners[edge[1]], color, 1.8f, handle);
+							}
+						}
+						else
+						{
+							const glm::mat3 normalMatrix = glm::mat3(world);
+							const glm::vec3 faceNormals[6] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 },
+								{ 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+							const glm::vec3 faceCenters[6] = {
+								{ bMax.x, (bMin.y + bMax.y) * 0.5f, (bMin.z + bMax.z) * 0.5f },
+								{ bMin.x, (bMin.y + bMax.y) * 0.5f, (bMin.z + bMax.z) * 0.5f },
+								{ (bMin.x + bMax.x) * 0.5f, bMax.y, (bMin.z + bMax.z) * 0.5f },
+								{ (bMin.x + bMax.x) * 0.5f, bMin.y, (bMin.z + bMax.z) * 0.5f },
+								{ (bMin.x + bMax.x) * 0.5f, (bMin.y + bMax.y) * 0.5f, bMax.z },
+								{ (bMin.x + bMax.x) * 0.5f, (bMin.y + bMax.y) * 0.5f, bMin.z }
+							};
+							bool faceVisible[6] = {};
+							for (int i = 0; i < 6; ++i)
+							{
+								const glm::vec3 centerWorld = glm::vec3(world * glm::vec4 { faceCenters[i], 1.0f });
+								const glm::vec3 normalWorld = glm::normalize(normalMatrix * faceNormals[i]);
+								faceVisible[i] = glm::dot(normalWorld, overlayCamera.Position - centerWorld) > 0.0f;
+							}
+
+							const int cubeEdges[12][4] = {
+								{ 0, 1, 3, 5 }, { 2, 3, 2, 5 }, { 4, 5, 3, 4 }, { 6, 7, 2, 4 },
+								{ 0, 2, 1, 5 }, { 1, 3, 0, 5 }, { 4, 6, 1, 4 }, { 5, 7, 0, 4 },
+								{ 0, 4, 1, 3 }, { 1, 5, 0, 3 }, { 2, 6, 1, 2 }, { 3, 7, 0, 2 },
+							};
+							for (const auto& edge : cubeEdges)
+							{
+								if (faceVisible[edge[2]] || faceVisible[edge[3]])
+								{
+									PushOccludedWorldSegment(worldCorners[edge[0]], worldCorners[edge[1]], color, 1.8f, handle);
+								}
+							}
+						}
+					};
+
 					if (selected.IsValid() && selected.HasComponent<MeshRendererComponent>() &&
 						selected.HasComponent<TransformComponent>())
 					{
 						glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
 						if (selected.HasComponent<WorldTransformComponent>())
 							world = selected.GetComponent<WorldTransformComponent>().Matrix;
-						const bool plane = selected.GetComponent<MeshRendererComponent>().Primitive == MeshRendererComponent::PrimitiveShape::Plane;
+						const auto& mr = selected.GetComponent<MeshRendererComponent>();
+						const bool plane = mr.Primitive == MeshRendererComponent::PrimitiveShape::Plane && !mr.Mesh.HasPath() && !mr.Mesh.Identity.IsValid();
 
-						const glm::vec3 corners[8] = {
-							{ (0 & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((0 & 2) ? 0.5f : -0.5f), (0 & 4) ? 0.5f : -0.5f },
-							{ (1 & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((1 & 2) ? 0.5f : -0.5f), (1 & 4) ? 0.5f : -0.5f },
-							{ (2 & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((2 & 2) ? 0.5f : -0.5f), (2 & 4) ? 0.5f : -0.5f },
-							{ (3 & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((3 & 2) ? 0.5f : -0.5f), (3 & 4) ? 0.5f : -0.5f },
-							{ (4 & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((4 & 2) ? 0.5f : -0.5f), (4 & 4) ? 0.5f : -0.5f },
-							{ (5 & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((5 & 2) ? 0.5f : -0.5f), (5 & 4) ? 0.5f : -0.5f },
-							{ (6 & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((6 & 2) ? 0.5f : -0.5f), (6 & 4) ? 0.5f : -0.5f },
-							{ (7 & 1) ? 0.5f : -0.5f, plane ? 0.0f : ((7 & 2) ? 0.5f : -0.5f), (7 & 4) ? 0.5f : -0.5f },
-						};
-						glm::vec3 worldCorners[8];
-						for (int i = 0; i < 8; ++i)
-							worldCorners[i] = glm::vec3(world * glm::vec4(corners[i], 1.0f));
-
-						const glm::mat3 normalMatrix = glm::mat3(world);
-						const glm::vec3 faceNormals[6] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 },
-							{ 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
-						const glm::vec3 faceCenters[6] = { { 0.5f, 0, 0 }, { -0.5f, 0, 0 }, { 0, 0.5f, 0 },
-							{ 0, -0.5f, 0 }, { 0, 0, 0.5f }, { 0, 0, -0.5f } };
-						bool faceVisible[6] = {};
-						for (int i = 0; i < 6; ++i)
+						glm::vec3 bMin { -0.5f, -0.5f, -0.5f };
+						glm::vec3 bMax {  0.5f,  0.5f,  0.5f };
+						if (mr.Mesh.HasPath() || mr.Mesh.Identity.IsValid())
 						{
-							const glm::vec3 centerWorld = glm::vec3(world * glm::vec4 { faceCenters[i], 1.0f });
-							const glm::vec3 normalWorld = glm::normalize(normalMatrix * faceNormals[i]);
-							faceVisible[i] = glm::dot(normalWorld, overlayCamera.Position - centerWorld) > 0.0f;
+							std::string err;
+							if (auto mesh = Mesh::LoadWModel(mr.Mesh.Path, &err))
+							{
+								bMin = mesh->GetBounds().Min;
+								bMax = mesh->GetBounds().Max;
+							}
 						}
+						if (bMin.x > bMax.x || bMin.y > bMax.y || bMin.z > bMax.z)
+						{
+							bMin = glm::vec3(-0.5f);
+							bMax = glm::vec3(0.5f);
+						}
+						bMax = glm::max(bMax, bMin + glm::vec3(0.05f));
 
+						drawWireframeBox(world, bMin, bMax, plane, theme.Warning, static_cast<entt::entity>(selected));
+					}
+
+					// ---- 选中动画骨骼模型立体线框盒 (SkinnedMeshRendererComponent) ----
+					if (selected.IsValid() && selected.HasComponent<SkinnedMeshRendererComponent>() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
+						if (selected.HasComponent<WorldTransformComponent>())
+							world = selected.GetComponent<WorldTransformComponent>().Matrix;
+						const auto& smr = selected.GetComponent<SkinnedMeshRendererComponent>();
+
+						glm::vec3 bMin { -0.5f, -0.5f, -0.5f };
+						glm::vec3 bMax {  0.5f,  0.5f,  0.5f };
+						if (smr.Mesh.HasPath() || smr.Mesh.Identity.IsValid())
+						{
+							std::string err;
+							if (auto mesh = Mesh::LoadWModel(smr.Mesh.Path, &err))
+							{
+								bMin = mesh->GetBounds().Min;
+								bMax = mesh->GetBounds().Max;
+							}
+						}
+						if (bMin.x > bMax.x || bMin.y > bMax.y || bMin.z > bMax.z)
+						{
+							bMin = glm::vec3(-0.5f);
+							bMax = glm::vec3(0.5f);
+						}
+						bMax = glm::max(bMax, bMin + glm::vec3(0.05f));
+
+						drawWireframeBox(world, bMin, bMax, false, theme.Warning, static_cast<entt::entity>(selected));
+					}
+
+					// ---- 选中 2D 精灵图元线框 (SpriteComponent) ----
+					if (selected.IsValid() && selected.HasComponent<SpriteComponent>() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						const auto& spr = selected.GetComponent<SpriteComponent>();
+						glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
+						if (selected.HasComponent<WorldTransformComponent>())
+							world = selected.GetComponent<WorldTransformComponent>().Matrix;
+						if (spr.Pivot.x != 0.5f || spr.Pivot.y != 0.5f)
+							world = glm::translate(world, glm::vec3(0.5f - spr.Pivot.x, 0.5f - spr.Pivot.y, 0.0f));
+
+						const glm::vec3 corners[4] = {
+							glm::vec3(world * glm::vec4(-0.5f, -0.5f, 0.0f, 1.0f)),
+							glm::vec3(world * glm::vec4( 0.5f, -0.5f, 0.0f, 1.0f)),
+							glm::vec3(world * glm::vec4( 0.5f,  0.5f, 0.0f, 1.0f)),
+							glm::vec3(world * glm::vec4(-0.5f,  0.5f, 0.0f, 1.0f)),
+						};
 						const Wui::WuiColor selectOutlineColor = theme.Warning;
 						const entt::entity selHandle = static_cast<entt::entity>(selected);
-
-						if (plane)
+						for (int i = 0; i < 4; ++i)
 						{
-							const int planeEdges[4][2] = { { 0, 1 }, { 1, 5 }, { 5, 4 }, { 4, 0 } };
-							for (const auto& edge : planeEdges)
+							PushOccludedWorldSegment(corners[i], corners[(i + 1) % 4], selectOutlineColor, 1.8f, selHandle);
+						}
+					}
+
+					// ---- 选中 2D 瓦片地图线框 (TilemapComponent) ----
+					if (selected.IsValid() && selected.HasComponent<TilemapComponent>() &&
+						selected.HasComponent<TransformComponent>())
+					{
+						const auto& tmComp = selected.GetComponent<TilemapComponent>();
+						glm::mat4 world = selected.GetComponent<TransformComponent>().GetLocalMatrix();
+						if (selected.HasComponent<WorldTransformComponent>())
+							world = selected.GetComponent<WorldTransformComponent>().Matrix;
+
+						float mapW = 16.0f, mapH = 16.0f;
+						if (tmComp.Tilemap.HasPath())
+						{
+							const std::string tmP = StringPool::Get().PathOf(tmComp.Tilemap.Path);
+							if (auto tm = Tilemap::GetOrLoad(tmP))
 							{
-								PushOccludedWorldSegment(worldCorners[edge[0]], worldCorners[edge[1]],
-									selectOutlineColor, 1.8f, selHandle);
+								mapW = static_cast<float>(tm->GetWidth()) * (tmComp.CellSize.x > 0.0f ? tmComp.CellSize.x : tm->GetCellSize().x);
+								mapH = static_cast<float>(tm->GetHeight()) * (tmComp.CellSize.y > 0.0f ? tmComp.CellSize.y : tm->GetCellSize().y);
 							}
 						}
-						else
+
+						const glm::vec3 corners[4] = {
+							glm::vec3(world * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)),
+							glm::vec3(world * glm::vec4(mapW, 0.0f, 0.0f, 1.0f)),
+							glm::vec3(world * glm::vec4(mapW, mapH, 0.0f, 1.0f)),
+							glm::vec3(world * glm::vec4(0.0f, mapH, 0.0f, 1.0f)),
+						};
+						const Wui::WuiColor selectOutlineColor = theme.Warning;
+						const entt::entity selHandle = static_cast<entt::entity>(selected);
+						for (int i = 0; i < 4; ++i)
 						{
-							const int cubeEdges[12][4] = {
-								{ 0, 1, 3, 5 }, { 2, 3, 2, 5 }, { 4, 5, 3, 4 }, { 6, 7, 2, 4 },   // 沿 X
-								{ 0, 2, 1, 5 }, { 1, 3, 0, 5 }, { 4, 6, 1, 4 }, { 5, 7, 0, 4 },   // 沿 Y
-								{ 0, 4, 1, 3 }, { 1, 5, 0, 3 }, { 2, 6, 1, 2 }, { 3, 7, 0, 2 },   // 沿 Z
-							};
-							for (const auto& edge : cubeEdges)
-							{
-								if (faceVisible[edge[2]] || faceVisible[edge[3]])
-								{
-									PushOccludedWorldSegment(worldCorners[edge[0]], worldCorners[edge[1]],
-										selectOutlineColor, 1.8f, selHandle);
-								}
-							}
+							PushOccludedWorldSegment(corners[i], corners[(i + 1) % 4], selectOutlineColor, 1.8f, selHandle);
 						}
 					}
 
@@ -5958,1395 +5962,53 @@ namespace World
 		static std::unordered_map<uint32_t, CachedAgentPath> s_AgentPathCache;
 
 // ---- 3D 导航网格 (NavMesh & AI Navigation) 视口可视化 ----
+		// 3D 几何要素（多边形半透明填充面、边界轮廓线、代理圆柱体、路径折线、障碍盒）已全面移交 SceneRenderer
+		// 并在原生 GPU 渲染流中进行硬件像素级深度测试 (DepthTest = true, DepthWrite = false)；
+		// ViewportPanel 仅在屏幕空间保留 2D 文本标牌气泡。
 		const bool anyNavRequested = !play && (s_ShowNavMesh ||
 			NavMeshPanel::ShowPolygons ||
 			NavMeshPanel::ShowPaths ||
 			NavMeshPanel::ShowObstacles ||
 			NavMeshPanel::ShowOffMeshLinks ||
 			NavMeshPanel::ShowAreaCosts);
-
-		if (anyNavRequested)
+		const Ref<Scene> navScene = m_Host.GetActiveScene();
+		if (anyNavRequested && navScene && m_Host.HasRenderedScene())
 		{
-			const Ref<Scene> navScene = m_Host.GetActiveScene();
-			if (navScene)
+			const Wui::GizmoCamera debugCamera = m_Host.GetGizmoCamera();
+			const glm::mat4& viewProj = debugCamera.ViewProjection;
+			Wui::ClipScope navClip(ctx, sceneRect);
+
+			const auto& registry = std::as_const(*navScene).GetRegistry();
+			for (auto [handle, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
 			{
-				const Wui::GizmoCamera debugCamera = m_Host.GetGizmoCamera();
-				const glm::mat4& viewProj = debugCamera.ViewProjection;
-				const glm::vec3 cameraPos = debugCamera.Position;
-				const glm::vec3 cameraForward = debugCamera.Forward;
-				Wui::ClipScope navClip(ctx, sceneRect);
-
-				const auto& registry = std::as_const(*navScene).GetRegistry();
-				std::shared_ptr<NavMesh> navMesh = navScene->GetNavMesh();
-				const entt::entity selectedHandle = selected.IsValid()
-					&& selected.GetScene() == navScene.get()
-					? static_cast<entt::entity>(selected) : entt::null;
-
-				std::shared_ptr<TerrainData> terrainData = nullptr;
-				glm::vec3 terrainOrigin { 0.0f };
-				glm::vec3 terrainScale { 1.0f };
-				if (navScene)
+				if (areaComp.ClearanceHeight > 0.0f)
 				{
-					for (auto [th, tc, xf] : registry.view<TerrainComponent, TransformComponent>().each())
+					glm::vec3 badgeWorld { 0.0f };
+					if (const auto* xf = registry.try_get<TransformComponent>(handle))
+						badgeWorld = xf->Location + glm::vec3(0.0f, areaComp.Extents.y + 0.35f, 0.0f);
+					const glm::vec4 clipPos = viewProj * glm::vec4(badgeWorld, 1.0f);
+					if (clipPos.w > 0.05f)
 					{
-						terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
-						if (terrainData)
+						const glm::vec3 ndc = glm::vec3(clipPos) / clipPos.w;
+						if (ndc.z >= -1.0f && ndc.z <= 1.0f)
 						{
-							terrainOrigin = xf.Location;
-							terrainScale = glm::max(glm::abs(xf.Scale), glm::vec3(0.001f));
-							break;
-						}
-					}
-					if (!terrainData)
-					{
-						for (auto [th, tc] : registry.view<TerrainComponent>().each())
-						{
-							terrainData = TerrainRenderer::GetOrCreateTerrainData(tc.TerrainAsset, tc.CellSize, tc.HeightScale);
-							if (terrainData)
-								break;
-						}
-					}
-				}
-
-				auto sampleTerrainWorldHeight = [&](float worldX, float worldZ, float& outWorldH) -> bool {
-					if (!terrainData) return false;
-					const float localX = (worldX - terrainOrigin.x) / terrainScale.x;
-					const float localZ = (worldZ - terrainOrigin.z) / terrainScale.z;
-					const float maxLocalX = static_cast<float>(terrainData->GetWidth() > 0 ? terrainData->GetWidth() - 1 : 0) * terrainData->GetCellSize();
-					const float maxLocalZ = static_cast<float>(terrainData->GetHeight() > 0 ? terrainData->GetHeight() - 1 : 0) * terrainData->GetCellSize();
-					if (localX < 0.0f || localZ < 0.0f || localX > maxLocalX || localZ > maxLocalZ)
-						return false;
-					outWorldH = terrainOrigin.y + terrainData->SampleHeight(localX, localZ) * terrainScale.y;
-					return true;
-				};
-
-				// 收集场景静态遮挡物包围盒 (用于导航全要素遮挡剔除，杜绝穿透建筑物与山体)
-				struct StaticAABB { glm::vec3 Min; glm::vec3 Max; entt::entity Owner = entt::null; };
-				std::vector<StaticAABB> occluderBoxes;
-				for (auto [h, xf, box] : registry.view<TransformComponent, BoxCollider3DComponent>().each())
-				{
-					if (h == selectedHandle)
-						continue;
-					const glm::vec3 s = glm::abs(xf.Scale);
-					const glm::vec3 ext = s * box.HalfExtents;
-					// 跳过薄板/桥面/地面层（例如 ext.y < 0.6f 的水平薄板或 ext.x > 12.0f || ext.z > 12.0f 的大跨度地板/高架桥面），避免高架桥面把桥下的导航代理、路径和路障错误剔除
-					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
-						continue;
-					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
-					{
-						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext, h });
-					}
-				}
-				for (auto [h, xf, wb] : registry.view<TransformComponent, WhiteboxComponent>().each())
-				{
-					if (h == selectedHandle)
-						continue;
-					const glm::vec3 s = glm::abs(xf.Scale);
-					const glm::vec3 ext = s * wb.Dimensions * 0.5f;
-					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
-						continue;
-					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
-					{
-						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext, h });
-					}
-				}
-				for (auto [h, xf, mr] : registry.view<TransformComponent, MeshRendererComponent>().each())
-				{
-					if (h == selectedHandle)
-						continue;
-					if (registry.try_get<NavMeshObstacleComponent>(h) || registry.try_get<NavMeshAreaModifierComponent>(h))
-						continue;
-					if (mr.Primitive != MeshRendererComponent::PrimitiveShape::Cube)
-						continue;
-					const glm::vec3 s = glm::abs(xf.Scale);
-					const glm::vec3 ext = s * 0.5f;
-					if (ext.y < 0.6f || ext.x > 12.0f || ext.z > 12.0f)
-						continue;
-					if (ext.x >= 0.35f && ext.z >= 0.35f && ext.y >= 0.35f)
-					{
-						occluderBoxes.push_back({ xf.Location - ext, xf.Location + ext, h });
-					}
-				}
-
-				auto rayHitsAABB = [](const glm::vec3& orig, const glm::vec3& dir, float maxDist, const glm::vec3& bMin, const glm::vec3& bMax) -> bool
-				{
-					float tmin = 0.0f;
-					float tmax = maxDist;
-					for (int i = 0; i < 3; ++i)
-					{
-						if (std::abs(dir[i]) < 1e-6f)
-						{
-							if (orig[i] < bMin[i] || orig[i] > bMax[i]) return false;
-						}
-						else
-						{
-							const float ood = 1.0f / dir[i];
-							float t1 = (bMin[i] - orig[i]) * ood;
-							float t2 = (bMax[i] - orig[i]) * ood;
-							if (t1 > t2) std::swap(t1, t2);
-							tmin = std::max(tmin, t1);
-							tmax = std::min(tmax, t2);
-							if (tmin > tmax) return false;
-						}
-					}
-					return tmin > 0.05f && tmin < maxDist - 0.05f;
-				};
-
-				auto isOccluded = [&](const glm::vec3& targetPt, bool isSurface = false, float extraThreshold = 0.0f, entt::entity ignoreEntity = entt::null) -> bool
-				{
-					const glm::vec3 toTarget = targetPt - cameraPos;
-					const float dist = glm::length(toTarget);
-					if (dist < 1.0f)
-						return false;
-
-					if (terrainData)
-					{
-						float targetGndH = 0.0f;
-						if (!isSurface && sampleTerrainWorldHeight(targetPt.x, targetPt.z, targetGndH))
-						{
-							if (targetPt.y < targetGndH - 0.04f)
-								return true;
-						}
-
-						const int numSteps = std::clamp(static_cast<int>(std::ceil(dist / 2.0f)), isSurface ? 4 : 6, 16);
-						const float normDist = dist;
-						for (int s = 1; s <= numSteps; ++s)
-						{
-							const float t = static_cast<float>(s) / static_cast<float>(numSteps);
-							const float distFromTarget = (1.0f - t) * normDist;
-							if (isSurface && distFromTarget < 2.5f)
-								break;
-							if (!isSurface && distFromTarget < 0.25f)
-								break;
-
-							const glm::vec3 rayPt = glm::mix(cameraPos, targetPt, t);
-							float gndH = 0.0f;
-							if (sampleTerrainWorldHeight(rayPt.x, rayPt.z, gndH))
-							{
-								const float heightMargin = isSurface ? (0.25f + extraThreshold) : (0.06f + extraThreshold);
-								if (gndH > rayPt.y + heightMargin)
-									return true;
-							}
-						}
-					}
-
-					if (!occluderBoxes.empty() && dist > 0.5f)
-					{
-						const glm::vec3 normDir = toTarget / dist;
-						for (const auto& box : occluderBoxes)
-						{
-							if (ignoreEntity != entt::null && box.Owner == ignoreEntity)
-								continue;
-
-							if (targetPt.x >= box.Min.x && targetPt.x <= box.Max.x &&
-								targetPt.y >= box.Min.y && targetPt.y <= box.Max.y &&
-								targetPt.z >= box.Min.z && targetPt.z <= box.Max.z)
-							{
-								const bool camInside = (cameraPos.x >= box.Min.x && cameraPos.x <= box.Max.x &&
-									cameraPos.y >= box.Min.y && cameraPos.y <= box.Max.y &&
-									cameraPos.z >= box.Min.z && cameraPos.z <= box.Max.z);
-								if (!camInside)
-									return true;
-								continue;
-							}
-							if (rayHitsAABB(cameraPos, normDir, dist, box.Min, box.Max))
-								return true;
-						}
-					}
-					return false;
-				};
-
-				auto PushOccludedWorldSegment = [&](const glm::vec3& p0, const glm::vec3& p1,
-					const Wui::WuiColor& color, float lineWidth, entt::entity ignoreEntity = entt::null)
-				{
-					const float totalDist = glm::distance(p0, p1);
-					if (totalDist < 1e-4f)
-						return;
-
-					const int numSteps = std::clamp(static_cast<int>(std::ceil(totalDist / 0.40f)), 3, 24);
-
-					std::vector<bool> vis(numSteps + 1);
-					for (int i = 0; i <= numSteps; ++i)
-					{
-						const float t = static_cast<float>(i) / static_cast<float>(numSteps);
-						const glm::vec3 pt = glm::mix(p0, p1, t);
-						vis[i] = !isOccluded(pt, false, 0.0f, ignoreEntity);
-					}
-
-					float curStart = -1.0f;
-					for (int i = 0; i < numSteps; ++i)
-					{
-						const float t0 = static_cast<float>(i) / static_cast<float>(numSteps);
-						const float t1 = static_cast<float>(i + 1) / static_cast<float>(numSteps);
-						const bool v0 = vis[i];
-						const bool v1 = vis[i + 1];
-
-						if (v0 && v1)
-						{
-							if (curStart < 0.0f)
-								curStart = t0;
-						}
-						else if (v0 && !v1)
-						{
-							if (curStart < 0.0f)
-								curStart = t0;
-							float tVis = t0, tOcc = t1;
-							for (int b = 0; b < 3; ++b)
-							{
-								const float tMid = (tVis + tOcc) * 0.5f;
-								if (!isOccluded(glm::mix(p0, p1, tMid), false, 0.0f, ignoreEntity))
-									tVis = tMid;
-								else
-									tOcc = tMid;
-							}
-							const glm::vec3 startPt = glm::mix(p0, p1, curStart);
-							const glm::vec3 endPt = glm::mix(p0, p1, tVis);
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(startPt, 1.0f),
-								viewProj * glm::vec4(endPt, 1.0f),
-								color, lineWidth);
-							curStart = -1.0f;
-						}
-						else if (!v0 && v1)
-						{
-							float tOcc = t0, tVis = t1;
-							for (int b = 0; b < 3; ++b)
-							{
-								const float tMid = (tVis + tOcc) * 0.5f;
-								if (!isOccluded(glm::mix(p0, p1, tMid), false, 0.0f, ignoreEntity))
-									tVis = tMid;
-								else
-									tOcc = tMid;
-							}
-							curStart = tVis;
-						}
-						else
-						{
-							if (curStart >= 0.0f)
-							{
-								const glm::vec3 startPt = glm::mix(p0, p1, curStart);
-								const glm::vec3 endPt = glm::mix(p0, p1, t0);
-								PushProjectedSegment(ctx, viewProj, sceneRect,
-									viewProj * glm::vec4(startPt, 1.0f),
-									viewProj * glm::vec4(endPt, 1.0f),
-									color, lineWidth);
-								curStart = -1.0f;
-							}
-						}
-					}
-
-					if (curStart >= 0.0f)
-					{
-						const glm::vec3 startPt = glm::mix(p0, p1, curStart);
-						const glm::vec3 endPt = p1;
-						PushProjectedSegment(ctx, viewProj, sceneRect,
-							viewProj * glm::vec4(startPt, 1.0f),
-							viewProj * glm::vec4(endPt, 1.0f),
-							color, lineWidth);
-					}
-				};
-
-				// 动态障碍物与区域代价修饰实时同步
-				if (navMesh && navMesh->GetPolygonCount() > 0)
-				{
-					static const void* s_LastNavMesh = nullptr;
-					static std::vector<glm::vec3> s_PrevObstacleStates;
-					static std::vector<glm::vec4> s_PrevAreaStates;
-
-					std::vector<glm::vec3> currObstacleStates;
-					for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
-					{
-						if (obs.CarveNavMesh == 1)
-						{
-							glm::vec3 c { 0.0f };
-							glm::vec3 s { 1.0f };
-							if (const auto* xform = registry.try_get<TransformComponent>(handle))
-							{
-								c = xform->Location;
-								s = glm::abs(xform->Scale);
-							}
-							currObstacleStates.push_back(c);
-							currObstacleStates.push_back(s * obs.Extents);
-						}
-					}
-
-					std::vector<glm::vec4> currAreaStates;
-					std::vector<NavMeshAreaModifier> sceneAreaModifiers;
-					for (auto [handle, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
-					{
-						glm::vec3 c { 0.0f };
-						glm::vec3 s { 1.0f };
-						if (const auto* xform = registry.try_get<TransformComponent>(handle))
-						{
-							c = xform->Location;
-							s = glm::abs(xform->Scale);
-						}
-						const glm::vec3 worldExtents = s * areaComp.Extents;
-						currAreaStates.push_back(glm::vec4(c, areaComp.CostMultiplier));
-						currAreaStates.push_back(glm::vec4(worldExtents, static_cast<float>(areaComp.AreaType) + areaComp.ClearanceHeight * 10.0f));
-
-						NavMeshAreaModifier mod;
-						mod.Center = c;
-						mod.Extents = worldExtents;
-						mod.CostMultiplier = areaComp.CostMultiplier;
-						mod.ClearanceHeight = areaComp.ClearanceHeight;
-						mod.AreaType = areaComp.AreaType;
-						sceneAreaModifiers.push_back(mod);
-					}
-
-					if (navMesh.get() != s_LastNavMesh || currObstacleStates != s_PrevObstacleStates || currAreaStates != s_PrevAreaStates)
-					{
-						s_LastNavMesh = navMesh.get();
-						s_PrevObstacleStates = std::move(currObstacleStates);
-						s_PrevAreaStates = std::move(currAreaStates);
-
-						if (!sceneAreaModifiers.empty())
-							navMesh->ReapplyAreaModifiers(sceneAreaModifiers);
-
-						navMesh->ClearObstacles();
-						for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
-						{
-							if (obs.CarveNavMesh == 1)
-							{
-								glm::vec3 c { 0.0f };
-								glm::vec3 s { 1.0f };
-								if (const auto* xform = registry.try_get<TransformComponent>(handle))
-								{
-									c = xform->Location;
-									s = glm::abs(xform->Scale);
-								}
-								const glm::vec3 worldExtents = s * obs.Extents;
-								navMesh->ApplyObstacle(c, worldExtents, true);
-							}
-						}
-						s_AgentPathCache.clear();
-					}
-				}
-
-				if (navMesh && navMesh->GetPolygonCount() > 0 && NavMeshPanel::ShowPolygons)
-				{
-					const glm::vec3 cameraPos = debugCamera.Position;
-					const glm::vec3 cameraForward = debugCamera.Forward;
-
-					// 空间粗筛加速：优先利用 MacroTiles（24m 瓦片），遍历视距 800m 以内且在视野前方的瓦片多边形
-					const size_t polyCount = navMesh->GetPolygonCount();
-					constexpr float kNearPolyMaxDist = 800.0f;
-					constexpr float kNearPolyMaxDistSq = kNearPolyMaxDist * kNearPolyMaxDist;
-
-					struct PolyCandidate
-					{
-						float DistSq;
-						uint32_t Index;
-					};
-					std::vector<PolyCandidate> candidates;
-					candidates.reserve(2048);
-					std::vector<uint8_t> visitedPolys(polyCount, 0);
-
-					const auto& macroTiles = navMesh->GetMacroTiles();
-					if (!macroTiles.empty() && !macroTiles[0].PolygonIndices.empty())
-					{
-						constexpr float kTileReach = 800.0f + 24.0f * 1.5f;
-						constexpr float kTileReachSq = kTileReach * kTileReach;
-
-						for (const auto& tile : macroTiles)
-						{
-							if (tile.PolyCount == 0) continue;
-							const glm::vec3 toTile = tile.Center - cameraPos;
-							const float tDistSq = glm::dot(toTile, toTile);
-							if (tDistSq > kTileReachSq) continue;
-
-							if (!debugCamera.IsOrthographic && glm::dot(toTile, cameraForward) < -48.0f)
-								continue;
-
-							for (uint32_t pIdx : tile.PolygonIndices)
-							{
-								if (pIdx >= polyCount || visitedPolys[pIdx]) continue;
-								visitedPolys[pIdx] = 1;
-								const auto& poly = navMesh->GetPolygon(pIdx);
-								if (poly.Blocked && !NavMeshPanel::ShowObstacles) continue;
-								if (poly.VertexIndices.size() < 3) continue;
-
-								const glm::vec3 toPoly = poly.Center - cameraPos;
-								const float distSq = glm::dot(toPoly, toPoly);
-								if (distSq > kNearPolyMaxDistSq) continue;
-
-								if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < -2.0f)
-									continue;
-
-								// 严禁对可行走多边形执行 isOccluded 遮挡剔除，确保远景与低视角下 100% 连续完整可见
-								if (isOccluded(poly.Center, true))
-									continue;
-								const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
-								if (clipPos.w > 0.05f)
-								{
-									const glm::vec2 ndc = glm::vec2(clipPos.x, clipPos.y) / clipPos.w;
-									if (std::abs(ndc.x) > 2.8f || ndc.y > 2.8f || ndc.y < -3.5f) continue;
-								}
-
-								candidates.push_back({ distSq, pIdx });
-							}
-						}
-					}
-					else
-					{
-						for (size_t p = 0; p < polyCount; ++p)
-						{
-							const uint32_t pIdx = static_cast<uint32_t>(p);
-							if (visitedPolys[pIdx]) continue;
-							visitedPolys[pIdx] = 1;
-							const auto& poly = navMesh->GetPolygon(pIdx);
-							if (poly.Blocked && !NavMeshPanel::ShowObstacles) continue;
-							if (poly.VertexIndices.size() < 3) continue;
-
-							const glm::vec3 toPoly = poly.Center - cameraPos;
-							const float distSq = glm::dot(toPoly, toPoly);
-							if (distSq > kNearPolyMaxDistSq) continue;
-
-							if (!debugCamera.IsOrthographic && glm::dot(toPoly, cameraForward) < -2.0f)
-								continue;
-
-							// 严禁对可行走多边形执行 isOccluded 遮挡剔除
-							if (isOccluded(poly.Center, true))
-								continue;
-							const glm::vec4 clipPos = viewProj * glm::vec4(poly.Center, 1.0f);
-							if (clipPos.w > 0.05f)
-							{
-								const glm::vec2 ndc = glm::vec2(clipPos.x, clipPos.y) / clipPos.w;
-								if (std::abs(ndc.x) > 2.8f || ndc.y > 2.8f || ndc.y < -3.5f) continue;
-							}
-
-							candidates.push_back({ distSq, pIdx });
-						}
-					}
-
-					// 画家算法：由远及近 (Back-to-Front) 深度排序，消除杂乱重叠
-					std::sort(candidates.begin(), candidates.end(), [](const PolyCandidate& a, const PolyCandidate& b) {
-						return a.DistSq > b.DistSq;
-					});
-
-					size_t quadCount = 0;
-					size_t lineCount = 0;
-					constexpr size_t kMaxQuadBudget = 12000;
-					constexpr size_t kMaxLineBudget = 16000;
-					constexpr float kNearW = 0.05f;
-
-					std::vector<glm::vec4> inClips;
-					inClips.reserve(16);
-					std::vector<glm::vec4> clippedClips;
-					clippedClips.reserve(16);
-					std::vector<glm::vec2> screenPts;
-					screenPts.reserve(16);
-
-					for (const auto& cand : candidates)
-					{
-						if (quadCount >= kMaxQuadBudget && lineCount >= kMaxLineBudget)
-							break;
-
-						const auto& poly = navMesh->GetPolygon(cand.Index);
-						if (poly.Blocked && !NavMeshPanel::ShowObstacles)
-							continue;
-
-						const size_t vertCount = poly.VertexIndices.size();
-
-						// 1. Sutherland-Hodgman 近裁剪面精确多边形裁剪 (w >= kNearW):
-						// 消除相机仰角拉起时下沿多边形截断消失或暴力 clamp(-5, 5) 造成的畸变拉花
-						inClips.clear();
-						for (size_t i = 0; i < vertCount; ++i)
-						{
-							const size_t vIdx = poly.VertexIndices[i];
-							const glm::vec3 worldPos = navMesh->GetVertex(vIdx) + glm::vec3(0.0f, 0.08f, 0.0f);
-							inClips.push_back(viewProj * glm::vec4(worldPos, 1.0f));
-						}
-
-						clippedClips.clear();
-						for (size_t i = 0; i < inClips.size(); ++i)
-						{
-							const glm::vec4& p0 = inClips[i];
-							const glm::vec4& p1 = inClips[(i + 1) % inClips.size()];
-							const bool in0 = (p0.w >= kNearW);
-							const bool in1 = (p1.w >= kNearW);
-							if (in0)
-								clippedClips.push_back(p0);
-							if (in0 != in1)
-							{
-								const float t = std::clamp((kNearW - p0.w) / (p1.w - p0.w), 0.0f, 1.0f);
-								clippedClips.push_back(p0 + t * (p1 - p0));
-							}
-						}
-
-						if (clippedClips.size() < 3)
-							continue;
-
-						screenPts.clear();
-						float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
-						for (const auto& clip : clippedClips)
-						{
-							const float invW = 1.0f / clip.w;
-							const glm::vec2 ndc { clip.x * invW, clip.y * invW };
-							const glm::vec2 sp {
-								sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
-								sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H
+							const glm::vec2 badgePos {
+								sceneRect.X + (ndc.x * 0.5f + 0.5f) * sceneRect.W,
+								sceneRect.Y + (1.0f - (ndc.y * 0.5f + 0.5f)) * sceneRect.H
 							};
-							screenPts.push_back(sp);
-							minX = std::min(minX, sp.x);
-							maxX = std::max(maxX, sp.x);
-							minY = std::min(minY, sp.y);
-							maxY = std::max(maxY, sp.y);
-						}
-
-						if (maxX < sceneRect.X || minX > sceneRect.X + sceneRect.W ||
-							maxY < sceneRect.Y || minY > sceneRect.Y + sceneRect.H)
-							continue;
-
-						const bool isCovered = (poly.Clearance > 0.0f && poly.Clearance <= 2.6f);
-
-						// 统一采用 UE5 标准导航翠绿色，杜绝将普通山坡强制高亮为刺眼薄荷绿；仅当限高通道 (Clearance > 0) 或特殊 AreaType 时区分
-						Wui::WuiColor polyColor = poly.Blocked
-							? Wui::WuiColor{ 0.95f, 0.25f, 0.25f, 0.95f }
-							: (isCovered
-								? Wui::WuiColor{ 0.20f, 0.75f, 1.00f, 0.95f }
-								: Wui::WuiColor{ 0.18f, 0.90f, 0.48f, 0.85f });
-
-						Wui::WuiColor fillColor = poly.Blocked
-							? Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.40f }
-							: (isCovered
-								? Wui::WuiColor{ 0.15f, 0.55f, 0.90f, 0.32f }
-								: Wui::WuiColor{ 0.12f, 0.82f, 0.42f, 0.26f });
-
-						if (NavMeshPanel::ShowAreaCosts && !poly.Blocked)
-						{
-							if (poly.AreaType == 1)
+							if (badgePos.x >= sceneRect.X && badgePos.x <= sceneRect.X + sceneRect.W &&
+								badgePos.y >= sceneRect.Y && badgePos.y <= sceneRect.Y + sceneRect.H)
 							{
-								polyColor = Wui::WuiColor{ 0.35f, 0.95f, 0.35f, 0.90f };
-								fillColor = Wui::WuiColor{ 0.30f, 0.95f, 0.30f, 0.35f };
-							}
-							else if (poly.AreaType == 2)
-							{
-								polyColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.90f };
-								fillColor = Wui::WuiColor{ 0.65f, 0.35f, 0.95f, 0.35f };
-							}
-							else if (poly.AreaType == 3)
-							{
-								polyColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.90f };
-								fillColor = Wui::WuiColor{ 0.95f, 0.40f, 0.15f, 0.40f };
-							}
-							else if (poly.AreaType == 5)
-							{
-								polyColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.90f };
-								fillColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.40f };
+								char clearText[64];
+								std::snprintf(clearText, sizeof(clearText), "Clearance: %.1fm", areaComp.ClearanceHeight);
+								const float fontSz = 11.0f;
+								const float textW = ctx.MeasureTextWidth(clearText, fontSz);
+								const Wui::WuiRect tagRect { badgePos.x - textW * 0.5f - 6.0f, badgePos.y - 18.0f, textW + 12.0f, 18.0f };
+								Wui::PanelBackground(ctx, tagRect, Wui::WuiColor{ 0.05f, 0.12f, 0.20f, 0.88f }, 4.0f);
+								Wui::HighlightOutline(ctx, tagRect, Wui::WuiColor{ 0.20f, 0.85f, 1.00f, 0.90f }, 4.0f, 1.2f);
+								Wui::Label(ctx, { tagRect.X + 6.0f, tagRect.Y + 2.5f }, clearText, Wui::WuiColor{ 0.20f, 0.85f, 1.00f, 0.90f }, fontSz);
 							}
 						}
-
-						// 2. 半透明全涂色填充 (贴合真实多边形，杜绝悬空浮板)
-						if (NavMeshPanel::FillPolygons && quadCount < kMaxQuadBudget)
-						{
-							if (screenPts.size() == 3)
-							{
-								Wui::ConvexQuad(ctx, { screenPts[0], screenPts[1], screenPts[2], screenPts[2] }, fillColor);
-								++quadCount;
-							}
-							else if (screenPts.size() == 4)
-							{
-								Wui::ConvexQuad(ctx, { screenPts[0], screenPts[1], screenPts[2], screenPts[3] }, fillColor);
-								++quadCount;
-							}
-							else
-							{
-								for (size_t s = 1; s + 1 < screenPts.size() && quadCount < kMaxQuadBudget; ++s)
-								{
-									Wui::ConvexQuad(ctx, { screenPts[0], screenPts[s], screenPts[s + 1], screenPts[s + 1] }, fillColor);
-									++quadCount;
-								}
-							}
-						}
-
-						// 3. 自适应 LOD 网格线与边界轮廓线 (对标 UE5 视觉体验：近距离细网格，远距离干净纯色块)
-						const float dist = std::sqrt(cand.DistSq);
-						int gridStride = 0;
-						float innerAlpha = 0.20f;
-						float borderThickness = 1.4f;
-						float borderAlpha = polyColor.A;
-
-						if (dist < 22.0f)
-						{
-							gridStride = 2;
-							innerAlpha = 0.18f;
-							borderThickness = 1.6f;
-						}
-						else
-						{
-							gridStride = 0;
-							innerAlpha = 0.0f;
-							borderThickness = (dist < 70.0f) ? 1.4f : 1.1f;
-							if (dist >= 70.0f)
-								borderAlpha = 0.65f;
-						}
-
-						for (size_t i = 0; i < vertCount; ++i)
-						{
-							const size_t v0Idx = poly.VertexIndices[i];
-							const size_t v1Idx = poly.VertexIndices[(i + 1) % vertCount];
-							const int32_t nbr = (i < poly.Neighbors.size()) ? poly.Neighbors[i] : -1;
-							const bool isBoundary = (nbr == -1 || (nbr >= 0 && static_cast<uint32_t>(nbr) < polyCount && navMesh->GetPolygon(static_cast<uint32_t>(nbr)).Blocked != poly.Blocked));
-
-							if (!isBoundary)
-							{
-								if (gridStride == 0)
-									continue; // 远距离不画内部线，只留纯净色块和外轮廓线
-								if (static_cast<int32_t>(cand.Index) > nbr)
-									continue; // 内部共享边只画一次
-								if (gridStride > 1 && (cand.Index % gridStride != 0))
-									continue; // 中距离稀疏化
-								if (lineCount >= kMaxLineBudget)
-									continue;
-							}
-							else
-							{
-								if (lineCount >= kMaxLineBudget + 400)
-									continue;
-							}
-
-							glm::vec4 c0 = inClips[i];
-							glm::vec4 c1 = inClips[(i + 1) % vertCount];
-
-							if (c0.w < kNearW && c1.w < kNearW)
-								continue;
-							if (c0.w < kNearW)
-							{
-								const float t = std::clamp((kNearW - c0.w) / (c1.w - c0.w), 0.0f, 1.0f);
-								c0 = c0 + t * (c1 - c0);
-							}
-							else if (c1.w < kNearW)
-							{
-								const float t = std::clamp((kNearW - c1.w) / (c0.w - c1.w), 0.0f, 1.0f);
-								c1 = c1 + t * (c0 - c1);
-							}
-
-							glm::vec2 sp0 {
-								sceneRect.X + (c0.x / c0.w + 1.0f) * 0.5f * sceneRect.W,
-								sceneRect.Y + (1.0f - c0.y / c0.w) * 0.5f * sceneRect.H
-							};
-							glm::vec2 sp1 {
-								sceneRect.X + (c1.x / c1.w + 1.0f) * 0.5f * sceneRect.W,
-								sceneRect.Y + (1.0f - c1.y / c1.w) * 0.5f * sceneRect.H
-							};
-
-							if (!ClipLineSegment2D(sp0, sp1, sceneRect.X, sceneRect.X + sceneRect.W, sceneRect.Y, sceneRect.Y + sceneRect.H))
-								continue;
-
-							const float thickness = isBoundary ? borderThickness : 1.0f;
-							const Wui::WuiColor lineColor = isBoundary
-								? Wui::WuiColor{ polyColor.R, polyColor.G, polyColor.B, borderAlpha }
-								: Wui::WuiColor{ polyColor.R, polyColor.G, polyColor.B, innerAlpha };
-
-							Wui::LineSegment(ctx, sp0, sp1, lineColor, thickness);
-							++lineCount;
-						}
-					}
-				}
-
-				// 1. 动态障碍物 (NavMeshObstacleComponent) 3D 盒体线框 (与 TransformComponent 本地矩阵及选择框 100% 同步，逐段遮挡绘制)
-				if (NavMeshPanel::ShowObstacles)
-				{
-					const Wui::WuiColor obsColor { 1.0f, 0.55f, 0.15f, 0.95f };
-					for (auto [handle, obs] : registry.view<NavMeshObstacleComponent>().each())
-					{
-						const bool isSelected = (handle == selectedHandle);
-						glm::mat4 world(1.0f);
-						if (const auto* xform = registry.try_get<TransformComponent>(handle))
-						{
-							world = xform->GetLocalMatrix();
-						}
-
-						const glm::vec3 localCorners[8] = {
-							glm::vec3(-obs.Extents.x, -obs.Extents.y, -obs.Extents.z),
-							glm::vec3( obs.Extents.x, -obs.Extents.y, -obs.Extents.z),
-							glm::vec3( obs.Extents.x, -obs.Extents.y,  obs.Extents.z),
-							glm::vec3(-obs.Extents.x, -obs.Extents.y,  obs.Extents.z),
-							glm::vec3(-obs.Extents.x,  obs.Extents.y, -obs.Extents.z),
-							glm::vec3( obs.Extents.x,  obs.Extents.y, -obs.Extents.z),
-							glm::vec3( obs.Extents.x,  obs.Extents.y,  obs.Extents.z),
-							glm::vec3(-obs.Extents.x,  obs.Extents.y,  obs.Extents.z)
-						};
-						glm::vec3 worldCorners[8];
-						for (int i = 0; i < 8; ++i)
-						{
-							worldCorners[i] = glm::vec3(world * glm::vec4(localCorners[i], 1.0f));
-						}
-
-						const float lineWidth = isSelected ? 2.2f : 1.4f;
-						Wui::WuiColor curObsColor = obsColor;
-						curObsColor.A = isSelected ? 0.95f : 0.65f;
-
-						constexpr int edges[12][2] = {
-							{0,1}, {1,2}, {2,3}, {3,0},
-							{4,5}, {5,6}, {6,7}, {7,4},
-							{0,4}, {1,5}, {2,6}, {3,7}
-						};
-						for (int e = 0; e < 12; ++e)
-						{
-							PushOccludedWorldSegment(worldCorners[edges[e][0]], worldCorners[edges[e][1]],
-								curObsColor, lineWidth, handle);
-						}
-					}
-				}
-
-				// 2. 寻路代理 (NavMeshAgentComponent) 圆柱体、目标光环与路径折线 (差异化体型与姿态感知)
-				for (auto [handle, agent] : registry.view<NavMeshAgentComponent>().each())
-				{
-					const bool isSelected = (handle == selectedHandle);
-					glm::vec3 center { 0.0f };
-					if (const auto* xform = registry.try_get<TransformComponent>(handle))
-						center = xform->Location;
-
-					const float r = std::max(0.1f, agent.AgentRadius);
-					const float h = std::max(0.2f, agent.GetEffectiveHeight());
-
-					Wui::WuiColor agentColor;
-					if (agent.HasCustomAgentColor())
-					{
-						const glm::vec4 c = agent.GetCustomAgentColor();
-						agentColor = Wui::WuiColor{ c.r, c.g, c.b, c.a };
-					}
-					else
-					{
-						// 姿态自适应色彩：下蹲采用沉稳蓝灰，站立采用明亮蓝绿
-						agentColor = agent.Crouching
-							? Wui::WuiColor{ 0.35f, 0.75f, 0.95f, 0.95f }
-							: Wui::WuiColor{ 0.15f, 0.90f, 0.85f, 0.95f };
-					}
-
-					constexpr int kSegments = 16;
-					constexpr float kTwoPi = 6.28318530718f;
-
-					if (!isOccluded(center))
-					{
-					glm::vec3 prevBot = center + glm::vec3(r, 0.0f, 0.0f);
-					glm::vec3 prevTop = center + glm::vec3(r, h, 0.0f);
-
-					for (int i = 1; i <= kSegments; ++i)
-					{
-						const float a = kTwoPi * static_cast<float>(i) / static_cast<float>(kSegments);
-						const glm::vec3 currBot = center + glm::vec3(std::cos(a) * r, 0.0f, std::sin(a) * r);
-						const glm::vec3 currTop = center + glm::vec3(std::cos(a) * r, h, std::sin(a) * r);
-
-						PushProjectedSegment(ctx, viewProj, sceneRect,
-							viewProj * glm::vec4(prevBot, 1.0f),
-							viewProj * glm::vec4(currBot, 1.0f),
-							agentColor, 1.6f);
-						PushProjectedSegment(ctx, viewProj, sceneRect,
-							viewProj * glm::vec4(prevTop, 1.0f),
-							viewProj * glm::vec4(currTop, 1.0f),
-							agentColor, 1.6f);
-
-						if (i % 4 == 0)
-						{
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(currBot, 1.0f),
-								viewProj * glm::vec4(currTop, 1.0f),
-								agentColor, 1.6f);
-						}
-
-						prevBot = currBot;
-						prevTop = currTop;
-					}
-					}
-
-					// 目标点光环与指引虚线
-					const Wui::WuiColor pathColor { 1.0f, 0.85f, 0.2f, 0.90f };
-					if (!isOccluded(agent.Destination))
-					{
-					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), agent.Destination, r * 0.8f, 1, pathColor, 2.0f);
-
-					// 绘制地面旗帜
-					PushProjectedSegment(ctx, viewProj, sceneRect,
-						viewProj * glm::vec4(agent.Destination, 1.0f),
-						viewProj * glm::vec4(agent.Destination + glm::vec3(0.0f, 1.2f, 0.0f), 1.0f),
-						pathColor, 2.0f);
-					PushProjectedSegment(ctx, viewProj, sceneRect,
-						viewProj * glm::vec4(agent.Destination + glm::vec3(0.0f, 1.2f, 0.0f), 1.0f),
-						viewProj * glm::vec4(agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), 1.0f),
-						pathColor, 2.0f);
-					PushProjectedSegment(ctx, viewProj, sceneRect,
-						viewProj * glm::vec4(agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), 1.0f),
-						viewProj * glm::vec4(agent.Destination + glm::vec3(0.0f, 0.8f, 0.0f), 1.0f),
-						pathColor, 2.0f);
-					}
-
-					if (NavMeshPanel::ShowPaths && navMesh && navMesh->GetPolygonCount() > 0)
-					{
-						const uint32_t agentKey = static_cast<uint32_t>(static_cast<entt::entity>(handle));
-						auto& cache = s_AgentPathCache[agentKey];
-
-						const auto now = std::chrono::steady_clock::now();
-						const glm::vec3 dStart = center - cache.LastStart;
-						const glm::vec3 dDest = agent.Destination - cache.LastDest;
-						const float dStartSq = glm::dot(dStart, dStart);
-						const float dDestSq = glm::dot(dDest, dDest);
-						const double elapsedSec = std::chrono::duration<double>(now - cache.LastTime).count();
-
-						if (cache.Path.empty() || dStartSq > 0.0625f || dDestSq > 0.0625f || elapsedSec > 0.4 ||
-							cache.LastCrouch != agent.Crouching || std::abs(cache.LastHeight - agent.AgentHeight) > 0.05f)
-						{
-							cache.LastStart = center;
-							cache.LastDest = agent.Destination;
-							cache.LastTime = now;
-							cache.LastCrouch = agent.Crouching;
-							cache.LastHeight = agent.AgentHeight;
-							cache.Path.clear();
-							NavQueryFilter filter;
-							filter.AgentHeight = agent.GetEffectiveHeight();
-							filter.AgentRadius = agent.AgentRadius;
-							filter.AreaMask = agent.AreaMask;
-							navMesh->FindPath(center, agent.Destination, cache.Path, filter);
-						}
-
-						const auto& agentPath = cache.Path;
-						if (agentPath.size() >= 2)
-						{
-							for (size_t i = 0; i < agentPath.size() - 1; ++i)
-							{
-								const glm::vec3 p0 = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
-								const glm::vec3 p1 = agentPath[i + 1] + glm::vec3(0.0f, 0.1f, 0.0f);
-								if (isOccluded(p0) && isOccluded(p1))
-									continue;
-
-								PushProjectedSegment(ctx, viewProj, sceneRect,
-									viewProj * glm::vec4(p0, 1.0f),
-									viewProj * glm::vec4(p1, 1.0f),
-									pathColor, 2.5f);
-							}
-
-							const float agentDistToCam = glm::distance(center, cameraPos);
-							if (isSelected || agentDistToCam < 45.0f)
-							{
-								constexpr int kWpSegments = 8;
-								constexpr float kTwoPi = 6.28318530718f;
-								for (size_t i = 0; i < agentPath.size(); ++i)
-								{
-									const glm::vec3 wp = agentPath[i] + glm::vec3(0.0f, 0.1f, 0.0f);
-									if (isOccluded(wp))
-										continue;
-									glm::vec4 prevPt = viewProj * glm::vec4(wp + glm::vec3(0.12f, 0.0f, 0.0f), 1.0f);
-									for (int s = 1; s <= kWpSegments; ++s)
-									{
-										const float a = kTwoPi * static_cast<float>(s) / static_cast<float>(kWpSegments);
-										const glm::vec3 w = wp + glm::vec3(std::cos(a) * 0.12f, 0.0f, std::sin(a) * 0.12f);
-										const glm::vec4 currPt = viewProj * glm::vec4(w, 1.0f);
-										PushProjectedSegment(ctx, viewProj, sceneRect, prevPt, currPt, pathColor, 1.4f);
-										prevPt = currPt;
-									}
-								}
-							}
-						}
-					}
-				}
-
-				// 2b. 行为树智能体 (BehaviorTreeComponent) 实时决策导航线、威胁连线与状态信标
-				for (auto [handle, bt] : registry.view<BehaviorTreeComponent>().each())
-				{
-					if (!bt.Enabled)
-						continue;
-
-					const bool isSelected = (handle == selectedHandle);
-					glm::vec3 center { 0.0f };
-					if (const auto* xform = registry.try_get<TransformComponent>(handle))
-						center = xform->Location;
-
-					// 1. 状态信标菱形 (Diamond Beacon above agent head)
-					const glm::vec3 headTop = center + glm::vec3(0.0f, 2.1f, 0.0f);
-					if (!isOccluded(headTop))
-					{
-						Wui::WuiColor beaconColor { 0.5f, 0.5f, 0.5f, 0.7f };
-						if (bt.Status == BehaviorStatus::Running)
-							beaconColor = Wui::WuiColor { 0.98f, 0.65f, 0.15f, 0.95f }; // 琥珀金 Running
-						else if (bt.Status == BehaviorStatus::Success)
-							beaconColor = Wui::WuiColor { 0.15f, 0.90f, 0.35f, 0.95f }; // 翡翠绿 Success
-						else if (bt.Status == BehaviorStatus::Failure)
-							beaconColor = Wui::WuiColor { 0.95f, 0.20f, 0.20f, 0.95f }; // 绯红 Failure
-
-						const float ds = isSelected ? 0.22f : 0.14f;
-						const glm::vec3 dTop = headTop + glm::vec3(0.0f, ds, 0.0f);
-						const glm::vec3 dBot = headTop - glm::vec3(0.0f, ds, 0.0f);
-						const glm::vec3 dLeft = headTop + glm::vec3(-ds, 0.0f, 0.0f);
-						const glm::vec3 dRight = headTop + glm::vec3(ds, 0.0f, 0.0f);
-						const glm::vec3 dFront = headTop + glm::vec3(0.0f, 0.0f, ds);
-						const glm::vec3 dBack = headTop + glm::vec3(0.0f, 0.0f, -ds);
-
-						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dTop, 1.0f), viewProj * glm::vec4(dLeft, 1.0f), beaconColor, 1.8f);
-						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dTop, 1.0f), viewProj * glm::vec4(dRight, 1.0f), beaconColor, 1.8f);
-						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dTop, 1.0f), viewProj * glm::vec4(dFront, 1.0f), beaconColor, 1.8f);
-						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dTop, 1.0f), viewProj * glm::vec4(dBack, 1.0f), beaconColor, 1.8f);
-
-						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dBot, 1.0f), viewProj * glm::vec4(dLeft, 1.0f), beaconColor, 1.8f);
-						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dBot, 1.0f), viewProj * glm::vec4(dRight, 1.0f), beaconColor, 1.8f);
-						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dBot, 1.0f), viewProj * glm::vec4(dFront, 1.0f), beaconColor, 1.8f);
-						PushProjectedSegment(ctx, viewProj, sceneRect, viewProj * glm::vec4(dBot, 1.0f), viewProj * glm::vec4(dBack, 1.0f), beaconColor, 1.8f);
-					}
-
-					// 仅在被选中或视距 45m 内绘制导航与威胁连线
-					const float camDist = glm::distance(center, cameraPos);
-					if (isSelected || camDist < 45.0f)
-					{
-						// 2. 黑板目标点连线与靶标 (BlackboardTargetPos)
-						if (glm::length(bt.BlackboardTargetPos) > 0.01f && glm::distance(center, bt.BlackboardTargetPos) > 0.3f)
-						{
-							const Wui::WuiColor btTargetColor { 0.20f, 0.85f, 0.95f, isSelected ? 0.90f : 0.60f };
-							const glm::vec3 startPt = center + glm::vec3(0.0f, 0.5f, 0.0f);
-							const glm::vec3 destPt = bt.BlackboardTargetPos + glm::vec3(0.0f, 0.1f, 0.0f);
-
-							if (!isOccluded(startPt) || !isOccluded(destPt))
-							{
-								PushProjectedSegment(ctx, viewProj, sceneRect,
-									viewProj * glm::vec4(startPt, 1.0f),
-									viewProj * glm::vec4(destPt, 1.0f),
-									btTargetColor, isSelected ? 2.2f : 1.4f);
-							}
-
-							if (!isOccluded(destPt))
-							{
-								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), destPt, 0.45f, 1, btTargetColor, 1.8f);
-								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), destPt, 0.20f, 1, btTargetColor, 1.4f);
-							}
-						}
-
-						// 3. 锁定威胁连线 (TargetEntity / Threat Line)
-						if (bt.TargetEntity != 0 && bt.TargetEntity != static_cast<uint32_t>(entt::null))
-						{
-							entt::entity threatHandle = static_cast<entt::entity>(bt.TargetEntity);
-							if (registry.valid(threatHandle) && registry.all_of<TransformComponent>(threatHandle))
-							{
-								const glm::vec3 threatPos = registry.get<TransformComponent>(threatHandle).Location;
-								const Wui::WuiColor threatLineColor { 0.95f, 0.20f, 0.20f, isSelected ? 0.85f : 0.50f };
-								const glm::vec3 tStart = center + glm::vec3(0.0f, 1.2f, 0.0f);
-								const glm::vec3 tEnd = threatPos + glm::vec3(0.0f, 1.2f, 0.0f);
-
-								if (!isOccluded(tStart) || !isOccluded(tEnd))
-								{
-									PushProjectedSegment(ctx, viewProj, sceneRect,
-										viewProj * glm::vec4(tStart, 1.0f),
-										viewProj * glm::vec4(tEnd, 1.0f),
-										threatLineColor, 1.8f);
-								}
-
-								if (!isOccluded(threatPos))
-								{
-									PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), threatPos, 0.40f, 1, threatLineColor, 2.0f);
-								}
-							}
-						}
-					}
-				}
-
-				// 3. 寻路探针测试路径
-				if (NavMeshPanel::ShowPaths)
-				{
-					const auto& testPath = NavMeshPanel::GetTestPath();
-					if (testPath.size() >= 2)
-					{
-						const Wui::WuiColor testPathColor { 0.3f, 0.9f, 1.0f, 0.95f };
-						for (size_t i = 0; i < testPath.size() - 1; ++i)
-						{
-							const glm::vec3 p0 = testPath[i] + glm::vec3(0.0f, 0.12f, 0.0f);
-							const glm::vec3 p1 = testPath[i + 1] + glm::vec3(0.0f, 0.12f, 0.0f);
-							if (isOccluded(p0) && isOccluded(p1))
-								continue;
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(p0, 1.0f),
-								viewProj * glm::vec4(p1, 1.0f),
-								testPathColor, 2.5f);
-							if (!isOccluded(p0))
-								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), p0, 0.18f, 1, testPathColor, 1.8f);
-						}
-						const glm::vec3 lastPt = testPath.back() + glm::vec3(0.0f, 0.12f, 0.0f);
-						if (!isOccluded(lastPt))
-							PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), lastPt, 0.18f, 1, testPathColor, 1.8f);
-					}
-				}
-
-				// 4. 区域代价修饰区 (NavMeshAreaModifierComponent 实体 & NavMesh 资产内修饰体)
-				if (NavMeshPanel::ShowAreaCosts && navMesh)
-				{
-					size_t entityAreaModCount = 0;
-					// A. 场景内实体挂载的 NavMeshAreaModifierComponent (数据驱动，显式第一类组件)
-					for (auto [handle, areaComp] : registry.view<NavMeshAreaModifierComponent>().each())
-					{
-						++entityAreaModCount;
-						const bool isSelected = (handle == selectedHandle);
-						glm::mat4 world(1.0f);
-						glm::vec3 modCenter { 0.0f };
-						if (const auto* xform = registry.try_get<TransformComponent>(handle))
-						{
-							world = xform->GetLocalMatrix();
-							modCenter = xform->Location;
-						}
-
-						Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.85f };
-						if (areaComp.AreaType == 2)
-							areaColor = Wui::WuiColor{ 0.70f, 0.35f, 0.95f, 0.85f };
-						else if (areaComp.AreaType == 3)
-							areaColor = Wui::WuiColor{ 0.95f, 0.45f, 0.15f, 0.85f };
-						else if (areaComp.AreaType == 4)
-							areaColor = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.85f };
-						else if (areaComp.AreaType == 5)
-							areaColor = Wui::WuiColor{ 0.15f, 0.85f, 0.95f, 0.85f };
-
-						// 视口代价区域中心标志 (仅限非 Play 态，专属半透明底、区域颜色边框、居中 A 符号，悬停/选中发光)
-						// 仅在中心未被遮挡时绘制居中徽标，避免徽标悬空穿透
-						if (!play && !isOccluded(modCenter))
-						{
-							const glm::vec4 clipCenter = viewProj * glm::vec4(modCenter, 1.0f);
-							if (clipCenter.w > 0.05f)
-							{
-								const glm::vec2 ndc { clipCenter.x / clipCenter.w, clipCenter.y / clipCenter.w };
-								const glm::vec2 badgeCenter {
-									sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
-									sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H
-								};
-								if (badgeCenter.x >= sceneRect.X - 24.0f && badgeCenter.x <= sceneRect.X + sceneRect.W + 24.0f &&
-									badgeCenter.y >= sceneRect.Y - 24.0f && badgeCenter.y <= sceneRect.Y + sceneRect.H + 24.0f)
-								{
-									const float distToMouse = glm::length(ctx.Input().MousePos - badgeCenter);
-									const bool isBadgeHovered = (distToMouse <= 18.0f);
-									const float badgeRadius = isSelected ? 12.0f : 10.0f;
-									const Wui::WuiRect badgeRect {
-										badgeCenter.x - badgeRadius,
-										badgeCenter.y - badgeRadius,
-										badgeRadius * 2.0f,
-										badgeRadius * 2.0f
-									};
-
-									// 半透明底色
-									Wui::PanelBackground(ctx, badgeRect, Wui::WuiColor{ 0.08f, 0.10f, 0.14f, 0.88f }, badgeRadius);
-
-									// 区域颜色边框
-									Wui::HighlightOutline(ctx, badgeRect, areaColor, badgeRadius, isSelected ? 2.2f : 1.4f);
-
-									// 悬停或选中时绘制明亮外圈
-									if (isBadgeHovered || isSelected)
-									{
-										const float glowRadius = badgeRadius + 3.0f;
-										const Wui::WuiRect glowRect {
-											badgeCenter.x - glowRadius,
-											badgeCenter.y - glowRadius,
-											glowRadius * 2.0f,
-											glowRadius * 2.0f
-										};
-										Wui::HighlightOutline(ctx, glowRect, Wui::WuiColor{ 1.0f, 1.0f, 1.0f, 0.85f }, glowRadius, 1.2f);
-									}
-
-									// 居中 "A" 符号 (Area Modifier)
-									const float fontSz = 11.0f;
-									const float textW = ctx.MeasureTextWidth("A", fontSz);
-									Wui::Label(ctx, { badgeCenter.x - textW * 0.5f, badgeCenter.y - fontSz * 0.55f },
-										"A", (isSelected || isBadgeHovered) ? Wui::WuiColor{ 1.0f, 1.0f, 1.0f, 1.0f } : areaColor, fontSz);
-								}
-							}
-						}
-
-						// 3D 立体线框盒：逐段遮挡绘制（未遮挡部分正常显示，进入山体/建筑物/地表以下的部分精确切断不显示）
-						const glm::vec3 localCorners[8] = {
-							glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
-							glm::vec3( areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
-							glm::vec3( areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z),
-							glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z),
-							glm::vec3(-areaComp.Extents.x,  areaComp.Extents.y, -areaComp.Extents.z),
-							glm::vec3( areaComp.Extents.x,  areaComp.Extents.y, -areaComp.Extents.z),
-							glm::vec3( areaComp.Extents.x,  areaComp.Extents.y,  areaComp.Extents.z),
-							glm::vec3(-areaComp.Extents.x,  areaComp.Extents.y,  areaComp.Extents.z)
-						};
-						glm::vec3 worldCorners[8];
-						for (int i = 0; i < 8; ++i)
-						{
-							worldCorners[i] = glm::vec3(world * glm::vec4(localCorners[i], 1.0f));
-						}
-
-						const float lineWidth = isSelected ? 2.2f : 1.3f;
-						areaColor.A = isSelected ? 0.95f : 0.55f;
-
-						constexpr int edges[12][2] = {
-							{0,1}, {1,2}, {2,3}, {3,0},
-							{4,5}, {5,6}, {6,7}, {7,4},
-							{0,4}, {1,5}, {2,6}, {3,7}
-						};
-						for (int e = 0; e < 12; ++e)
-						{
-							PushOccludedWorldSegment(worldCorners[edges[e][0]], worldCorners[edges[e][1]],
-								areaColor, lineWidth, handle);
-						}
-
-						// 限高区域 (ClearanceHeight > 0) 3D 净空高度标尺、顶部网格与文字标牌
-						if (areaComp.ClearanceHeight > 0.0f)
-						{
-							const float clearY = -areaComp.Extents.y + areaComp.ClearanceHeight;
-							const glm::vec3 localCeilCorners[4] = {
-								glm::vec3(-areaComp.Extents.x, clearY, -areaComp.Extents.z),
-								glm::vec3( areaComp.Extents.x, clearY, -areaComp.Extents.z),
-								glm::vec3( areaComp.Extents.x, clearY,  areaComp.Extents.z),
-								glm::vec3(-areaComp.Extents.x, clearY,  areaComp.Extents.z)
-							};
-							glm::vec3 worldCeil[4];
-							for (int i = 0; i < 4; ++i)
-								worldCeil[i] = glm::vec3(world * glm::vec4(localCeilCorners[i], 1.0f));
-
-							const Wui::WuiColor clearCol{ 0.20f, 0.85f, 1.00f, 0.90f };
-							// 顶部网格框 (逐段遮挡)
-							for (int i = 0; i < 4; ++i)
-							{
-								PushOccludedWorldSegment(worldCeil[i], worldCeil[(i + 1) % 4],
-									clearCol, 1.8f, handle);
-							}
-							// 顶面对角交叉线 (逐段遮挡)
-							PushOccludedWorldSegment(worldCeil[0], worldCeil[2], clearCol, 1.0f, handle);
-							PushOccludedWorldSegment(worldCeil[1], worldCeil[3], clearCol, 1.0f, handle);
-
-							// 4 根垂直立柱高度标尺 (从底部升至限高顶部，逐段遮挡)
-							const glm::vec3 localBotCorners[4] = {
-								glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
-								glm::vec3( areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
-								glm::vec3( areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z),
-								glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z)
-							};
-							for (int i = 0; i < 4; ++i)
-							{
-								const glm::vec3 botWorld = glm::vec3(world * glm::vec4(localBotCorners[i], 1.0f));
-								PushOccludedWorldSegment(botWorld, worldCeil[i], clearCol, 1.4f, handle);
-							}
-
-							// 3D 浮动文字标牌: "Clearance: 1.3m" (仅在中心标牌未被遮挡时绘制)
-							const glm::vec3 ceilCenterWorld = glm::vec3(world * glm::vec4(0.0f, clearY, 0.0f, 1.0f));
-							if (!isOccluded(ceilCenterWorld))
-							{
-								const glm::vec4 clipCeilCenter = viewProj * glm::vec4(ceilCenterWorld, 1.0f);
-								if (clipCeilCenter.w > 0.05f)
-								{
-									const glm::vec2 ndc { clipCeilCenter.x / clipCeilCenter.w, clipCeilCenter.y / clipCeilCenter.w };
-									const glm::vec2 badgePos {
-										sceneRect.X + (ndc.x + 1.0f) * 0.5f * sceneRect.W,
-										sceneRect.Y + (1.0f - ndc.y) * 0.5f * sceneRect.H
-									};
-									if (badgePos.x >= sceneRect.X && badgePos.x <= sceneRect.X + sceneRect.W &&
-										badgePos.y >= sceneRect.Y && badgePos.y <= sceneRect.Y + sceneRect.H)
-									{
-										char clearText[64];
-										std::snprintf(clearText, sizeof(clearText), "Clearance: %.1fm", areaComp.ClearanceHeight);
-										const float fontSz = 11.0f;
-										const float textW = ctx.MeasureTextWidth(clearText, fontSz);
-										const Wui::WuiRect tagRect { badgePos.x - textW * 0.5f - 6.0f, badgePos.y - 18.0f, textW + 12.0f, 18.0f };
-										Wui::PanelBackground(ctx, tagRect, Wui::WuiColor{ 0.05f, 0.12f, 0.20f, 0.88f }, 4.0f);
-										Wui::HighlightOutline(ctx, tagRect, clearCol, 4.0f, 1.2f);
-										Wui::Label(ctx, { tagRect.X + 6.0f, tagRect.Y + 2.5f }, clearText, clearCol, fontSz);
-									}
-								}
-							}
-						}
-					}
-
-					// B. 导航网格二进制资产内记录的修饰体（仅当场景无显式实体时作为后备，避免与实体重复绘制或绘制烘焙期残影）
-					if (entityAreaModCount == 0)
-					{
-						for (const auto& mod : navMesh->GetAreaModifiers())
-						{
-							Wui::WuiColor areaColor { 0.35f, 0.95f, 0.35f, 0.50f };
-							if (mod.AreaType == 2)
-								areaColor = Wui::WuiColor{ 0.70f, 0.35f, 0.95f, 0.50f };
-							else if (mod.AreaType == 3)
-								areaColor = Wui::WuiColor{ 0.95f, 0.45f, 0.15f, 0.50f };
-							else if (mod.AreaType == 4)
-								areaColor = Wui::WuiColor{ 0.95f, 0.20f, 0.20f, 0.50f };
-
-							const glm::vec3 center = mod.Center;
-							const glm::vec3 extents = mod.Extents;
-							const glm::vec3 corners[8] = {
-								center + glm::vec3(-extents.x, -extents.y, -extents.z),
-								center + glm::vec3( extents.x, -extents.y, -extents.z),
-								center + glm::vec3( extents.x, -extents.y,  extents.z),
-								center + glm::vec3(-extents.x, -extents.y,  extents.z),
-								center + glm::vec3(-extents.x,  extents.y, -extents.z),
-								center + glm::vec3( extents.x,  extents.y, -extents.z),
-								center + glm::vec3( extents.x,  extents.y,  extents.z),
-								center + glm::vec3(-extents.x,  extents.y,  extents.z)
-							};
-							constexpr int edges[12][2] = {
-								{0,1}, {1,2}, {2,3}, {3,0},
-								{4,5}, {5,6}, {6,7}, {7,4},
-								{0,4}, {1,5}, {2,6}, {3,7}
-							};
-							for (int e = 0; e < 12; ++e)
-							{
-								PushOccludedWorldSegment(corners[edges[e][0]], corners[edges[e][1]],
-									areaColor, 1.3f);
-							}
-						}
-					}
-				}
-
-				// 5. 跨网格跳跃点 (NavMeshOffMeshLinkComponent 实体 & NavMesh 资产内跳跃点)
-				if (NavMeshPanel::ShowOffMeshLinks && navMesh)
-				{
-					const Wui::WuiColor linkColor { 0.95f, 0.20f, 0.85f, 0.95f };
-					auto drawSingleLink = [&](const glm::vec3& start, const glm::vec3& end, bool isSelected = false)
-					{
-						const glm::vec3 pStart = start + glm::vec3(0.0f, 0.1f, 0.0f);
-						const glm::vec3 pEnd = end + glm::vec3(0.0f, 0.1f, 0.0f);
-						const float dist = glm::distance(pStart, pEnd);
-						const float arcH = std::clamp(dist * 0.20f, 0.6f, 2.2f);
-						const glm::vec3 mid = (pStart + pEnd) * 0.5f + glm::vec3(0.0f, arcH, 0.0f);
-						if ((isOccluded(start) && isOccluded(end)) ||
-							(isOccluded(mid) && (isOccluded(start) || isOccluded(end))))
-						{
-							return;
-						}
-						constexpr int kArcSegs = 16;
-						const float lineThick = isSelected ? 2.6f : 1.8f;
-						const float ringRadius = 0.24f;
-						const float ringThick = isSelected ? 2.0f : 1.4f;
-						Wui::WuiColor linkCol = linkColor;
-						linkCol.A = isSelected ? 0.95f : 0.75f;
-
-						glm::vec3 prevPt = pStart;
-						for (int s = 1; s <= kArcSegs; ++s)
-						{
-							const float t = static_cast<float>(s) / static_cast<float>(kArcSegs);
-							const glm::vec3 horiz = glm::mix(pStart, pEnd, t);
-							const float parabola = 4.0f * arcH * t * (1.0f - t);
-							const glm::vec3 currPt = horiz + glm::vec3(0.0f, parabola, 0.0f);
-
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(prevPt, 1.0f),
-								viewProj * glm::vec4(currPt, 1.0f),
-								linkCol, lineThick);
-							prevPt = currPt;
-						}
-						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), pStart, ringRadius, 1, linkCol, ringThick);
-						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), pEnd, ringRadius, 1, linkCol, ringThick);
-
-						const glm::vec3 diff = pEnd - pStart;
-						if (glm::length(diff) > 0.01f)
-						{
-							const glm::vec3 dir = glm::normalize(diff);
-							const glm::vec3 right = glm::normalize(glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f)));
-							const glm::vec3 arrowLeft = pEnd - dir * 0.4f + right * 0.22f + glm::vec3(0.0f, 0.1f, 0.0f);
-							const glm::vec3 arrowRight = pEnd - dir * 0.4f - right * 0.22f + glm::vec3(0.0f, 0.1f, 0.0f);
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(pEnd, 1.0f),
-								viewProj * glm::vec4(arrowLeft, 1.0f),
-								linkCol, lineThick);
-							PushProjectedSegment(ctx, viewProj, sceneRect,
-								viewProj * glm::vec4(pEnd, 1.0f),
-								viewProj * glm::vec4(arrowRight, 1.0f),
-								linkCol, lineThick);
-						}
-					};
-
-					// A. 场景实体挂载的 NavMeshOffMeshLinkComponent (数据驱动，显式第一类组件)
-					size_t entityLinkCount = 0;
-					for (auto [handle, linkComp] : registry.view<NavMeshOffMeshLinkComponent>().each())
-					{
-						++entityLinkCount;
-						const bool isSelected = (handle == selectedHandle);
-						glm::vec3 startPos { 0.0f };
-						if (const auto* xform = registry.try_get<TransformComponent>(handle))
-							startPos = xform->Location;
-						const glm::vec3 endPos = linkComp.TargetLocation;
-						const float dist = glm::distance(startPos, endPos);
-						const float arcH = std::clamp(dist * 0.20f, 0.6f, 2.2f);
-						const glm::vec3 mid = (startPos + endPos) * 0.5f + glm::vec3(0.0f, arcH, 0.0f);
-						if ((isOccluded(startPos) && isOccluded(endPos)) ||
-							(isOccluded(mid) && (isOccluded(startPos) || isOccluded(endPos))))
-							continue;
-						drawSingleLink(startPos, linkComp.TargetLocation, isSelected);
-					}
-
-					// B. 导航网格资产内的跳跃点（仅当场景无实体挂载时作为后备，杜绝与场景实体重复双重绘制产生重影）
-					if (entityLinkCount == 0)
-					{
-						for (const auto& link : navMesh->GetOffMeshLinks())
-						{
-							drawSingleLink(link.Start, link.End, false);
-						}
-					}
-				}
-
-				// 6. 通视测试线 (LoS Raycast Probe)
-				if (NavMeshPanel::ShowLoSRaycast)
-				{
-					const auto& probe = NavMeshPanel::GetRaycastProbe();
-					if (probe.HasTested)
-					{
-						if (probe.IsVisible)
-						{
-							if (!isOccluded(probe.Start) || !isOccluded(probe.End))
-							{
-								const Wui::WuiColor losGreen { 0.20f, 0.95f, 0.35f, 0.95f };
-								PushProjectedSegment(ctx, viewProj, sceneRect,
-									viewProj * glm::vec4(probe.Start, 1.0f),
-									viewProj * glm::vec4(probe.End, 1.0f),
-									losGreen, 2.8f);
-								if (!isOccluded(probe.Start))
-									PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.Start, 0.25f, 1, losGreen, 2.0f);
-								if (!isOccluded(probe.End))
-									PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.End, 0.25f, 1, losGreen, 2.0f);
-							}
-						}
-						else
-						{
-							const Wui::WuiColor losYellow { 0.95f, 0.85f, 0.20f, 0.95f };
-							const Wui::WuiColor losRed { 0.95f, 0.25f, 0.25f, 0.95f };
-							if (!isOccluded(probe.Start) || !isOccluded(probe.HitPoint))
-							{
-								PushProjectedSegment(ctx, viewProj, sceneRect,
-									viewProj * glm::vec4(probe.Start, 1.0f),
-									viewProj * glm::vec4(probe.HitPoint, 1.0f),
-									losYellow, 2.8f);
-							}
-							if (!isOccluded(probe.HitPoint) || !isOccluded(probe.End))
-							{
-								PushProjectedSegment(ctx, viewProj, sceneRect,
-									viewProj * glm::vec4(probe.HitPoint, 1.0f),
-									viewProj * glm::vec4(probe.End, 1.0f),
-									losRed, 2.8f);
-							}
-							if (!isOccluded(probe.Start))
-								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.Start, 0.25f, 1, losYellow, 2.0f);
-							if (!isOccluded(probe.HitPoint))
-							{
-								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 0, losRed, 2.2f);
-								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 1, losRed, 2.2f);
-								PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), probe.HitPoint, 0.35f, 2, losRed, 2.2f);
-							}
-						}
-					}
-				}
-
-				// 7. 随机漫游采样点 (Random Wander Probe)
-				const auto& wander = NavMeshPanel::GetWanderProbe();
-				if (wander.HasSampled)
-				{
-					const Wui::WuiColor circleColor { 0.2f, 0.7f, 0.95f, 0.65f };
-					const Wui::WuiColor flagColor { 0.2f, 0.95f, 0.9f, 0.95f };
-					if (!isOccluded(wander.Center))
-					{
-						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), wander.Center, wander.Radius, 1, circleColor, 1.8f);
-						PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), wander.Center, 0.3f, 1, circleColor, 2.0f);
-					}
-
-					const glm::vec3 pt = wander.SampledPoint;
-					if (!isOccluded(pt))
-					{
-					PushWorldCircle(ctx, viewProj, sceneRect, glm::mat4(1.0f), pt, 0.35f, 1, flagColor, 2.2f);
-					PushProjectedSegment(ctx, viewProj, sceneRect,
-						viewProj * glm::vec4(pt, 1.0f),
-						viewProj * glm::vec4(pt + glm::vec3(0.0f, 1.6f, 0.0f), 1.0f),
-						flagColor, 2.2f);
-					PushProjectedSegment(ctx, viewProj, sceneRect,
-						viewProj * glm::vec4(pt + glm::vec3(0.0f, 1.6f, 0.0f), 1.0f),
-						viewProj * glm::vec4(pt + glm::vec3(0.45f, 1.35f, 0.0f), 1.0f),
-						flagColor, 2.2f);
-					PushProjectedSegment(ctx, viewProj, sceneRect,
-						viewProj * glm::vec4(pt + glm::vec3(0.45f, 1.35f, 0.0f), 1.0f),
-						viewProj * glm::vec4(pt + glm::vec3(0.0f, 1.1f, 0.0f), 1.0f),
-						flagColor, 2.2f);
 					}
 				}
 			}

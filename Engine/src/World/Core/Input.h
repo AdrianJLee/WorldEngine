@@ -9,6 +9,8 @@ namespace World
 	{
 	public:
 		static bool IsKeyPressed(int keycode);
+		static bool IsKeyJustPressed(int keycode);
+		static bool IsKeyJustReleased(int keycode);
 		static bool IsMouseButtonPressed(int button);
 		static std::pair<float, float> GetMousePosition();
 		static float GetMouseX();
@@ -24,5 +26,12 @@ namespace World
 		// 模式下报告的虚拟指针位移，保证鼠标仍能控制镜头。
 		static void AccumulateMouseDelta(float dx, float dy);
 		static std::pair<float, float> ConsumeMouseDelta();
+
+		// AI 试玩、自动化测试与状态注入通道
+		static void SetSimulatedKeyState(int keycode, bool pressed);
+		static void ClearSimulatedKeys();
+
+		// 帧输入状态结转与边沿判定驱动
+		static void UpdateFrameInputState();
 	};
 }

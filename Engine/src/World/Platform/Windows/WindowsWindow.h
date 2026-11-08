@@ -53,6 +53,7 @@ namespace World
 		bool IsForegroundApp() const override;
 		void SetCursorLocked(bool locked) override;
 		bool IsCursorLocked() const override { return m_CursorLocked; }
+		void SetCursorPosition(double x, double y) override;
 		void SetCursorVisible(bool visible) override;
 		bool IsCursorVisible() const override { return m_CursorVisible; }
 		void SyncCursorState() override;

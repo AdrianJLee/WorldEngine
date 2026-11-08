@@ -72,6 +72,7 @@ namespace World
 		// 当前正在执行的系统脚本逻辑路径(空 = 不在加载系统脚本)。
 		// ecs:AddSystem 用它把系统名归属到发起它的那份系统脚本。
 		std::string s_LoadingSystemScript;
+		std::vector<std::string> s_ScriptErrors;
 		// 系统脚本目录的轮询监听(懒建立;ShutdownInternal 释放)。
 		std::unique_ptr<ScriptFileWatch> s_SystemWatch;
 
@@ -1881,6 +1882,27 @@ namespace World
 	}
 
 	// M55:撤销一份系统脚本注册的全部 UI 回调(整份重跑/卸载时调用)。
+	std::size_t ScriptEngine::GetScriptErrorCount()
+	{
+		return s_ScriptErrors.size();
+	}
+
+	std::vector<std::string> ScriptEngine::GetRecentScriptErrors()
+	{
+		return s_ScriptErrors;
+	}
+
+	void ScriptEngine::ClearScriptErrors()
+	{
+		s_ScriptErrors.clear();
+	}
+
+	void ScriptEngine::RecordScriptError(std::string error)
+	{
+		if (!error.empty())
+			s_ScriptErrors.push_back(std::move(error));
+	}
+
 	void ScriptEngine::ClearScriptUiDraws(const std::string& logicalPath)
 	{
 		if (SystemScriptRecord* record = FindSystemScriptRecord(logicalPath))
@@ -1915,12 +1937,14 @@ namespace World
 				++failures;
 				if (Log::GetCoreLogger())
 					WLD_CORE_ERROR("[Luau] '{}' ui.onDraw failed: {}", entry.first, error.what());
+				RecordScriptError("[Luau] '" + entry.first + "' ui.onDraw failed: " + error.what());
 			}
 			catch (...)
 			{
 				++failures;
 				if (Log::GetCoreLogger())
 					WLD_CORE_ERROR("[Luau] '{}' ui.onDraw failed: unknown exception", entry.first);
+				RecordScriptError("[Luau] '" + entry.first + "' ui.onDraw failed: unknown exception");
 			}
 		}
 		return failures;
@@ -1951,6 +1975,7 @@ namespace World
 		{
 			if (Log::GetCoreLogger())
 				WLD_CORE_ERROR("[Luau System Loader] cannot read '{}': {}", logicalPath, readError);
+			RecordScriptError("[Luau System Loader] cannot read '" + logicalPath + "': " + readError);
 			return 0;
 		}
 
@@ -1966,6 +1991,7 @@ namespace World
 		{
 			if (Log::GetCoreLogger())
 				WLD_CORE_ERROR("[Luau System Loader] '{}' failed: {}", logicalPath, error);
+			RecordScriptError("[Luau System Loader] '" + logicalPath + "' failed: " + error);
 			return 0;
 		}
 		if (Log::GetCoreLogger())

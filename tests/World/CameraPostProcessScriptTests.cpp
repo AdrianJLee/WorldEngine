@@ -70,7 +70,11 @@ int main()
 			assert(type(PostProcess.SetBloom) == "function", "PostProcess.SetBloom must be a function")
 			assert(type(PostProcess.SetChromaticAberration) == "function", "PostProcess.SetChromaticAberration must be a function")
 			assert(type(Input.IsKeyPressed) == "function", "Input.IsKeyPressed must be a function")
+			assert(type(Input.IsKeyJustPressed) == "function", "Input.IsKeyJustPressed must be a function")
+			assert(type(Input.IsKeyJustReleased) == "function", "Input.IsKeyJustReleased must be a function")
 			assert(Input.IsKeyPressed("Space") == false, "Space should not be pressed in headless")
+			assert(Input.IsKeyJustPressed("Space") == false, "Space should not be just pressed in headless")
+			assert(Input.IsKeyJustReleased("Space") == false, "Space should not be just released in headless")
 			assert(Input.IsKeyPressed(32) == false, "Keycode 32 should not be pressed in headless")
 		)", "TableCheck");
 

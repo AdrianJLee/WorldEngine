@@ -196,6 +196,7 @@ namespace World
 				// WP5:本帧滚轮已被玩法输入采样消费(采样在层更新的 OnUpdate 里),
 				// 清掉累积值;平台轮询(OnUpdate)随后只累积下一帧的增量。
 				Input::ResetScrollDelta();
+				Input::UpdateFrameInputState();
 				tracePhase("Renderer::EndFramePresent");
 				{
 					WLD_TRACE_SCOPE("Renderer.EndFramePresent");
@@ -248,18 +249,29 @@ namespace World
 		dispatcher.Dispatch<KeyTypedEvent>([](KeyTypedEvent& ev)
 			{ Wui::WuiRhiBackend::FeedChar(static_cast<uint32_t>(ev.GetKeyCode())); return false; });
 		dispatcher.Dispatch<MouseButtonPressedEvent>([](MouseButtonPressedEvent& ev)
-			{ Wui::WuiRhiBackend::FeedMouseButton(ev.GetMouseButton(), true); return false; });
+			{
+				const bool locked = Application::HasInstance() && Application::Get().GetWindow().IsCursorLocked();
+				if (!locked)
+					Wui::WuiRhiBackend::FeedMouseButton(ev.GetMouseButton(), true);
+				return false;
+			});
 		dispatcher.Dispatch<MouseButtonReleasedEvent>([](MouseButtonReleasedEvent& ev)
-			{ Wui::WuiRhiBackend::FeedMouseButton(ev.GetMouseButton(), false); return false; });
+			{
+				const bool locked = Application::HasInstance() && Application::Get().GetWindow().IsCursorLocked();
+				if (!locked)
+					Wui::WuiRhiBackend::FeedMouseButton(ev.GetMouseButton(), false);
+				return false;
+			});
 		dispatcher.Dispatch<MouseMovedEvent>([](MouseMovedEvent& ev)
 			{
-				Wui::WuiRhiBackend::FeedMouseMove(ev.GetX(), ev.GetY());
+				const bool locked = Application::HasInstance()
+					&& Application::Get().GetWindow().IsCursorLocked();
+				if (!locked)
+					Wui::WuiRhiBackend::FeedMouseMove(ev.GetX(), ev.GetY());
 				// 捕获态兜底：GLFW 在 disabled 模式下报告的是**虚拟指针**位置，
 				// 相邻帧差值就是本帧位移。Raw Input 不可用时镜头仍能跟手。
 				static bool s_HadLock = false;
 				static glm::vec2 s_Last { 0.0f };
-				const bool locked = Application::HasInstance()
-					&& Application::Get().GetWindow().IsCursorLocked();
 				const glm::vec2 position { ev.GetX(), ev.GetY() };
 				if (locked && s_HadLock)
 					Input::AccumulateMouseDelta(position.x - s_Last.x, position.y - s_Last.y);
@@ -269,7 +281,9 @@ namespace World
 			});
 		dispatcher.Dispatch<MouseScrolledEvent>([](MouseScrolledEvent& ev)
 			{
-				Wui::WuiRhiBackend::FeedMouseScroll(ev.GetXOffset(), ev.GetYOffset());
+				const bool locked = Application::HasInstance() && Application::Get().GetWindow().IsCursorLocked();
+				if (!locked)
+					Wui::WuiRhiBackend::FeedMouseScroll(ev.GetXOffset(), ev.GetYOffset());
 				// WP5:同一份平台事件也喂给玩法输入(滚轮此前只到 UI,游戏侧读不到)。
 				Input::AccumulateScroll(ev.GetXOffset(), ev.GetYOffset());
 				return false;

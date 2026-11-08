@@ -46,6 +46,8 @@ namespace World
 		static void DrawCirclePositions(const glm::vec3 positions[4], const glm::vec4& color,
 			float thickness, float fade, int entityID);
 
+		static void DrawNavMeshQuadPositions(const glm::vec3 positions[4], const glm::vec4& color);
+
 		static void DrawLineCore(const glm::vec3& p0, const glm::vec3& p1, const glm::vec4& color, int entityID = -1);
 		static void DrawRectCore(const glm::mat4& transform, const glm::vec4& color, int entityID = -1);
 

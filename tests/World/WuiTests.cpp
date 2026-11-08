@@ -6803,6 +6803,43 @@ int main()
 			CHECK(World::Utf8::IsValid(World::Utf8::TrimToBytes(mixed, 5)));
 		}
 
+		// ---- Viewport Fly / Cursor Lock Input Defense & ResetMouseState ----
+		{
+			World::Wui::WuiInputCollector collector;
+			collector.OnMouseMove(500.0f, 300.0f);
+			collector.OnMouseButton(0, true);
+			collector.OnMouseButton(1, true);
+			collector.OnMouseScroll(0.0f, 10.0f);
+
+			collector.ResetMouseState();
+
+			World::Wui::WuiInputState input;
+			collector.BeginFrame(input, { 1920.0f, 1080.0f }, 60.0f);
+
+			CHECK(!input.MouseDown[0]);
+			CHECK(!input.MouseDown[1]);
+			CHECK(!input.MouseDown[2]);
+			CHECK(!input.MouseClicked[0]);
+			CHECK(!input.MouseClicked[1]);
+			CHECK(!input.MouseClicked[2]);
+			CHECK(!input.MouseReleased[0]);
+			CHECK(!input.MouseReleased[1]);
+			CHECK(!input.MouseReleased[2]);
+			CHECK(input.Wheel == 0.0f);
+
+			// 验证视口飞行漫游期间将设备指针移出布局后的几何不变量：
+			// 任何 UI 面板或按钮绝对不能触发 Hover 或 Click
+			input.MousePos = { -10000.0f, -10000.0f };
+			const World::Wui::WuiRect buttonRect { 100.0f, 100.0f, 120.0f, 30.0f };
+			const World::Wui::WuiRect toolbarRect { 0.0f, 0.0f, 1920.0f, 40.0f };
+			const World::Wui::WuiRect hierarchyRect { 0.0f, 40.0f, 300.0f, 800.0f };
+			CHECK(!buttonRect.Contains(input.MousePos));
+			CHECK(!toolbarRect.Contains(input.MousePos));
+			CHECK(!hierarchyRect.Contains(input.MousePos));
+
+			collector.EndFrame();
+		}
+
 		std::printf("World.Wui: all checks passed\n");
 		return 0;
 	}

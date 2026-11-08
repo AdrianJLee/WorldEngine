@@ -17,6 +17,7 @@ namespace World::Wui
 		void OnMouseButton(int button, bool down);
 		void OnMouseMove(float x, float y);
 		void OnMouseScroll(float dx, float dy);
+		void ResetMouseState();
 
 		void BeginFrame(WuiInputState& out, glm::vec2 viewport, float fps);
 		void EndFrame();

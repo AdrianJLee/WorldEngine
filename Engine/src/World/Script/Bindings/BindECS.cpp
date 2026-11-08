@@ -726,6 +726,7 @@ namespace World
 					{
 						if (Log::GetCoreLogger())
 							WLD_CORE_ERROR("[Luau ECS System '{}'] update error: {}", name, callError);
+						ScriptEngine::RecordScriptError("[Luau ECS System '" + name + "'] update error: " + callError);
 					}
 				},
 				phase,
@@ -778,6 +779,7 @@ namespace World
 					{
 						if (Log::GetCoreLogger())
 							WLD_CORE_ERROR("[Luau ECS StartupSystem('{}')] failed: {}", name, err);
+						ScriptEngine::RecordScriptError("[Luau ECS StartupSystem('" + name + "')] failed: " + err);
 					}
 				}
 			});

@@ -1,5 +1,6 @@
 #include "World/Core/WorldContext.h"
 #include "World/NavMesh/NavMesh.h"
+#include "World/Scene/SceneOcclusion.h"
 #include "World/Terrain/Terrain.h"
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
@@ -811,6 +812,135 @@ static void TestNavMeshOffMeshLinkCostAndChokepoint()
 	std::cout << "[PASS] TestNavMeshOffMeshLinkCostAndChokepoint\n";
 }
 
+static void TestNavMeshAndGizmoOcclusionInvariants()
+{
+	WorldContext context;
+	Scene scene(context);
+	auto& registry = scene.GetRegistry();
+
+	// 1. 3D 网格模型遮挡不变量：模型背后的导航采样点必须被遮挡，模型前方与侧边不得被遮挡
+	const entt::entity modelEnt = registry.create();
+	auto& xfModel = registry.emplace<TransformComponent>(modelEnt);
+	xfModel.Location = glm::vec3(0.0f, 1.0f, 0.0f);
+	xfModel.Scale = glm::vec3(2.0f, 2.0f, 2.0f);
+	auto& mr = registry.emplace<MeshRendererComponent>(modelEnt);
+	mr.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
+
+	// 2. 2D 图片精灵遮挡不变量：图片背后的导航采样点必须被遮挡，前方不得被遮挡
+	const entt::entity spriteEnt = registry.create();
+	auto& xfSprite = registry.emplace<TransformComponent>(spriteEnt);
+	xfSprite.Location = glm::vec3(10.0f, 1.0f, 0.0f);
+	xfSprite.Scale = glm::vec3(3.0f, 3.0f, 1.0f);
+	auto& spr = registry.emplace<SpriteComponent>(spriteEnt);
+	spr.Pivot = glm::vec2(0.5f, 0.5f);
+
+	// 3. 旋转 OBB 障碍物遮挡不变量：精准判定旋转朝向，杜绝 AABB 虚空过度遮挡
+	const entt::entity obbEnt = registry.create();
+	auto& xfObb = registry.emplace<TransformComponent>(obbEnt);
+	xfObb.Location = glm::vec3(20.0f, 1.0f, 0.0f);
+	xfObb.Scale = glm::vec3(4.0f, 2.0f, 1.0f);
+	xfObb.Rotation = glm::vec3(0.0f, 45.0f, 0.0f); // 绕 Y 轴旋转 45 度
+	auto& mrObb = registry.emplace<MeshRendererComponent>(obbEnt);
+	mrObb.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
+
+	// 4. 地面大跨度薄板过滤不变量：ext.y < 0.6f 且 ext.x > 4.0f 的地面不应作为阻挡视线的遮挡体
+	const entt::entity floorEnt = registry.create();
+	auto& xfFloor = registry.emplace<TransformComponent>(floorEnt);
+	xfFloor.Location = glm::vec3(30.0f, 0.0f, 0.0f);
+	xfFloor.Scale = glm::vec3(10.0f, 0.2f, 10.0f);
+	auto& mrFloor = registry.emplace<MeshRendererComponent>(floorEnt);
+	mrFloor.Primitive = MeshRendererComponent::PrimitiveShape::Cube;
+
+	// 5. 3D 球体碰撞体遮挡不变量：球体作为实体遮挡物
+	const entt::entity sphereEnt = registry.create();
+	auto& xfSphere = registry.emplace<TransformComponent>(sphereEnt);
+	xfSphere.Location = glm::vec3(50.0f, 1.0f, 0.0f);
+	auto& sphereComp = registry.emplace<SphereCollider3DComponent>(sphereEnt);
+	sphereComp.Radius = 1.0f;
+	sphereComp.Offset = glm::vec3(0.0f, 0.5f, 0.0f);
+
+	// 6. 3D 胶囊体碰撞体遮挡不变量：胶囊体作为实体遮挡物
+	const entt::entity capsuleEnt = registry.create();
+	auto& xfCap = registry.emplace<TransformComponent>(capsuleEnt);
+	xfCap.Location = glm::vec3(60.0f, 1.0f, 0.0f);
+	auto& capComp = registry.emplace<CapsuleCollider3DComponent>(capsuleEnt);
+	capComp.Radius = 0.6f;
+	capComp.HalfHeight = 1.0f;
+	capComp.Offset = glm::vec3(0.0f, 0.0f, 0.0f);
+
+	auto occluders = CollectSceneOccluders(registry);
+
+	// 验证收集结果：必须包含 modelEnt, spriteEnt, obbEnt，且必须正确跳过 floorEnt 薄板
+	bool hasModel = false, hasSprite = false, hasObb = false, hasFloor = false;
+	bool hasSphere = false, hasCapsule = false;
+	for (const auto& occ : occluders)
+	{
+		if (occ.Owner == modelEnt) hasModel = true;
+		if (occ.Owner == spriteEnt) hasSprite = true;
+		if (occ.Owner == obbEnt) hasObb = true;
+		if (occ.Owner == floorEnt) hasFloor = true;
+		if (occ.Owner == sphereEnt) hasSphere = true;
+		if (occ.Owner == capsuleEnt) hasCapsule = true;
+	}
+	assert(hasModel && "Model must be collected in occluders");
+	assert(hasSprite && "Sprite image must be collected in occluders");
+	assert(hasObb && "Rotated OBB model must be collected in occluders");
+	assert(!hasFloor && "Thin floor slab must be skipped from occluders");
+	assert(hasSphere && "Sphere collider must be collected in occluders");
+	assert(hasCapsule && "Capsule collider must be collected in occluders");
+
+	// 测试 1: 模型遮挡验证
+	const glm::vec3 camPosModel(0.0f, 1.0f, 5.0f);
+	const glm::vec3 ptBehindModel(0.0f, 1.0f, -3.0f);
+	const glm::vec3 ptInFrontModel(0.0f, 1.0f, 2.5f);
+	const glm::vec3 ptBesideModel(4.0f, 1.0f, -3.0f);
+
+	auto testOccluded = [&](const glm::vec3& cam, const glm::vec3& target, entt::entity ign = entt::null) -> bool {
+		const glm::vec3 toTarget = target - cam;
+		const float dist = glm::length(toTarget);
+		const glm::vec3 dir = toTarget / dist;
+		return RayHitsSceneOccluders(occluders, cam, dir, dist, target, ign);
+	};
+
+	assert(testOccluded(camPosModel, ptBehindModel) == true && "Point behind 3D model must be occluded");
+	assert(testOccluded(camPosModel, ptInFrontModel) == false && "Point in front of 3D model must not be occluded");
+	assert(testOccluded(camPosModel, ptBesideModel) == false && "Point beside 3D model must not be occluded");
+	assert(testOccluded(camPosModel, ptBehindModel, modelEnt) == false && "Point behind model must ignore model when modelEnt is ignored");
+
+	// 测试 2: 图片 (Sprite) 遮挡验证
+	const glm::vec3 camPosSprite(10.0f, 1.0f, 5.0f);
+	const glm::vec3 ptBehindSprite(10.0f, 1.0f, -2.5f);
+	const glm::vec3 ptInFrontSprite(10.0f, 1.0f, 2.0f);
+	const glm::vec3 ptBesideSprite(14.0f, 1.0f, -2.5f);
+
+	assert(testOccluded(camPosSprite, ptBehindSprite) == true && "Point behind 2D sprite image must be occluded");
+	assert(testOccluded(camPosSprite, ptInFrontSprite) == false && "Point in front of 2D sprite image must not be occluded");
+	assert(testOccluded(camPosSprite, ptBesideSprite) == false && "Point beside 2D sprite image must not be occluded");
+
+	// 测试 3: 旋转 OBB 精确性验证 (45 度旋转的盒子，中心在 (20, 1, 0))
+	const glm::vec3 camPosObb(20.0f, 1.0f, 6.0f);
+	const glm::vec3 ptDirectBehindObb(20.0f, 1.0f, -3.0f);
+	assert(testOccluded(camPosObb, ptDirectBehindObb) == true && "Point directly behind rotated OBB must be occluded");
+
+	// 测试 4: 球体碰撞体遮挡与忽略自遮挡
+	const glm::vec3 camPosSphere(50.0f, 1.5f, 5.0f);
+	const glm::vec3 ptBehindSphere(50.0f, 1.5f, -3.0f);
+	const glm::vec3 ptInFrontSphere(50.0f, 1.5f, 2.5f);
+	assert(testOccluded(camPosSphere, ptBehindSphere) == true && "Point behind SphereCollider3D must be occluded");
+	assert(testOccluded(camPosSphere, ptInFrontSphere) == false && "Point in front of SphereCollider3D must not be occluded");
+	assert(testOccluded(camPosSphere, ptBehindSphere, sphereEnt) == false && "SphereCollider3D wireframe must not self-occlude when ignoreEntity is handle");
+
+	// 测试 5: 胶囊体碰撞体遮挡与忽略自遮挡
+	const glm::vec3 camPosCapsule(60.0f, 1.0f, 5.0f);
+	const glm::vec3 ptBehindCapsule(60.0f, 1.0f, -3.0f);
+	const glm::vec3 ptInFrontCapsule(60.0f, 1.0f, 2.5f);
+	assert(testOccluded(camPosCapsule, ptBehindCapsule) == true && "Point behind CapsuleCollider3D must be occluded");
+	assert(testOccluded(camPosCapsule, ptInFrontCapsule) == false && "Point in front of CapsuleCollider3D must not be occluded");
+	assert(testOccluded(camPosCapsule, ptBehindCapsule, capsuleEnt) == false && "CapsuleCollider3D wireframe must not self-occlude when ignoreEntity is handle");
+
+	std::cout << "[PASS] TestNavMeshAndGizmoOcclusionInvariants\n";
+}
+
 int main()
 {
 	std::cout << "Starting World.NavMesh tests...\n";
@@ -831,6 +961,7 @@ int main()
 	TestNavMeshMultiLayeredOverlappingSurfaces();
 	TestNavMeshAreaModifierCenterYOffsetClearance();
 	TestNavMeshOffMeshLinkCostAndChokepoint();
-	std::cout << "All 17 World.NavMesh tests passed successfully!\n";
+	TestNavMeshAndGizmoOcclusionInvariants();
+	std::cout << "All 18 World.NavMesh tests passed successfully!\n";
 	return 0;
 }

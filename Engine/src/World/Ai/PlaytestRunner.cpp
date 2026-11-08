@@ -10,6 +10,14 @@
 #include "World/Core/Application.h"
 #include "World/Core/StringPool.h"
 #include "World/Utils/Paths.h"
+#include "World/Core/Input.h"
+#include "World/Core/KeyCodes.h"
+#include "World/Events/KeyEvent.h"
+#include "World/Gameplay/Runtime/GameApp.h"
+#include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Schema/SchemaRegistry.h"
+#include <algorithm>
+#include <cctype>
 
 #include <yaml-cpp/yaml.h>
 #include <chrono>
@@ -25,6 +33,268 @@ namespace World::Ai
 
 	namespace
 	{
+		bool ValueToDouble(const Schema::Value& val, double& outVal)
+		{
+			if (auto* f = std::get_if<float>(&val)) { outVal = static_cast<double>(*f); return true; }
+			if (auto* d = std::get_if<double>(&val)) { outVal = *d; return true; }
+			if (auto* i = std::get_if<int32_t>(&val)) { outVal = static_cast<double>(*i); return true; }
+			if (auto* u = std::get_if<uint32_t>(&val)) { outVal = static_cast<double>(*u); return true; }
+			if (auto* i64 = std::get_if<int64_t>(&val)) { outVal = static_cast<double>(*i64); return true; }
+			if (auto* u64 = std::get_if<uint64_t>(&val)) { outVal = static_cast<double>(*u64); return true; }
+			if (auto* i16 = std::get_if<int16_t>(&val)) { outVal = static_cast<double>(*i16); return true; }
+			if (auto* u16 = std::get_if<uint16_t>(&val)) { outVal = static_cast<double>(*u16); return true; }
+			if (auto* i8 = std::get_if<int8_t>(&val)) { outVal = static_cast<double>(*i8); return true; }
+			if (auto* u8 = std::get_if<uint8_t>(&val)) { outVal = static_cast<double>(*u8); return true; }
+			if (auto* b = std::get_if<bool>(&val)) { outVal = *b ? 1.0 : 0.0; return true; }
+			return false;
+		}
+
+		bool CompareNumbers(double actual, const std::string& op, double expected)
+		{
+			if (op == "<") return actual < expected;
+			if (op == "<=") return actual <= expected;
+			if (op == ">") return actual > expected;
+			if (op == ">=") return actual >= expected;
+			if (op == "==") return std::abs(actual - expected) < 1e-4;
+			if (op == "!=") return std::abs(actual - expected) >= 1e-4;
+			return false;
+		}
+
+		bool EvaluateFieldAssertion(Scene* scene, const std::string& assertExpr, std::string& outFailure)
+		{
+			if (!scene)
+			{
+				outFailure = "Assertion failed: null scene";
+				return true;
+			}
+
+			std::string str = assertExpr;
+			if (str.rfind("assert:", 0) == 0)
+				str = str.substr(7);
+
+			static const std::vector<std::string> ops = { "<=", ">=", "==", "!=", "<", ">" };
+			std::string foundOp;
+			size_t opPos = std::string::npos;
+			for (const auto& op : ops)
+			{
+				const size_t pos = str.find(op);
+				if (pos != std::string::npos)
+				{
+					foundOp = op;
+					opPos = pos;
+					break;
+				}
+			}
+
+			if (opPos == std::string::npos)
+				return false;
+
+			std::string left = str.substr(0, opPos);
+			std::string right = str.substr(opPos + foundOp.size());
+			auto trim = [](std::string& s) {
+				while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front())))
+					s.erase(s.begin());
+				while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back())))
+					s.pop_back();
+			};
+			trim(left);
+			trim(right);
+
+			double expectedVal = 0.0;
+			try {
+				expectedVal = std::stod(right);
+			} catch (...) {
+				outFailure = "Assertion syntax error in '" + assertExpr + "': right-hand side is not a valid number";
+				return true;
+			}
+
+			std::vector<std::string> parts;
+			{
+				std::stringstream ss(left);
+				std::string token;
+				while (std::getline(ss, token, '.'))
+				{
+					trim(token);
+					if (!token.empty())
+						parts.push_back(token);
+				}
+			}
+
+			if (parts.size() < 2)
+			{
+				outFailure = "Assertion syntax error in '" + assertExpr + "': expected '[entity.]Component.Field'";
+				return true;
+			}
+
+			std::string entityName;
+			std::string compName;
+			std::string fieldName;
+			std::string subFieldName;
+
+			if (parts.size() == 2)
+			{
+				compName = parts[0];
+				fieldName = parts[1];
+			}
+			else if (parts.size() == 3)
+			{
+				bool isEntity = false;
+				for (auto [e, tag] : scene->GetRegistry().view<TagComponent>().each())
+				{
+					if (tag.Tag == StringPool::Get().InternName(parts[0]))
+					{
+						isEntity = true;
+						break;
+					}
+				}
+				if (isEntity)
+				{
+					entityName = parts[0];
+					compName = parts[1];
+					fieldName = parts[2];
+				}
+				else
+				{
+					compName = parts[0];
+					fieldName = parts[1];
+					subFieldName = parts[2];
+				}
+			}
+			else if (parts.size() >= 4)
+			{
+				entityName = parts[0];
+				compName = parts[1];
+				fieldName = parts[2];
+				subFieldName = parts[3];
+			}
+
+			const Schema::TypeSchema* schema = scene->GetContext().Schemas().Find(compName);
+			if (!schema)
+			{
+				for (const auto* candidate : scene->GetContext().Schemas().List(Schema::TypeCategory::Component))
+				{
+					if (!candidate) continue;
+					const size_t sep = candidate->Id.Name.rfind("::");
+					const std::string shortName = (sep == std::string::npos) ? candidate->Id.Name : candidate->Id.Name.substr(sep + 2);
+					if (shortName == compName || candidate->DisplayName == compName)
+					{
+						schema = candidate;
+						break;
+					}
+				}
+			}
+
+			if (!schema || !schema->Storage)
+			{
+				outFailure = "Assertion failed: component schema '" + compName + "' not found in scene context";
+				return true;
+			}
+
+			const Schema::FieldSchema* fieldSchema = nullptr;
+			for (const auto& f : schema->Fields)
+			{
+				if (f.Name == fieldName)
+				{
+					fieldSchema = &f;
+					break;
+				}
+			}
+			if (!fieldSchema || !fieldSchema->Get)
+			{
+				outFailure = "Assertion failed: field '" + fieldName + "' not found on component '" + compName + "'";
+				return true;
+			}
+
+			entt::entity targetHandle = entt::null;
+			auto& registry = scene->GetRegistry();
+
+			if (!entityName.empty())
+			{
+				for (auto [e, tag] : registry.view<TagComponent>().each())
+				{
+					if (tag.Tag == StringPool::Get().InternName(entityName))
+					{
+						targetHandle = e;
+						break;
+					}
+				}
+				if (targetHandle == entt::null)
+				{
+					outFailure = "Assertion failed: entity '" + entityName + "' not found for assertion '" + assertExpr + "'";
+					return true;
+				}
+			}
+			else
+			{
+				auto* storage = registry.storage(schema->Storage->ComponentId);
+				if (storage && !storage->empty())
+				{
+					targetHandle = storage->operator[](0);
+				}
+				if (targetHandle == entt::null)
+				{
+					outFailure = "Assertion failed: no entity in scene carries component '" + compName + "'";
+					return true;
+				}
+			}
+
+			Entity ent(scene, targetHandle);
+			if (!ent.HasComponent(schema->Storage->ComponentId))
+			{
+				outFailure = "Assertion failed: entity does not carry component '" + compName + "'";
+				return true;
+			}
+
+			const void* compPtr = ent.GetComponent(schema->Storage->ComponentId);
+			if (!compPtr)
+			{
+				outFailure = "Assertion failed: null component pointer for '" + compName + "'";
+				return true;
+			}
+
+			Schema::Value val = fieldSchema->Get(compPtr);
+			double actualVal = 0.0;
+			bool valOk = false;
+
+			if (!subFieldName.empty())
+			{
+				if (auto* v3 = std::get_if<glm::vec3>(&val))
+				{
+					if (subFieldName == "x") { actualVal = v3->x; valOk = true; }
+					else if (subFieldName == "y") { actualVal = v3->y; valOk = true; }
+					else if (subFieldName == "z") { actualVal = v3->z; valOk = true; }
+				}
+				else if (auto* v2 = std::get_if<glm::vec2>(&val))
+				{
+					if (subFieldName == "x") { actualVal = v2->x; valOk = true; }
+					else if (subFieldName == "y") { actualVal = v2->y; valOk = true; }
+				}
+				else if (auto* v4 = std::get_if<glm::vec4>(&val))
+				{
+					if (subFieldName == "x") { actualVal = v4->x; valOk = true; }
+					else if (subFieldName == "y") { actualVal = v4->y; valOk = true; }
+					else if (subFieldName == "z") { actualVal = v4->z; valOk = true; }
+					else if (subFieldName == "w") { actualVal = v4->w; valOk = true; }
+				}
+			}
+			else
+			{
+				valOk = ValueToDouble(val, actualVal);
+			}
+
+			if (!valOk)
+			{
+				outFailure = "Assertion failed: could not extract numeric value for '" + left + "'";
+				return true;
+			}
+
+			if (!CompareNumbers(actualVal, foundOp, expectedVal))
+			{
+				outFailure = "Assertion failed: " + assertExpr + " (actual: " + std::to_string(actualVal) + ")";
+			}
+			return true;
+		}
+
 		size_t GetSceneEntityCount(Scene* scene)
 		{
 			if (!scene)
@@ -312,6 +582,9 @@ namespace World::Ai
 			}
 		}
 
+		Input::ClearSimulatedKeys();
+		ScriptEngine::ClearScriptErrors();
+
 		const auto start = std::chrono::high_resolution_clock::now();
 
 		try
@@ -322,16 +595,88 @@ namespace World::Ai
 				{
 					if (inp.frame == f)
 					{
-						result.logs.push_back("Frame " + std::to_string(f) + ": input event " + inp.type + " key=" + inp.key);
+						int keycode = -1;
+						try {
+							if (!inp.key.empty() && std::all_of(inp.key.begin(), inp.key.end(), ::isdigit))
+								keycode = std::stoi(inp.key);
+						} catch (...) {}
+						if (keycode < 0 && !inp.key.empty())
+						{
+							std::string upperKey = inp.key;
+							for (char& c : upperKey) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+							if (upperKey == "SPACE") keycode = KeyCodes::Space;
+							else if (upperKey == "TAB") keycode = KeyCodes::Tab;
+							else if (upperKey == "ENTER" || upperKey == "RETURN") keycode = KeyCodes::Enter;
+							else if (upperKey == "ESCAPE" || upperKey == "ESC") keycode = KeyCodes::Escape;
+							else if (upperKey == "LEFT") keycode = KeyCodes::Left;
+							else if (upperKey == "RIGHT") keycode = KeyCodes::Right;
+							else if (upperKey == "UP") keycode = KeyCodes::Up;
+							else if (upperKey == "DOWN") keycode = KeyCodes::Down;
+							else if (upperKey.size() == 1 && upperKey[0] >= 'A' && upperKey[0] <= 'Z')
+								keycode = KeyCodes::A + (upperKey[0] - 'A');
+							else if (upperKey.size() == 1 && upperKey[0] >= '0' && upperKey[0] <= '9')
+								keycode = KeyCodes::D0 + (upperKey[0] - '0');
+						}
+
+						const bool isDown = (inp.type == "key_down" || inp.type == "press" || inp.type == "keydown");
+						const bool isUp = (inp.type == "key_up" || inp.type == "release" || inp.type == "keyup");
+
+						if (isDown && keycode >= 0)
+						{
+							Input::SetSimulatedKeyState(keycode, true);
+							if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+								app->Events().Emit(KeyPressedEvent(keycode, 0));
+						}
+						else if (isUp && keycode >= 0)
+						{
+							Input::SetSimulatedKeyState(keycode, false);
+							if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+								app->Events().Emit(KeyReleasedEvent(keycode));
+						}
+						result.logs.push_back("Frame " + std::to_string(f) + ": input event " + inp.type + " key=" + inp.key + " (keycode=" + std::to_string(keycode) + ")");
 					}
 				}
 				targetScene->OnUpdateRuntime(Timestep(config.fixedDeltaTime));
+				Input::UpdateFrameInputState();
 				result.framesSimulated++;
+
+				// 脚本异常硬性拦截：推帧期间若探测到任何脚本解析失败或未捕获异常，立即终止推帧并判负
+				if (ScriptEngine::GetScriptErrorCount() > 0)
+				{
+					for (const auto& err : ScriptEngine::GetRecentScriptErrors())
+					{
+						result.failures.push_back("Script error at frame " + std::to_string(f) + ": " + err);
+					}
+					result.pass = false;
+					break;
+				}
 			}
 		}
 		catch (const std::exception& e)
 		{
 			result.failures.push_back(std::string("Simulation crashed: ") + e.what());
+			result.pass = false;
+		}
+
+		Input::ClearSimulatedKeys();
+
+		// 全量推帧结束后再次确认脚本错误
+		if (ScriptEngine::GetScriptErrorCount() > 0)
+		{
+			for (const auto& err : ScriptEngine::GetRecentScriptErrors())
+			{
+				bool alreadyReported = false;
+				for (const auto& existing : result.failures)
+				{
+					if (existing.find(err) != std::string::npos)
+					{
+						alreadyReported = true;
+						break;
+					}
+				}
+				if (!alreadyReported)
+					result.failures.push_back("Script error: " + err);
+			}
 			result.pass = false;
 		}
 
@@ -400,7 +745,16 @@ namespace World::Ai
 
 		for (const auto& assertStr : config.asserts)
 		{
-			if (assertStr == "entity_count > 0")
+			if (assertStr == "no_script_errors" || assertStr == "assert:no_script_errors")
+			{
+				if (ScriptEngine::GetScriptErrorCount() > 0)
+				{
+					result.failures.push_back("Assertion failed: no_script_errors (" +
+						std::to_string(ScriptEngine::GetScriptErrorCount()) + " error(s) detected)");
+					result.pass = false;
+				}
+			}
+			else if (assertStr == "entity_count > 0")
 			{
 				if (GetSceneEntityCount(targetScene) == 0)
 				{
@@ -529,6 +883,23 @@ namespace World::Ai
 				{
 					result.failures.push_back("Assertion failed: " + assertStr +
 						" (luau expressions are not executed by playtest; use entity:/component:/no_void_fall or run Runtime)");
+					result.pass = false;
+				}
+			}
+			else
+			{
+				std::string fieldFailure;
+				if (EvaluateFieldAssertion(targetScene, assertStr, fieldFailure))
+				{
+					if (!fieldFailure.empty())
+					{
+						result.failures.push_back(fieldFailure);
+						result.pass = false;
+					}
+				}
+				else
+				{
+					result.failures.push_back("Unknown assertion: '" + assertStr + "'");
 					result.pass = false;
 				}
 			}

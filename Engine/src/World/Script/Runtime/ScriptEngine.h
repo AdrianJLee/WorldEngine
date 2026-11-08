@@ -164,6 +164,12 @@ namespace World
 		// 撤销一份系统脚本注册的全部 UI 回调(整份重跑/卸载时用)。
 		static void ClearScriptUiDraws(const std::string& logicalPath);
 
+		// AI 试玩与自动化测试探针: 探测并收集运行时发生的脚本错误
+		static std::size_t GetScriptErrorCount();
+		static std::vector<std::string> GetRecentScriptErrors();
+		static void ClearScriptErrors();
+		static void RecordScriptError(std::string error);
+
 		static void DefineMathType();
 		static void RegisterMathTypes();
 

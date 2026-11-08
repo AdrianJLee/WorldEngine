@@ -6,28 +6,103 @@
 #include "World/Core/Application.h"
 
 #include <GLFW/glfw3.h>
+#include <unordered_map>
 
 namespace World
 {
+	namespace
+	{
+		// 滚轮增量累积器(仅主线程读写:事件分发与帧采样都在主线程)。
+		float s_ScrollX = 0.0f;
+		float s_ScrollY = 0.0f;
+		// 捕获态指针位移兜底累积器(同线程)。
+		float s_MouseDeltaX = 0.0f;
+		float s_MouseDeltaY = 0.0f;
+
+		// 模拟按键注入通道与边沿状态追踪
+		std::unordered_map<int, bool> s_SimulatedKeys;
+		std::unordered_map<int, bool> s_CurrentKeyStates;
+		std::unordered_map<int, bool> s_PreviousKeyStates;
+
+		bool QueryRawPhysicalKey(int keycode)
+		{
+			auto it = s_SimulatedKeys.find(keycode);
+			if (it != s_SimulatedKeys.end() && it->second)
+				return true;
+
+			if (Application::HasInstance())
+			{
+				auto window = static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow());
+				if (window && glfwGetKey(window, keycode) == GLFW_PRESS)
+					return true;
+
+				if (Application::Get().GetWindow().IsFocused())
+				{
+					int vk = -1;
+					if (keycode >= 65 && keycode <= 90) vk = keycode;
+					else if (keycode >= 48 && keycode <= 57) vk = keycode;
+					else if (keycode == 32) vk = VK_SPACE;
+					else if (keycode == 256) vk = VK_ESCAPE;
+					else if (keycode == 257) vk = VK_RETURN;
+					else if (keycode == 258) vk = VK_TAB;
+					if (vk >= 0 && (::GetAsyncKeyState(vk) & 0x8000))
+						return true;
+				}
+			}
+			return false;
+		}
+	}
+
 	bool Input::IsKeyPressed(int keycode)
 	{
-		auto window = static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow());
-		if (window && glfwGetKey(window, keycode) == GLFW_PRESS)
-			return true;
-
-		if (Application::HasInstance() && Application::Get().GetWindow().IsFocused())
-		{
-			int vk = -1;
-			if (keycode >= 65 && keycode <= 90) vk = keycode;
-			else if (keycode >= 48 && keycode <= 57) vk = keycode;
-			else if (keycode == 32) vk = VK_SPACE;
-			else if (keycode == 256) vk = VK_ESCAPE;
-			else if (keycode == 257) vk = VK_RETURN;
-			if (vk >= 0 && (::GetAsyncKeyState(vk) & 0x8000))
-				return true;
-		}
-		return false;
+		const bool pressed = QueryRawPhysicalKey(keycode);
+		s_CurrentKeyStates[keycode] = pressed;
+		return pressed;
 	}
+
+	bool Input::IsKeyJustPressed(int keycode)
+	{
+		const bool current = IsKeyPressed(keycode);
+		const auto prevIt = s_PreviousKeyStates.find(keycode);
+		const bool prev = (prevIt != s_PreviousKeyStates.end()) ? prevIt->second : false;
+		return current && !prev;
+	}
+
+	bool Input::IsKeyJustReleased(int keycode)
+	{
+		const bool current = IsKeyPressed(keycode);
+		const auto prevIt = s_PreviousKeyStates.find(keycode);
+		const bool prev = (prevIt != s_PreviousKeyStates.end()) ? prevIt->second : false;
+		return !current && prev;
+	}
+
+	void Input::SetSimulatedKeyState(int keycode, bool pressed)
+	{
+		if (pressed)
+			s_SimulatedKeys[keycode] = true;
+		else
+			s_SimulatedKeys.erase(keycode);
+		s_CurrentKeyStates[keycode] = pressed;
+	}
+
+	void Input::ClearSimulatedKeys()
+	{
+		s_SimulatedKeys.clear();
+		s_CurrentKeyStates.clear();
+		s_PreviousKeyStates.clear();
+	}
+
+	void Input::UpdateFrameInputState()
+	{
+		s_PreviousKeyStates = s_CurrentKeyStates;
+		s_CurrentKeyStates.clear();
+		for (const auto& kv : s_SimulatedKeys)
+		{
+			if (kv.second)
+				s_CurrentKeyStates[kv.first] = true;
+		}
+	}
+
 	bool Input::IsMouseButtonPressed(int button)
 	{
 		auto window = static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow());
@@ -52,15 +127,7 @@ namespace World
 		return y;
 	}
 
-	namespace
-	{
-		// 滚轮增量累积器(仅主线程读写:事件分发与帧采样都在主线程)。
-		float s_ScrollX = 0.0f;
-		float s_ScrollY = 0.0f;
-		// 捕获态指针位移兜底累积器(同线程)。
-		float s_MouseDeltaX = 0.0f;
-		float s_MouseDeltaY = 0.0f;
-	}
+
 
 	void Input::AccumulateScroll(float xOffset, float yOffset)
 	{

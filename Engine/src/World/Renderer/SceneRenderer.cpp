@@ -2,6 +2,7 @@
 #include "wldpch.h"
 #include "World/Profiling/ProfilingMacros.h"
 #include "World/Renderer/SceneRenderer.h"
+#include "World/NavMesh/NavMesh.h"
 #include "World/Renderer/Lighting2D.h"
 
 #include "World/RHI/RhiFramebufferBridge.h"
@@ -1991,6 +1992,8 @@ namespace World
 				Renderer2D::DrawQuad(quadTr, nullptr, 1.0f, flashColor);
 			}
 		}
+
+		RenderNavMesh(camera, cameraTransform);
 
 		Renderer2D::EndScene();
 		m_CommandBuffers[slot]->EndRenderPass();
@@ -4004,7 +4007,262 @@ namespace World
 		m_CommandBuffers[slot]->DrawIndexed(6, 1, 0);
 	}
 
+
+	void SceneRenderer::RenderNavMesh(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		if (!m_Options.ShowNavMesh || !m_ActiveScene)
+			return;
+
+		const std::shared_ptr<NavMesh>& navMesh = m_ActiveScene->GetNavMesh();
+		if (!navMesh || navMesh->GetPolygonCount() == 0)
+			return;
+
+		const uint32_t polyCount = static_cast<uint32_t>(navMesh->GetPolygonCount());
+
+		// 1. 3D 导航多边形半透明填充面与边界/内轮廓线 (GPU 硬件深度测试通道，对标 UE5)
+		if (m_Options.ShowNavPolygons)
+		{
+			for (uint32_t p = 0; p < polyCount; ++p)
+			{
+				const auto& poly = navMesh->GetPolygon(p);
+				if (poly.Blocked && !m_Options.ShowNavObstacles)
+					continue;
+				const size_t vertCount = poly.VertexIndices.size();
+				if (vertCount < 3)
+					continue;
+
+				const bool isCovered = (poly.Clearance > 0.0f && poly.Clearance <= 2.6f);
+				glm::vec4 polyColor = poly.Blocked
+					? glm::vec4(0.95f, 0.25f, 0.25f, 0.95f)
+					: (isCovered
+						? glm::vec4(0.20f, 0.75f, 1.00f, 0.95f)
+						: glm::vec4(0.18f, 0.90f, 0.48f, 0.85f));
+
+				glm::vec4 fillColor = poly.Blocked
+					? glm::vec4(0.95f, 0.20f, 0.20f, 0.35f)
+					: (isCovered
+						? glm::vec4(0.15f, 0.55f, 0.90f, 0.32f)
+						: glm::vec4(0.12f, 0.82f, 0.42f, 0.26f));
+
+				if (m_Options.ShowNavAreaCosts && !poly.Blocked)
+				{
+					if (poly.AreaType == 1)      { polyColor = { 0.35f, 0.95f, 0.35f, 0.90f }; fillColor = { 0.30f, 0.95f, 0.30f, 0.35f }; }
+					else if (poly.AreaType == 2) { polyColor = { 0.65f, 0.35f, 0.95f, 0.90f }; fillColor = { 0.65f, 0.35f, 0.95f, 0.35f }; }
+					else if (poly.AreaType == 3) { polyColor = { 0.95f, 0.40f, 0.15f, 0.90f }; fillColor = { 0.95f, 0.40f, 0.15f, 0.40f }; }
+					else if (poly.AreaType == 5) { polyColor = { 0.15f, 0.85f, 0.95f, 0.90f }; fillColor = { 0.15f, 0.85f, 0.95f, 0.40f }; }
+				}
+
+				// 0.06m 地表法线偏置，彻底避免与地表发生 Z-Fighting，且能被地上障碍物精准遮挡
+				constexpr float kHeightOffset = 0.06f;
+				std::vector<glm::vec3> verts(vertCount);
+				for (size_t i = 0; i < vertCount; ++i)
+				{
+					verts[i] = navMesh->GetVertex(poly.VertexIndices[i]) + glm::vec3(0.0f, kHeightOffset, 0.0f);
+				}
+
+				// A. 填充多边形半透明表面 (Hardware Depth-Tested via Renderer2D::DrawNavMeshQuadPositions)
+				if (m_Options.FillNavPolygons)
+				{
+					if (vertCount == 3)
+					{
+						const glm::vec3 quad[4] = { verts[0], verts[1], verts[2], verts[2] };
+						Renderer2D::DrawNavMeshQuadPositions(quad, fillColor);
+					}
+					else if (vertCount == 4)
+					{
+						const glm::vec3 quad[4] = { verts[0], verts[1], verts[2], verts[3] };
+						Renderer2D::DrawNavMeshQuadPositions(quad, fillColor);
+					}
+					else
+					{
+						for (size_t s = 1; s + 1 < vertCount; ++s)
+						{
+							const glm::vec3 quad[4] = { verts[0], verts[s], verts[s + 1], verts[s + 1] };
+							Renderer2D::DrawNavMeshQuadPositions(quad, fillColor);
+						}
+					}
+				}
+
+				// B. 绘制多边形边界轮廓线与共享内边 (Hardware Depth-Tested via Renderer2D::DrawLineCore)
+				for (size_t i = 0; i < vertCount; ++i)
+				{
+					const int32_t nbr = (i < poly.Neighbors.size()) ? poly.Neighbors[i] : -1;
+					const bool isBoundary = (nbr == -1 || (nbr >= 0 && static_cast<uint32_t>(nbr) < polyCount && navMesh->GetPolygon(static_cast<uint32_t>(nbr)).Blocked != poly.Blocked));
+
+					if (isBoundary)
+					{
+						Renderer2D::DrawLineCore(verts[i], verts[(i + 1) % vertCount], polyColor);
+					}
+					else if (static_cast<int32_t>(p) < nbr)
+					{
+						const glm::vec4 innerColor(polyColor.r, polyColor.g, polyColor.b, 0.22f);
+						Renderer2D::DrawLineCore(verts[i], verts[(i + 1) % vertCount], innerColor);
+					}
+				}
+			}
+		}
+
+		// 2. 动态导航障碍物 (NavMeshObstacleComponent) 3D 立体线框盒
+		if (m_Options.ShowNavObstacles)
+		{
+			const glm::vec4 obsColor(1.0f, 0.55f, 0.15f, 0.85f);
+			for (auto [handle, obs] : m_ActiveScene->m_Registry.view<NavMeshObstacleComponent>().each())
+			{
+				glm::mat4 world(1.0f);
+				if (const auto* wt = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(handle))
+					world = wt->Matrix;
+				else if (const auto* xform = m_ActiveScene->m_Registry.try_get<TransformComponent>(handle))
+					world = xform->GetLocalMatrix();
+
+				const glm::vec3 localCorners[8] = {
+					glm::vec3(-obs.Extents.x, -obs.Extents.y, -obs.Extents.z),
+					glm::vec3( obs.Extents.x, -obs.Extents.y, -obs.Extents.z),
+					glm::vec3( obs.Extents.x, -obs.Extents.y,  obs.Extents.z),
+					glm::vec3(-obs.Extents.x, -obs.Extents.y,  obs.Extents.z),
+					glm::vec3(-obs.Extents.x,  obs.Extents.y, -obs.Extents.z),
+					glm::vec3( obs.Extents.x,  obs.Extents.y, -obs.Extents.z),
+					glm::vec3( obs.Extents.x,  obs.Extents.y,  obs.Extents.z),
+					glm::vec3(-obs.Extents.x,  obs.Extents.y, -obs.Extents.z)
+				};
+				glm::vec3 worldCorners[8];
+				for (int i = 0; i < 8; ++i)
+					worldCorners[i] = glm::vec3(world * glm::vec4(localCorners[i], 1.0f));
+
+				constexpr int edges[12][2] = {
+					{0,1}, {1,2}, {2,3}, {3,0},
+					{4,5}, {5,6}, {6,7}, {7,4},
+					{0,4}, {1,5}, {2,6}, {3,7}
+				};
+				for (int e = 0; e < 12; ++e)
+				{
+					Renderer2D::DrawLineCore(worldCorners[edges[e][0]], worldCorners[edges[e][1]], obsColor);
+				}
+			}
+		}
+
+		// 3. 寻路代理 (NavMeshAgentComponent) 圆柱体、目标点与路径折线
+		if (m_Options.ShowNavPaths)
+		{
+			for (auto [handle, agent] : m_ActiveScene->m_Registry.view<NavMeshAgentComponent>().each())
+			{
+				glm::vec3 center(0.0f);
+				if (const auto* xform = m_ActiveScene->m_Registry.try_get<TransformComponent>(handle))
+					center = xform->Location;
+
+				const float r = std::max(0.1f, agent.AgentRadius);
+				const float h = std::max(0.2f, agent.GetEffectiveHeight());
+				const glm::vec4 agentColor = agent.Crouching
+					? glm::vec4(0.35f, 0.75f, 0.95f, 0.95f)
+					: glm::vec4(0.15f, 0.90f, 0.85f, 0.95f);
+
+				constexpr int kSegs = 16;
+				constexpr float kTwoPi = 6.28318530718f;
+				glm::vec3 prevBot = center + glm::vec3(r, 0.0f, 0.0f);
+				glm::vec3 prevTop = center + glm::vec3(r, h, 0.0f);
+				for (int i = 1; i <= kSegs; ++i)
+				{
+					const float a = kTwoPi * static_cast<float>(i) / static_cast<float>(kSegs);
+					const glm::vec3 currBot = center + glm::vec3(std::cos(a) * r, 0.0f, std::sin(a) * r);
+					const glm::vec3 currTop = center + glm::vec3(std::cos(a) * r, h, std::sin(a) * r);
+					Renderer2D::DrawLineCore(prevBot, currBot, agentColor);
+					Renderer2D::DrawLineCore(prevTop, currTop, agentColor);
+					if (i % 4 == 0)
+						Renderer2D::DrawLineCore(currBot, currTop, agentColor);
+					prevBot = currBot;
+					prevTop = currTop;
+				}
+
+				// 目标点地面旗帜
+				const glm::vec4 destColor(1.0f, 0.85f, 0.2f, 0.90f);
+				Renderer2D::DrawLineCore(agent.Destination, agent.Destination + glm::vec3(0.0f, 1.2f, 0.0f), destColor);
+				Renderer2D::DrawLineCore(agent.Destination + glm::vec3(0.0f, 1.2f, 0.0f), agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), destColor);
+				Renderer2D::DrawLineCore(agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), agent.Destination + glm::vec3(0.0f, 0.8f, 0.0f), destColor);
+
+				// 寻路路径折线
+				std::vector<glm::vec3> path;
+				NavQueryFilter filter;
+				filter.AgentHeight = agent.GetEffectiveHeight();
+				filter.AgentRadius = agent.AgentRadius;
+				filter.AreaMask = agent.AreaMask;
+				if (navMesh->FindPath(center, agent.Destination, path, filter) && path.size() >= 2)
+				{
+					const glm::vec4 pathColor(1.0f, 0.85f, 0.2f, 0.90f);
+					for (size_t i = 0; i < path.size() - 1; ++i)
+					{
+						Renderer2D::DrawLineCore(path[i] + glm::vec3(0.0f, 0.1f, 0.0f),
+							path[i + 1] + glm::vec3(0.0f, 0.1f, 0.0f), pathColor);
+					}
+				}
+			}
+		}
+
+		// 4. 区域代价修饰区 (NavMeshAreaModifierComponent) 立体线框盒
+		if (m_Options.ShowNavAreaCosts)
+		{
+			for (auto [handle, areaComp] : m_ActiveScene->m_Registry.view<NavMeshAreaModifierComponent>().each())
+			{
+				glm::mat4 world(1.0f);
+				if (const auto* wt = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(handle))
+					world = wt->Matrix;
+				else if (const auto* xform = m_ActiveScene->m_Registry.try_get<TransformComponent>(handle))
+					world = xform->GetLocalMatrix();
+
+				glm::vec4 areaColor(0.35f, 0.95f, 0.35f, 0.70f);
+				if (areaComp.AreaType == 2) areaColor = glm::vec4(0.70f, 0.35f, 0.95f, 0.70f);
+				else if (areaComp.AreaType == 3) areaColor = glm::vec4(0.95f, 0.45f, 0.20f, 0.70f);
+				else if (areaComp.AreaType == 5) areaColor = glm::vec4(0.20f, 0.85f, 0.95f, 0.70f);
+
+				const glm::vec3 localCorners[8] = {
+					glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
+					glm::vec3( areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
+					glm::vec3( areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z),
+					glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z),
+					glm::vec3(-areaComp.Extents.x,  areaComp.Extents.y, -areaComp.Extents.z),
+					glm::vec3( areaComp.Extents.x,  areaComp.Extents.y, -areaComp.Extents.z),
+					glm::vec3( areaComp.Extents.x,  areaComp.Extents.y,  areaComp.Extents.z),
+					glm::vec3(-areaComp.Extents.x,  areaComp.Extents.y,  areaComp.Extents.z)
+				};
+				glm::vec3 worldCorners[8];
+				for (int i = 0; i < 8; ++i)
+					worldCorners[i] = glm::vec3(world * glm::vec4(localCorners[i], 1.0f));
+
+				constexpr int edges[12][2] = {
+					{0,1}, {1,2}, {2,3}, {3,0},
+					{4,5}, {5,6}, {6,7}, {7,4},
+					{0,4}, {1,5}, {2,6}, {3,7}
+				};
+				for (int e = 0; e < 12; ++e)
+				{
+					Renderer2D::DrawLineCore(worldCorners[edges[e][0]], worldCorners[edges[e][1]], areaColor);
+				}
+			}
+		}
+
+		// 5. 跨网格跳跃点 (NavMeshOffMeshLinkComponent) 抛物线弧线
+		if (m_Options.ShowNavOffMeshLinks)
+		{
+			const glm::vec4 linkColor(0.25f, 0.90f, 0.95f, 0.85f);
+			for (auto [handle, linkComp] : m_ActiveScene->m_Registry.view<NavMeshOffMeshLinkComponent>().each())
+			{
+				glm::vec3 startPos(0.0f);
+				if (const auto* xform = m_ActiveScene->m_Registry.try_get<TransformComponent>(handle))
+					startPos = xform->Location;
+				const glm::vec3 endPos = linkComp.TargetLocation;
+				const float dist = glm::distance(startPos, endPos);
+				const float arcH = std::clamp(dist * 0.20f, 0.6f, 2.2f);
+				constexpr int kArcSegs = 24;
+				glm::vec3 prevPt = startPos;
+				for (int s = 1; s <= kArcSegs; ++s)
+				{
+					const float t = static_cast<float>(s) / static_cast<float>(kArcSegs);
+					const glm::vec3 horiz = glm::mix(startPos, endPos, t);
+					const float parabola = 4.0f * arcH * t * (1.0f - t);
+					const glm::vec3 currPt = horiz + glm::vec3(0.0f, parabola, 0.0f);
+					Renderer2D::DrawLineCore(prevPt, currPt, linkColor);
+					prevPt = currPt;
+				}
+			}
+		}
+	}
+
 }
-
-
-

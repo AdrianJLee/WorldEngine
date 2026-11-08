@@ -509,10 +509,22 @@ namespace World
 
 		ScriptValue UiOnDrawImpl(const ScriptValue* args, std::size_t count)
 		{
-			if (count != 1 || !args[0].IsFunction())
+			const ScriptValue* callbackArg = nullptr;
+			if (count == 1 && args[0].IsFunction())
+			{
+				callbackArg = &args[0];
+			}
+			else if (count >= 2 && args[0].IsTable() && args[1].IsFunction())
+			{
+				// 容错: 兼容 ui:onDraw(fn) 冒号语法(args[0]=ui table, args[1]=callback function)
+				callbackArg = &args[1];
+			}
+			else
+			{
 				throw std::logic_error("ui.onDraw expects a single function argument");
+			}
 			std::string error;
-			ScriptEngine::RegisterScriptUiDraw(args[0], &error);
+			ScriptEngine::RegisterScriptUiDraw(*callbackArg, &error);
 			if (!error.empty())
 				throw std::logic_error(error);
 			return ScriptValue();
@@ -750,8 +762,7 @@ namespace World
 			{
 				return UiOnDrawImpl(args, count);
 			}, onDrawParams, 1, 1, "",
-				"Register a function that draws this script's UI every frame (call it at the top level "
-				"of a system script; inside the callback you may call any other ui.* function)." },
+				"Register a function that draws this script's UI every frame. Both ui.onDraw(draw) and ui:onDraw(draw) are supported." },
 			{ "open", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
 				return UiOpenImpl(args, count);

@@ -130,6 +130,21 @@ namespace World::Wui
 		(void)dx;
 	}
 
+	void WuiInputCollector::ResetMouseState()
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			m_MouseDown[i] = false;
+			m_PrevMouseDown[i] = false;
+			m_MouseClicked[i] = false;
+			m_MouseReleased[i] = false;
+			m_MouseDoubleClicked[i] = false;
+			m_PressFromSystem[i] = false;
+			m_PressTime[i] = -1.0;
+		}
+		m_Wheel = 0.0f;
+	}
+
 	void WuiInputCollector::BeginFrame(WuiInputState& out, glm::vec2 viewport, float fps)
 	{
 		SyncButtonsWithSystem();

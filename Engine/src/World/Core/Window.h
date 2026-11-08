@@ -105,6 +105,7 @@ namespace World
 		virtual bool IsForegroundApp() const { return true; }
 		virtual void SetCursorLocked(bool locked) { (void)locked; }
 		virtual bool IsCursorLocked() const { return false; }
+		virtual void SetCursorPosition(double x, double y) { (void)x; (void)y; }
 		// 仅隐藏/显示系统光标，不锁定指针（HUD 与鼠标视角共存时用）。
 		// 锁定期间 SetCursorVisible 只记状态，解锁后按这个状态恢复。
 		virtual void SetCursorVisible(bool visible) { (void)visible; }

@@ -6,6 +6,8 @@
 #include "World/Platform/Windows/WindowsIme.h"
 
 #include "World/Renderer/Texture/TextureLibrary.h"
+#include "WUI/Panels/ViewportPanel.h"
+#include "WUI/Panels/NavMeshPanel.h"
 
 #include "World/Asset/AsyncLoader.h"
 #include "World/Asset/ScenePrefetch.h"
@@ -736,7 +738,12 @@ void EditorLayer::OnUpdate(Timestep ts){
 			&& Application::Get().GetWindow().IsCursorLocked()
 			&& !Input::IsMouseButtonPressed(1))
 		{
-			Application::Get().GetWindow().SetCursorLocked(false);
+			auto& win = Application::Get().GetWindow();
+			win.SetCursorLocked(false);
+			win.SetCursorPosition(m_FlyAnchorMousePos.x, m_FlyAnchorMousePos.y);
+			m_Viewport3DLastMouse = m_FlyAnchorMousePos;
+			Wui::WuiRhiBackend::FeedMouseMove(m_FlyAnchorMousePos.x, m_FlyAnchorMousePos.y);
+			Wui::WuiRhiBackend::ResetMouseState();
 			m_Viewport3DDragging = Viewport3DDrag::None;
 		}
 
@@ -989,6 +996,21 @@ void EditorLayer::OnUpdate(Timestep ts){
 		const glm::mat4 renderCameraTransform = viewportCamera.Transform;
 
 		m_RendererOptions.ShowGrid = (m_SceneState != SceneState::Play) && m_ShowReferenceGrid;
+		const bool anyNavRequested = (m_SceneState != SceneState::Play) && (
+			ViewportPanel::IsNavMeshVisible() ||
+			NavMeshPanel::ShowPolygons ||
+			NavMeshPanel::ShowPaths ||
+			NavMeshPanel::ShowObstacles ||
+			NavMeshPanel::ShowOffMeshLinks ||
+			NavMeshPanel::ShowAreaCosts);
+		m_RendererOptions.ShowNavMesh = anyNavRequested;
+		m_RendererOptions.ShowNavPolygons = NavMeshPanel::ShowPolygons;
+		m_RendererOptions.ShowNavPaths = NavMeshPanel::ShowPaths;
+		m_RendererOptions.ShowNavObstacles = NavMeshPanel::ShowObstacles;
+		m_RendererOptions.ShowNavOffMeshLinks = NavMeshPanel::ShowOffMeshLinks;
+		m_RendererOptions.ShowNavAreaCosts = NavMeshPanel::ShowAreaCosts;
+		m_RendererOptions.FillNavPolygons = NavMeshPanel::FillPolygons;
+
 		m_SceneRenderer->BeginScene(m_ActiveScene.get(), m_RendererOptions);
 		// D5c-4a:骨骼动画步长(编辑态也推进,便于在视口里直接看动画;Play 时同一口径)。
 		m_SceneRenderer->SetDeltaSeconds(m_LastDeltaSeconds);
@@ -1317,7 +1339,9 @@ void EditorLayer::OnUiFrame(){
 			// 发 mouse-move（虚拟光标持续漂移），WUI 会据此点亮工具栏 / 弹出提示，
 			// 表现为“光标看不见了，但移动还在影响别的 UI”。这里把设备指针移出布局，
 			// 清掉按键与滚轮；下面的脚本/AI 注入仍会在之后叠加。
-			if (m_SceneState == SceneState::Play && Application::Get().GetWindow().IsCursorLocked())
+			const bool cursorLocked = Application::HasInstance() && Application::Get().GetWindow().IsCursorLocked();
+			const bool isNavigating = IsFlyNavigating();
+			if (cursorLocked || isNavigating)
 			{
 				input.MousePos = { -10000.0f, -10000.0f };
 				input.Wheel = 0.0f;
@@ -1563,13 +1587,16 @@ void EditorLayer::OnEvent(Event& event){
 			EventDispatcher cameraDispatcher(event);
 			cameraDispatcher.Dispatch<MouseButtonPressedEvent>([this](MouseButtonPressedEvent& e)
 			{
+				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
+				{
+					return true;
+				}
 				const bool spacePressed = Input::IsKeyPressed(KeyCodes::Space);
-				if (e.GetMouseButton() == 0 /*左键*/ && spacePressed)
+				if (e.GetMouseButton() == 0 && spacePressed)
 				{
 					m_Viewport3DDragging = Viewport3DDrag::Pan;
 					return true;
 				}
-				// 纯 2D 锁定模式下: 右键为平移(Pan), 彻底禁止 3D 旋转
 				if (m_EditorCamera3D.Is2DMode())
 				{
 					m_Viewport3DDragging = (e.GetMouseButton() == 1 || e.GetMouseButton() == 2)
@@ -1577,23 +1604,25 @@ void EditorLayer::OnEvent(Event& event){
 				}
 				else
 				{
-					m_Viewport3DDragging = e.GetMouseButton() == 1 /*右键 orbit/fly*/ ? Viewport3DDrag::Orbit
-						: (e.GetMouseButton() == 2 /*中键 pan*/ ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+					m_Viewport3DDragging = e.GetMouseButton() == 1
+						? Viewport3DDrag::Orbit
+						: (e.GetMouseButton() == 2 ? Viewport3DDrag::Pan : Viewport3DDrag::None);
 				}
-
 				if (m_Viewport3DDragging != Viewport3DDrag::None)
 				{
 					m_ViewportFocused = true;
 				}
-
 				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 				{
 					auto& win = Application::Get().GetWindow();
 					if (!win.IsCursorLocked())
 					{
+						m_FlyAnchorMousePos = { Input::GetMouseX(), Input::GetMouseY() };
 						win.SetCursorLocked(true);
-						m_Viewport3DLastMouse = { Input::GetMouseX(), Input::GetMouseY() };
+						m_Viewport3DLastMouse = m_FlyAnchorMousePos;
+						Wui::WuiRhiBackend::ResetMouseState();
 					}
+					return true;
 				}
 				return false;
 			});
@@ -1605,10 +1634,23 @@ void EditorLayer::OnEvent(Event& event){
 					if (win.IsCursorLocked())
 					{
 						win.SetCursorLocked(false);
-						m_Viewport3DLastMouse = { Input::GetMouseX(), Input::GetMouseY() };
+						win.SetCursorPosition(m_FlyAnchorMousePos.x, m_FlyAnchorMousePos.y);
+						m_Viewport3DLastMouse = m_FlyAnchorMousePos;
+						Wui::WuiRhiBackend::FeedMouseMove(m_FlyAnchorMousePos.x, m_FlyAnchorMousePos.y);
+						Wui::WuiRhiBackend::ResetMouseState();
 					}
+					m_Viewport3DDragging = Viewport3DDrag::None;
+					return true;
 				}
-				m_Viewport3DDragging = Viewport3DDrag::None;
+				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
+				{
+					return true;
+				}
+				if (m_Viewport3DDragging != Viewport3DDrag::None)
+				{
+					m_Viewport3DDragging = Viewport3DDrag::None;
+					return true;
+				}
 				return false;
 			});
 			cameraDispatcher.Dispatch<MouseMovedEvent>([this](MouseMovedEvent& e)
@@ -1616,27 +1658,21 @@ void EditorLayer::OnEvent(Event& event){
 				const float dx = e.GetX() - m_Viewport3DLastMouse.x;
 				const float dy = e.GetY() - m_Viewport3DLastMouse.y;
 				m_Viewport3DLastMouse = { e.GetX(), e.GetY() };
-
 				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 				{
-					// 工业级视口灵敏度与方向约定 (对齐 UE5 / Unity / Blender):
-					// 灵敏度 0.18 度/像素; 鼠标右移向右转动视线 (-dx); 鼠标上移仰头看天 (dy)
 					constexpr float kSensitivity = 0.18f;
 					const float deltaYaw = dx * kSensitivity;
 					const float deltaPitch = dy * kSensitivity;
-
 					const bool altPressed = Input::IsKeyPressed(KeyCodes::LeftAlt) || Input::IsKeyPressed(KeyCodes::RightAlt);
 					if (altPressed)
 					{
-						// Alt + 右键: 围绕选中的目标中心 (Focus Target) 轨道公转环绕 (Orbit)
 						m_EditorCamera3D.Orbit(deltaYaw, deltaPitch);
 					}
 					else
 					{
-						// 纯右键拖拽: 商业级相机自身原位旋转 (FPS Free Look / 视口自由环视)
-						// 旋转中心点绝对锁定在相机自身位置，相机原地转头，绝不围绕外部点划大圈
 						m_EditorCamera3D.RotateInPlace(deltaYaw, deltaPitch);
 					}
+					return true;
 				}
 				else if (m_Viewport3DDragging == Viewport3DDrag::Pan)
 				{
@@ -1652,6 +1688,7 @@ void EditorLayer::OnEvent(Event& event){
 					const float panDx = -dx / uiScale * unitsPerDesignUnit;
 					const float panDy = dy / uiScale * unitsPerDesignUnit;
 					m_EditorCamera3D.Pan(panDx, panDy);
+					return true;
 				}
 				return false;
 			});

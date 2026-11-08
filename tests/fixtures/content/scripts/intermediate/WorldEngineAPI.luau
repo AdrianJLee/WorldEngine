@@ -402,6 +402,28 @@ function Input:CursorLocked() end
 ---@return boolean
 function Input:Quit() end
 
+---Current active viewport or client size in physical pixels.
+---@return vec2
+function Input:ViewportSize() end
+
+---Current physical window client size in pixels.
+---@return vec2
+function Input:WindowSize() end
+
+---Window content DPI scale.
+---@return number
+function Input:ContentScale() end
+
+---Whether the key was just pressed down this frame (rising-edge trigger; avoids repeat firing).
+---@param key string|number Key name ('Space', 'F', 'A', 'D') or integer keycode.
+---@return boolean
+function Input:IsKeyJustPressed(key) end
+
+---Whether the key was just released this frame (falling-edge trigger).
+---@param key string|number Key name ('Space', 'F', 'A', 'D') or integer keycode.
+---@return boolean
+function Input:IsKeyJustReleased(key) end
+
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.
 ---@class Level
@@ -552,6 +574,14 @@ function App:Quit() end
 ---Alias of App.Quit(); requests the application to close gracefully.
 ---@return boolean
 function App:Close() end
+
+---Current active viewport or client size in physical pixels.
+---@return vec2
+function App:ViewportSize() end
+
+---Current physical window client size in pixels.
+---@return vec2
+function App:WindowSize() end
 
 -- Global service table 'Audio': read-only; there is no runtime constructor.
 ---Read-only audio service table for sound events, playback control, bus volumes, and snapshots.
@@ -993,7 +1023,7 @@ function ui:rows(x, y, w, h, count, gap) end
 ---@return table
 function ui:columns(x, y, w, h, count, gap) end
 
----Register a function that draws this script's UI every frame (call it at the top level of a system script; inside the callback you may call any other ui.* function).
+---Register a function that draws this script's UI every frame. Both ui.onDraw(draw) and ui:onDraw(draw) are supported.
 ---@param draw function UI draw callback; it runs every frame during the UI phase, after script systems have updated.
 function ui:onDraw(draw) end
 

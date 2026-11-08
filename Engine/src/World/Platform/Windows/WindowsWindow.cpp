@@ -847,6 +847,13 @@ namespace World
 		}
 	}
 
+	void WindowsWindow::SetCursorPosition(double x, double y)
+	{
+		if (!m_Window)
+			return;
+		glfwSetCursorPos(m_Window, x, y);
+	}
+
 	void WindowsWindow::SetCursorLocked(bool locked)
 	{
 		if (!m_Window)

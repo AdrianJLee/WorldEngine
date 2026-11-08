@@ -20,6 +20,13 @@ namespace World
 	struct SceneRendererOptions
 	{
 		bool ShowGrid = true;
+		bool ShowNavMesh = false;
+		bool ShowNavPolygons = true;
+		bool ShowNavPaths = true;
+		bool ShowNavObstacles = true;
+		bool ShowNavOffMeshLinks = true;
+		bool ShowNavAreaCosts = true;
+		bool FillNavPolygons = true;
 	};
 
 	class WLD_API SceneRenderer : public IRenderExtractSink
@@ -89,6 +96,7 @@ namespace World
 		void Render2DLighting(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderDebug(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform);
+		void RenderNavMesh(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderTerrain(const Camera& camera, const glm::mat4& cameraTransform);
 		void RenderFoliage(const Camera& camera, const glm::mat4& cameraTransform);
 		// D5:网格/材质资产加载失败只警告一次(按路径去重),避免逐帧刷屏。

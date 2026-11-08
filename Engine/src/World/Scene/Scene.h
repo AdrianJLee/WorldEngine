@@ -392,6 +392,8 @@ namespace Animation
 		const std::vector<FrameSystemTiming>& GetFrameSystemTimings() const { return m_FrameSystemTimings; }
 		static const char* GetFrameSystemStatsDescription(const Scene& scene);
 		void OnViewportResize(uint32_t width, uint32_t height);
+		uint32_t GetViewportWidth() const { return m_ViewportWidth; }
+		uint32_t GetViewportHeight() const { return m_ViewportHeight; }
 		void OnRuntimeStart();
 		void OnRuntimeStop();
 		void OnSimulationStart();

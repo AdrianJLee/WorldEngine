@@ -93,7 +93,8 @@ namespace World
 			Rhi::PrimitiveTopology topology,
 			const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout,
 			float lineWidth = 1.0f,
-			bool additive = false)
+			bool additive = false,
+			bool depthWrite = false)
 		{
 			Rhi::PipelineDesc desc;
 			desc.Shader = shader;
@@ -116,7 +117,7 @@ namespace World
 			// 2D 精灵按 CPU 排序(SortingLayer/OrderInLayer/DepthKey)透明混合绘制:
 			// 深度测试开启(可被 3D 前景遮挡),关闭深度写入避免 2D 同平面 Z-fighting 与相互深度剔除产生撕裂
 			desc.DepthStencil.DepthTest = true;
-			desc.DepthStencil.DepthWrite = false;
+			desc.DepthStencil.DepthWrite = depthWrite;
 			if (additive)
 			{
 				desc.Blends.push_back({
@@ -207,6 +208,7 @@ namespace World
 		{
 			Batch<QuadVertex> Quads;
 			Batch<QuadVertex> QuadsAdditive;
+			Batch<QuadVertex> NavMeshQuads;
 			Batch<CircleVertex> Circles;
 			Batch<LineVertex> Lines;
 
@@ -235,10 +237,10 @@ namespace World
 
 		template <typename Vertex, uint32_t MaxIndices>
 		void CreateBatchPipeline(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
-			const BatchSpec& spec, const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout, bool additive = false)
+			const BatchSpec& spec, const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout, bool additive = false, bool depthWrite = false)
 		{
 			batch.Pipeline = Renderer::GetDevice()->CreatePipeline(
-				MakePipeline(shader, spec.Attributes, sizeof(Vertex), spec.Topology, textureLayout, spec.LineWidth, additive));
+				MakePipeline(shader, spec.Attributes, sizeof(Vertex), spec.Topology, textureLayout, spec.LineWidth, additive, depthWrite));
 		}
 
 		template <typename Vertex, uint32_t MaxIndices>
@@ -286,9 +288,9 @@ namespace World
 		template <typename Vertex, uint32_t MaxIndices>
 		void CreateBatch(Batch<Vertex>& batch, const Rhi::Handle<Rhi::Shader>& shader,
 			const BatchSpec& spec, const Rhi::Handle<Rhi::DescriptorSetLayout>& textureLayout,
-			uint32_t maxVertices, bool additive = false)
+			uint32_t maxVertices, bool additive = false, bool depthWrite = false)
 		{
-			CreateBatchPipeline<Vertex, MaxIndices>(batch, shader, spec, textureLayout, additive);
+			CreateBatchPipeline<Vertex, MaxIndices>(batch, shader, spec, textureLayout, additive, depthWrite);
 			CreateBatchBuffers<Vertex, MaxIndices>(batch, spec, maxVertices);
 		}
 
@@ -417,17 +419,19 @@ namespace World
 
 		const auto quadShader = CreateRendererShader(kQuadShaderPath, "Renderer2D-Quad");
 		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.Quads, quadShader, QuadBatchSpec(),
-			s_Data.TextureLayout, MaxQuads * 4, false);
+			s_Data.TextureLayout, MaxQuads * 4, false, /*depthWrite=*/true);
 		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.QuadsAdditive, quadShader, QuadBatchSpec(),
-			s_Data.TextureLayout, MaxQuads * 4, true);
+			s_Data.TextureLayout, MaxQuads * 4, true, /*depthWrite=*/false);
+		CreateBatch<QuadVertex, MaxQuads * 6>(s_Data.NavMeshQuads, quadShader, QuadBatchSpec(),
+			s_Data.TextureLayout, MaxQuads * 4, false, /*depthWrite=*/false);
 
 		const auto circleShader = CreateRendererShader(kCircleShaderPath, "Renderer2D-Circle");
 		CreateBatch<CircleVertex, MaxCircles * 6>(s_Data.Circles, circleShader, CircleBatchSpec(),
-			s_Data.TextureLayout, MaxCircles * 4);
+			s_Data.TextureLayout, MaxCircles * 4, false, /*depthWrite=*/false);
 
 		const auto lineShader = CreateRendererShader(kLineShaderPath, "Renderer2D-Line");
 		CreateBatch<LineVertex, MaxLines * 2>(s_Data.Lines, lineShader, LineBatchSpec(),
-			s_Data.TextureLayout, MaxLines * 2);
+			s_Data.TextureLayout, MaxLines * 2, false, /*depthWrite=*/false);
 	}
 
 	// HOTR-P1-T3:引擎内建 shader 热重载 —— **只**重建 shader + 管线:render pass / 纹理描述符
@@ -464,17 +468,20 @@ namespace World
 		const BatchSpec& lineSpec = LineBatchSpec();
 		const Rhi::Handle<Rhi::Pipeline> quadPipeline = Renderer::GetDevice()->CreatePipeline(
 			MakePipeline(quadShader, quadSpec.Attributes, sizeof(QuadVertex),
-				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth, false));
+				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth, false, true));
 		const Rhi::Handle<Rhi::Pipeline> quadAdditivePipeline = Renderer::GetDevice()->CreatePipeline(
 			MakePipeline(quadShader, quadSpec.Attributes, sizeof(QuadVertex),
-				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth, true));
+				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth, true, false));
+		const Rhi::Handle<Rhi::Pipeline> navmeshPipeline = Renderer::GetDevice()->CreatePipeline(
+			MakePipeline(quadShader, quadSpec.Attributes, sizeof(QuadVertex),
+				quadSpec.Topology, s_Data.TextureLayout, quadSpec.LineWidth, false, false));
 		const Rhi::Handle<Rhi::Pipeline> circlePipeline = Renderer::GetDevice()->CreatePipeline(
 			MakePipeline(circleShader, circleSpec.Attributes, sizeof(CircleVertex),
-				circleSpec.Topology, s_Data.TextureLayout, circleSpec.LineWidth));
+				circleSpec.Topology, s_Data.TextureLayout, circleSpec.LineWidth, false, false));
 		const Rhi::Handle<Rhi::Pipeline> linePipeline = Renderer::GetDevice()->CreatePipeline(
 			MakePipeline(lineShader, lineSpec.Attributes, sizeof(LineVertex),
-				lineSpec.Topology, s_Data.TextureLayout, lineSpec.LineWidth));
-		if (!quadPipeline || !quadAdditivePipeline || !circlePipeline || !linePipeline)
+				lineSpec.Topology, s_Data.TextureLayout, lineSpec.LineWidth, false, false));
+		if (!quadPipeline || !quadAdditivePipeline || !navmeshPipeline || !circlePipeline || !linePipeline)
 		{
 			if (error) *error = "pipeline creation failed (Renderer2D)";
 			return 0;
@@ -483,13 +490,15 @@ namespace World
 		// 3) 提交:替换 + 旧管线延迟释放。
 		const Rhi::Handle<Rhi::Pipeline> oldQuad = s_Data.Quads.Pipeline;
 		const Rhi::Handle<Rhi::Pipeline> oldQuadAdd = s_Data.QuadsAdditive.Pipeline;
+		const Rhi::Handle<Rhi::Pipeline> oldNavmesh = s_Data.NavMeshQuads.Pipeline;
 		const Rhi::Handle<Rhi::Pipeline> oldCircle = s_Data.Circles.Pipeline;
 		const Rhi::Handle<Rhi::Pipeline> oldLine = s_Data.Lines.Pipeline;
 		s_Data.Quads.Pipeline = quadPipeline;
 		s_Data.QuadsAdditive.Pipeline = quadAdditivePipeline;
+		s_Data.NavMeshQuads.Pipeline = navmeshPipeline;
 		s_Data.Circles.Pipeline = circlePipeline;
 		s_Data.Lines.Pipeline = linePipeline;
-		Renderer::QueueRelease([oldQuad, oldQuadAdd, oldCircle, oldLine]() {});
+		Renderer::QueueRelease([oldQuad, oldQuadAdd, oldNavmesh, oldCircle, oldLine]() {});
 		return 3;
 	}
 
@@ -510,6 +519,7 @@ namespace World
 		};
 		release(s_Data.Quads);
 		release(s_Data.QuadsAdditive);
+		release(s_Data.NavMeshQuads);
 		release(s_Data.Circles);
 		release(s_Data.Lines);
 
@@ -559,6 +569,7 @@ namespace World
 		s_Data.TextureSlotIndex = 1;
 		ResetBatch(s_Data.Quads);
 		ResetBatch(s_Data.QuadsAdditive);
+		ResetBatch(s_Data.NavMeshQuads);
 		ResetBatch(s_Data.Circles);
 		ResetBatch(s_Data.Lines);
 	}
@@ -623,6 +634,7 @@ namespace World
 		flushBatch(s_Data.Lines);
 		flushBatch(s_Data.Quads);
 		flushBatch(s_Data.QuadsAdditive);
+		flushBatch(s_Data.NavMeshQuads);
 		flushBatch(s_Data.Circles);
 	}
 
@@ -719,6 +731,29 @@ namespace World
 		glm::vec3 positions[4];
 		ComputeCirclePositions(transform, positions);
 		DrawCirclePositions(positions, color, thickness, fade, entityID);
+	}
+
+	void Renderer2D::DrawNavMeshQuadPositions(const glm::vec3 positions[4], const glm::vec4& color)
+	{
+		WLD_TRACE_FUNCTION();
+		if (s_Data.NavMeshQuads.IndexCount >= MaxQuads * 6)
+			NextBatch();
+
+		for (uint32_t i = 0; i < 4; i++)
+		{
+			s_Data.NavMeshQuads.Ptr->Position = positions[i];
+			s_Data.NavMeshQuads.Ptr->Color = color;
+			s_Data.NavMeshQuads.Ptr->TexCoord = { 0.0f, 0.0f };
+			s_Data.NavMeshQuads.Ptr->TexIndex = 0.0f;
+			s_Data.NavMeshQuads.Ptr->TilingFactor = 1.0f;
+			s_Data.NavMeshQuads.Ptr->EntityID = -1;
+			s_Data.NavMeshQuads.Ptr->NormalTexIndex = 0.0f;
+			s_Data.NavMeshQuads.Ptr->SortingLayer = 0.0f;
+			s_Data.NavMeshQuads.Ptr++;
+		}
+
+		s_Data.NavMeshQuads.IndexCount += 6;
+		s_Data.Stats.QuadCount++;
 	}
 
 	void Renderer2D::DrawCirclePositions(const glm::vec3 positions[4], const glm::vec4& color,

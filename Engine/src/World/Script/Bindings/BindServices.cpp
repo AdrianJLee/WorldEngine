@@ -3,6 +3,7 @@
 #include "World/Core/Input.h"
 #include "World/Core/Application.h"
 #include "World/Core/KeyCodes.h"
+#include <GLFW/glfw3.h>
 #include "World/WUI/WuiContext.h"
 #include <cctype>
 
@@ -290,6 +291,51 @@ namespace World
 			if (Scene* scene = ScriptEngine::GetActiveScene())
 				position = scene->GetInputSnapshot().MousePosition;
 			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", position);
+		}
+
+		ScriptValue InputContentScaleImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args; (void)count;
+			float scale = 1.0f;
+			if (Application::HasInstance())
+			{
+				if (void* nativeWin = Application::Get().GetWindow().GetNativeWindow())
+				{
+					float sx = 0.0f, sy = 0.0f;
+					glfwGetWindowContentScale(static_cast<GLFWwindow*>(nativeWin), &sx, &sy);
+					if (sx > 0.0f)
+						scale = sx;
+				}
+			}
+			return ScriptValue::Number(static_cast<double>(scale));
+		}
+
+		ScriptValue InputViewportSizeImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args; (void)count;
+			glm::vec2 size { 1280.0f, 720.0f };
+			if (Application::HasInstance())
+			{
+				if (void* nativeWin = Application::Get().GetWindow().GetNativeWindow())
+				{
+					int w = 0, h = 0;
+					glfwGetWindowSize(static_cast<GLFWwindow*>(nativeWin), &w, &h);
+					if (w > 0 && h > 0)
+					{
+						size.x = static_cast<float>(w);
+						size.y = static_cast<float>(h);
+						return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", size);
+					}
+				}
+				size.x = static_cast<float>(Application::Get().GetWindow().GetWidth());
+				size.y = static_cast<float>(Application::Get().GetWindow().GetHeight());
+			}
+			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", size);
+		}
+
+		ScriptValue InputWindowSizeImpl(const ScriptValue* args, std::size_t count)
+		{
+			return InputViewportSizeImpl(args, count);
 		}
 
 		// 光标的显示与锁定是**玩家可感知的状态**，必须让玩法脚本能控制：
@@ -879,48 +925,86 @@ namespace World
 		return true;
 	}
 
-			ScriptValue InputIsKeyPressedImpl(const ScriptValue* args, std::size_t count)
+			static int ParseKeyCodeArgument(const ScriptValue* args, std::size_t count, std::size_t startIndex = 0)
 		{
-			if (count == 0 || args[0].IsNil())
-				return ScriptValue::Boolean(false);
+			if (count <= startIndex || args[startIndex].IsNil())
+				return -1;
 
-			// 若当前正在输入控件中编辑（文本框/数值框持焦），静音屏蔽所有脚本按键轮询，防止误触
+			// 冒号调用容错: 若第0个参数为 Table (即 Input:IsKeyPressed), 取下一个参数
+			if (startIndex == 0 && count >= 2 && args[0].IsTable())
+				return ParseKeyCodeArgument(args, count, 1);
+
+			const ScriptValue& arg = args[startIndex];
+			if (arg.IsNumber())
+			{
+				double num = 0.0;
+				arg.AsNumber(&num);
+				return static_cast<int>(num);
+			}
+			if (arg.IsString())
+			{
+				std::string str;
+				arg.AsString(&str);
+				for (char& c : str) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+				if (str == "SPACE") return KeyCodes::Space;
+				if (str == "TAB") return KeyCodes::Tab;
+				if (str == "ESCAPE" || str == "ESC") return KeyCodes::Escape;
+				if (str == "ENTER" || str == "RETURN") return KeyCodes::Enter;
+				if (str == "LEFT") return KeyCodes::Left;
+				if (str == "RIGHT") return KeyCodes::Right;
+				if (str == "UP") return KeyCodes::Up;
+				if (str == "DOWN") return KeyCodes::Down;
+				if (str == "W") return KeyCodes::W;
+				if (str == "A") return KeyCodes::A;
+				if (str == "S") return KeyCodes::S;
+				if (str == "D") return KeyCodes::D;
+				if (str == "F") return KeyCodes::F;
+				if (str.length() == 1)
+				{
+					if (str[0] >= 'A' && str[0] <= 'Z')
+						return KeyCodes::A + (str[0] - 'A');
+					if (str[0] >= '0' && str[0] <= '9')
+						return KeyCodes::D0 + (str[0] - '0');
+				}
+			}
+			return -1;
+		}
+
+		ScriptValue InputIsKeyPressedImpl(const ScriptValue* args, std::size_t count)
+		{
 			if (Wui::WuiTextFocus::Get().Active())
 				return ScriptValue::Boolean(false);
 
-			int keyCode = -1;
-			if (args[0].IsNumber())
-			{
-				double num = 0.0;
-				args[0].AsNumber(&num);
-				keyCode = static_cast<int>(num);
-			}
-			else if (args[0].IsString())
-			{
-				std::string str;
-				args[0].AsString(&str);
-				for (char& c : str) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-				if (str == "SPACE") keyCode = KeyCodes::Space;
-				else if (str == "F") keyCode = KeyCodes::F;
-				else if (str == "A") keyCode = KeyCodes::A;
-				else if (str == "D") keyCode = KeyCodes::D;
-				else if (str == "W") keyCode = KeyCodes::W;
-				else if (str == "S") keyCode = KeyCodes::S;
-				else if (str == "ESCAPE" || str == "ESC") keyCode = KeyCodes::Escape;
-				else if (str == "ENTER" || str == "RETURN") keyCode = KeyCodes::Enter;
-				else if (str == "LEFT") keyCode = KeyCodes::Left;
-				else if (str == "RIGHT") keyCode = KeyCodes::Right;
-				else if (str == "UP") keyCode = KeyCodes::Up;
-				else if (str == "DOWN") keyCode = KeyCodes::Down;
-				else if (str.length() == 1 && str[0] >= 'A' && str[0] <= 'Z')
-					keyCode = KeyCodes::A + (str[0] - 'A');
-			}
-
+			const int keyCode = ParseKeyCodeArgument(args, count);
 			if (keyCode >= 0)
 			{
-				if (!Application::HasInstance())
-					return ScriptValue::Boolean(false);
 				return ScriptValue::Boolean(World::Input::IsKeyPressed(keyCode));
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue InputIsKeyJustPressedImpl(const ScriptValue* args, std::size_t count)
+		{
+			if (Wui::WuiTextFocus::Get().Active())
+				return ScriptValue::Boolean(false);
+
+			const int keyCode = ParseKeyCodeArgument(args, count);
+			if (keyCode >= 0)
+			{
+				return ScriptValue::Boolean(World::Input::IsKeyJustPressed(keyCode));
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue InputIsKeyJustReleasedImpl(const ScriptValue* args, std::size_t count)
+		{
+			if (Wui::WuiTextFocus::Get().Active())
+				return ScriptValue::Boolean(false);
+
+			const int keyCode = ParseKeyCodeArgument(args, count);
+			if (keyCode >= 0)
+			{
+				return ScriptValue::Boolean(World::Input::IsKeyJustReleased(keyCode));
 			}
 			return ScriptValue::Boolean(false);
 		}
@@ -1074,6 +1158,31 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 				return AppQuitImpl(args, count);
 			}, nullptr, 0, 0, "boolean",
 				"Request the application to close gracefully; returns true if the close request was issued." },
+			{ "ViewportSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputViewportSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Current active viewport or client size in physical pixels." },
+			{ "WindowSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputWindowSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Current physical window client size in pixels." },
+			{ "ContentScale", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputContentScaleImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Window content DPI scale." },
+			{ "IsKeyJustPressed", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputIsKeyJustPressedImpl(args, count);
+			}, inputKeyParam, 1, 1, "boolean",
+				"Whether the key was just pressed down this frame (rising-edge trigger; avoids repeat firing)." },
+			{ "IsKeyJustReleased", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputIsKeyJustReleasedImpl(args, count);
+			}, inputKeyParam, 1, 1, "boolean",
+				"Whether the key was just released this frame (falling-edge trigger)." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。
@@ -1267,6 +1376,16 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 				return AppQuitImpl(args, count);
 			}, nullptr, 0, 0, "boolean",
 				"Alias of App.Quit(); requests the application to close gracefully." },
+			{ "ViewportSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputViewportSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Current active viewport or client size in physical pixels." },
+			{ "WindowSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputWindowSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Current physical window client size in pixels." },
 		};
 		static const ScriptServiceBinding services[] = {
 			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, sizeof(inputMethods) / sizeof(inputMethods[0]) },
