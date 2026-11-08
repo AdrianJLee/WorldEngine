@@ -1,3 +1,4 @@
+#include "World/Core/EngineHostMode.h"
 #if defined(_WIN32)
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
@@ -583,9 +584,12 @@ namespace World
 	}
 	bool RuntimeLayer::OnKeyPressed(KeyPressedEvent& e)
 	{
-		// F3 快捷键切换调试 HUD 显示/隐藏
+		// F3 快捷键切换调试 HUD 显示/隐藏: 仅在非正式发布包下生效，正式发布包不展示内部调试 HUD
 		if (e.GetRepeatCount() == 0 && e.GetKeyCode() == KeyCodes::F3)
 		{
+			if (EngineEnvironment::IsPackaged())
+				return false;
+
 			m_ShowGameHud = !m_ShowGameHud;
 			WLD_CORE_INFO("[runtime] Debug HUD {0}", m_ShowGameHud ? "enabled" : "disabled");
 			return true;

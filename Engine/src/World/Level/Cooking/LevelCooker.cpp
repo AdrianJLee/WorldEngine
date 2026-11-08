@@ -66,11 +66,66 @@ namespace World::Level
 				}
 			}
 
+			// 收集所有直接挂载 EditorOnlyComponent 或标记为 EditorOnly 的实体 UUID (含层级继承)
+			std::unordered_set<uint64_t> editorOnlyUuids;
+			for (size_t i = 0; i < package.GetEntityCount(); ++i)
+			{
+				const auto& entity = package.GetEntity(i);
+				if (entity.DocumentYaml.find("EditorOnlyComponent") != std::string::npos ||
+					entity.DocumentYaml.find("World::EditorOnlyComponent") != std::string::npos ||
+					entity.Name.find("[EditorOnly]") != std::string::npos)
+				{
+					if (entity.EntityUUID != 0)
+						editorOnlyUuids.insert(entity.EntityUUID);
+				}
+			}
+
+			bool addedCascade = true;
+			while (addedCascade)
+			{
+				addedCascade = false;
+				for (size_t i = 0; i < package.GetEntityCount(); ++i)
+				{
+					const auto& entity = package.GetEntity(i);
+					if (entity.EntityUUID == 0 || editorOnlyUuids.count(entity.EntityUUID) != 0)
+						continue;
+
+					if (entity.DocumentYaml.find("Parent:") != std::string::npos)
+					{
+						try
+						{
+							YAML::Node node = YAML::Load(entity.DocumentYaml);
+							if (node["Entities"] && node["Entities"][0] && node["Entities"][0]["World::HierarchyComponent"])
+							{
+								const auto& hc = node["Entities"][0]["World::HierarchyComponent"];
+								if (hc["Parent"])
+								{
+									const uint64_t parentUuid = hc["Parent"].as<uint64_t>(0);
+									if (parentUuid != 0 && editorOnlyUuids.count(parentUuid) != 0)
+									{
+										editorOnlyUuids.insert(entity.EntityUUID);
+										addedCascade = true;
+									}
+								}
+							}
+						}
+						catch (...) {}
+					}
+				}
+			}
+
 			std::vector<ChunkBucket> chunkBuckets;
 
 			for (size_t i = 0; i < package.GetEntityCount(); ++i)
 			{
 				const auto& entity = package.GetEntity(i);
+				if (entity.EntityUUID != 0 && editorOnlyUuids.count(entity.EntityUUID) != 0)
+					continue;
+				if (entity.DocumentYaml.find("EditorOnlyComponent") != std::string::npos ||
+					entity.DocumentYaml.find("World::EditorOnlyComponent") != std::string::npos ||
+					entity.Name.find("[EditorOnly]") != std::string::npos)
+					continue;
+
 				uint64_t chunkId = entity.ChunkID;
 				if (chunkId == 0)
 				{

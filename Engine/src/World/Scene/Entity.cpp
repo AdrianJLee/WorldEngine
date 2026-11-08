@@ -199,4 +199,32 @@ namespace World
 		m_Scene->RequestRemove(m_EntityHandle, componentId);
 	}
 
+
+
+	bool Entity::IsEditorOnly() const
+	{
+		if (!IsValid() || !m_Scene)
+			return false;
+
+		const auto& reg = m_Scene->m_Registry;
+		entt::entity cur = m_EntityHandle;
+		while (cur != entt::null && reg.valid(cur))
+		{
+			if (reg.all_of<EditorOnlyComponent>(cur))
+			{
+				if (cur == m_EntityHandle)
+					return true;
+				const auto& comp = reg.get<EditorOnlyComponent>(cur);
+				if (comp.IncludeChildren != 0)
+					return true;
+			}
+
+			if (!reg.all_of<HierarchyComponent>(cur))
+				break;
+			const auto& h = reg.get<HierarchyComponent>(cur);
+			cur = static_cast<entt::entity>(h.Parent);
+		}
+
+		return false;
+	}
 }

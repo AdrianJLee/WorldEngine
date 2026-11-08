@@ -3362,6 +3362,28 @@ namespace World
 	static_assert(offsetof(LocalWindComponent, Type) == 28, "Type offset mismatch");
 	static_assert(offsetof(LocalWindComponent, ImpulseActive) == 29, "ImpulseActive offset mismatch");
 
+
+
+	// 编辑器专属标记组件 (EditorOnly)。挂载该组件的实体仅在编辑器中存在；
+	// 在关卡流送烘焙 (LevelCooker) 时强制剔除，不进入 .wchunk / .wpak，
+	// 且在纯运行时 (Runtime / Packaged) 加载场景时自动防御过滤。
+	struct EditorOnlyComponent
+	{
+		uint8_t IncludeChildren { 1 };       // 1B (offset 0): 1 = 包含该实体的所有子实体一并作为 EditorOnly
+		uint8_t Reserved[3] { 0, 0, 0 };     // 3B (offset 1..3): 对齐到 4 字节
+
+		EditorOnlyComponent() = default;
+
+		WE_SCHEMA_BODY(World, EditorOnlyComponent, Component)
+			WE_SCHEMA_META(Category("Editor"),
+				Doc("Marks this entity as editor-only. Stripped during level cooking and ignored in game runtime."));
+			WE_FIELD(IncludeChildren, UInt8, Default(1),
+				Doc("When enabled, all child entities attached to this entity in the hierarchy are also treated as editor-only."));
+		WE_SCHEMA_END
+	};
+	static_assert(sizeof(EditorOnlyComponent) == 4, "EditorOnlyComponent must be exactly 4 bytes");
+	static_assert(std::is_trivially_copyable_v<EditorOnlyComponent>, "EditorOnlyComponent must be trivially copyable");
+	static_assert(offsetof(EditorOnlyComponent, IncludeChildren) == 0, "IncludeChildren offset mismatch");
 }
 
 

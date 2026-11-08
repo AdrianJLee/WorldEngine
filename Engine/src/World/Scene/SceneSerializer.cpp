@@ -1,3 +1,4 @@
+#include "World/Core/EngineHostMode.h"
 #include "wldpch.h"
 #include "World/Scene/SceneSerializer.h"
 
@@ -447,6 +448,13 @@ namespace World
 		{
 			if (!node.IsMap())
 				return entt::null;
+
+			// 非编辑器环境 (Runtime 或 Packaged)，跳过 EditorOnly 实体
+			if (EngineEnvironment::IsPureGameRuntime())
+			{
+				if (node["World::EditorOnlyComponent"] || node["EditorOnlyComponent"])
+					return entt::null;
+			}
 
 			uint64_t uuid = 0;
 			if (YAML::Node identity = node["World::UUIDComponent"])

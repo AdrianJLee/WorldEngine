@@ -142,9 +142,16 @@ namespace World
 		// 带访问集与深度上限,非法层级(环/断链)也能安全显示且不丢行。
 		const auto labelOf = [&registry](entt::entity handle) -> std::string
 		{
+			std::string name = "Empty Entity";
 			if (const auto* tag = registry.try_get<TagComponent>(handle))
-				return StringPool::Get().NameOf(tag->Tag).empty() ? "Empty Entity" : StringPool::Get().NameOf(tag->Tag);
-			return "Empty Entity";
+			{
+				const std::string& n = StringPool::Get().NameOf(tag->Tag);
+				if (!n.empty())
+					name = n;
+			}
+			if (registry.all_of<EditorOnlyComponent>(handle))
+				name += " [EditorOnly]";
+			return name;
 		};
 		std::vector<entt::entity> roots;
 		for (auto handle : registry.view<UUIDComponent>())
@@ -575,7 +582,7 @@ namespace World
 			const Gameplay::PrefabInstanceRecord* contextRecord = OwningRecord(*scene, contextHandle);
 			// 菜单高度 = 条目数 × 22 + 8:实例子树多出"来源说明 + 3 个动作"四行,
 			// 旧实现把这几行画在声明高度之外(面板底图盖不住)。
-			const size_t itemCount = 16u + (contextRecord ? 4u : 0u);
+			const size_t itemCount = 17u + (contextRecord ? 4u : 0u);
 			Wui::WuiRect panel;
 			if (Wui::BeginContextMenu(ctx, popup, m_MenuPos, 260.0f, itemCount, &panel, theme))
 			{
@@ -605,6 +612,17 @@ namespace World
 							host.SetSelectedEntity({});
 						host.MarkDocumentDirty();
 					}
+					ctx.CloseAllPopups();
+				}
+				const bool isEditorOnly = m_Context.HasComponent<EditorOnlyComponent>();
+				if (Wui::ContextMenuItem(ctx, Wui::HashId("hierarchy.toggle_editor_only"),
+					nextItem(), isEditorOnly ? "Unmark Editor-Only (取消仅编辑器)" : "Mark as Editor-Only (设为仅编辑器实体)", theme))
+				{
+					if (isEditorOnly)
+						m_Context.RemoveComponent<EditorOnlyComponent>();
+					else
+						m_Context.AddComponent<EditorOnlyComponent>();
+					host.MarkDocumentDirty();
 					ctx.CloseAllPopups();
 				}
 				// W3b-2:重设父级/解挂。拖拽交互需要行控件支持拖拽(UI 组件库改动,单独排期),

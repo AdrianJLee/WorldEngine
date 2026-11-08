@@ -104,4 +104,10 @@ namespace World
 		"VfxComponent must stay trivially copyable");
 	static_assert(sizeof(VfxComponent) == 64,
 		"VfxComponent must stay within one cache line");
+
+
+	static_assert(std::is_trivially_copyable_v<EditorOnlyComponent>,
+		"EditorOnlyComponent must stay trivially copyable");
+	static_assert(sizeof(EditorOnlyComponent) <= 64,
+		"EditorOnlyComponent must stay within one cache line");
 }

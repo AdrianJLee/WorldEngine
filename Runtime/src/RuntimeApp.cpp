@@ -1,3 +1,4 @@
+#include "World/Core/EngineHostMode.h"
 #include "wldpch.h"
 #include "World.h"
 #include "RuntimeLayer.h"
@@ -147,6 +148,24 @@ namespace World
 	Application* CreateApplication(World::WorldContext& context)
 	{
 		ApplyCommandLineProject();
+
+		const bool headless = (std::getenv("WLD_HEADLESS") != nullptr && std::strcmp(std::getenv("WLD_HEADLESS"), "1") == 0);
+		if (headless)
+		{
+			EngineEnvironment::SetHostMode(EngineHostMode::Headless);
+		}
+		else
+		{
+			const std::filesystem::path exeDir = ExecutableDirectory();
+			std::error_code ec;
+			const bool hasLocalManifest = !exeDir.empty() && std::filesystem::is_regular_file(exeDir / "project.we.yaml", ec);
+			const bool hasDevBuildRoot = std::filesystem::is_directory(exeDir / "../../../Engine", ec);
+			if (hasLocalManifest && !hasDevBuildRoot)
+				EngineEnvironment::SetHostMode(EngineHostMode::Packaged);
+			else
+				EngineEnvironment::SetHostMode(EngineHostMode::Runtime);
+		}
+
 		return new RuntimeApp(context);
 	}
 }

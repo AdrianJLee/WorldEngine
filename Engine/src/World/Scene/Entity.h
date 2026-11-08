@@ -98,6 +98,8 @@ namespace World
 		void RemoveComponent() { RemoveComponent(entt::type_id<T>().hash()); }
 		void RemoveComponent(entt::id_type componentId);
 
+		bool IsEditorOnly() const;
+
 		operator bool() const { return IsValid(); }
 		operator entt::entity() const { return m_EntityHandle; }
 		operator uint32_t() const { return static_cast<uint32_t>(m_EntityHandle); }

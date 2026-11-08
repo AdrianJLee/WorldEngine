@@ -102,6 +102,7 @@ namespace
 		{ "World::TerrainComponent",             48 },
 		{ "World::FoliageComponent",             48 },
 		{ "World::LocalWindComponent",           32 },
+		{ "World::EditorOnlyComponent",          4 },
 		{ "World::AnimGraphComponent",            48 },
 		{ "World::TwoBoneIkComponent",            56 },
 		{ "World::FootIkComponent",               16 },

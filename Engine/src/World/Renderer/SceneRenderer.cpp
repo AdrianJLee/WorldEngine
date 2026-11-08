@@ -1871,7 +1871,7 @@ namespace World
 		Renderer2D::StartBatch();
 		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffers[slot]);
 
-		if (selectedEntity)
+		if (m_Options.ShowSelectionOutline && selectedEntity)
 		{
 			// 2D 精灵:描边就画在精灵本身的四边形上(与物体重合)。
 			// 3D 网格实体**不在这里画**:用实体 Transform 画出来的是一个 2D 方块 ——
@@ -1933,6 +1933,10 @@ namespace World
 					}
 				}
 			}
+		}
+
+		if (m_Options.ShowDebugColliders || m_Options.ShowDebugLights)
+		{
 			RenderDebug(camera, cameraTransform);
 		}
 		RenderGroundGrid(camera, cameraTransform);

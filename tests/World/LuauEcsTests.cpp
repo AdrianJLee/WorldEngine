@@ -562,6 +562,12 @@ int main()
 			// 夹具:临时内容根下的 scripts/systems/。加载器读 VFS(内容根)⇒ 用 Paths 的内容根。
 			const std::filesystem::path systemsDir = World::Paths::AssetRoot() / "scripts/systems";
 			std::filesystem::create_directories(systemsDir);
+			std::error_code cleanEc;
+			for (const auto& entry : std::filesystem::directory_iterator(systemsDir, cleanEc))
+			{
+				if (entry.path().extension() == ".luau")
+					std::filesystem::remove(entry.path(), cleanEc);
+			}
 			const std::filesystem::path goodScript = systemsDir / "M55UiProbe.luau";
 			const std::filesystem::path badScript = systemsDir / "M55UiBad.luau";
 			const std::filesystem::path colonScript = systemsDir / "M55UiColon.luau";

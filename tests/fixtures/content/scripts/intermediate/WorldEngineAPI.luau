@@ -583,6 +583,22 @@ function App:ViewportSize() end
 ---@return vec2
 function App:WindowSize() end
 
+---Whether the current process is running inside the editor host.
+---@return boolean
+function App:IsEditor() end
+
+---Whether the current process is running in standalone development runtime mode.
+---@return boolean
+function App:IsRuntime() end
+
+---Whether the current process is running as a packaged standalone game release.
+---@return boolean
+function App:IsPackaged() end
+
+---Current engine host environment mode string ('Editor', 'Runtime', 'Packaged', 'Headless', 'Tool').
+---@return string
+function App:HostMode() end
+
 -- Global service table 'Audio': read-only; there is no runtime constructor.
 ---Read-only audio service table for sound events, playback control, bus volumes, and snapshots.
 ---@class Audio
@@ -1248,6 +1264,10 @@ function ui:isOpen() end
 ---@field EnableCollision boolean
 ---@field EnableLimit boolean
 
+-- Component fields are exposed through Entity:GetComponent("EditorOnlyComponent"); there is no runtime global named EditorOnlyComponent.
+---@class EditorOnlyComponent
+---@field IncludeChildren number
+
 -- Component fields are exposed through Entity:GetComponent("FoliageComponent"); there is no runtime global named FoliageComponent.
 ---@class FoliageComponent
 ---@field ReceiveShadow number
@@ -1854,6 +1874,8 @@ function ui:isOpen() end
 ---@field DirectionalLight string Short alias for "DirectionalLightComponent".
 ---@field DistanceJoint2DComponent string Registered component type name "DistanceJoint2DComponent".
 ---@field DistanceJoint2D string Short alias for "DistanceJoint2DComponent".
+---@field EditorOnlyComponent string Registered component type name "EditorOnlyComponent".
+---@field EditorOnly string Short alias for "EditorOnlyComponent".
 ---@field FoliageComponent string Registered component type name "FoliageComponent".
 ---@field Foliage string Short alias for "FoliageComponent".
 ---@field FoliageInteractionComponent string Registered component type name "FoliageInteractionComponent".

@@ -996,6 +996,9 @@ void EditorLayer::OnUpdate(Timestep ts){
 		const glm::mat4 renderCameraTransform = viewportCamera.Transform;
 
 		m_RendererOptions.ShowGrid = (m_SceneState != SceneState::Play) && m_ShowReferenceGrid;
+		m_RendererOptions.ShowSelectionOutline = (m_SceneState != SceneState::Play);
+		m_RendererOptions.ShowDebugColliders = (m_SceneState != SceneState::Play);
+		m_RendererOptions.ShowDebugLights = (m_SceneState != SceneState::Play);
 		const bool anyNavRequested = (m_SceneState != SceneState::Play) && (
 			ViewportPanel::IsNavMeshVisible() ||
 			NavMeshPanel::ShowPolygons ||

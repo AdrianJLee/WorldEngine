@@ -1,3 +1,4 @@
+#include "World/Core/EngineHostMode.h"
 #include "World.h"
 #include "Core/EditorCooker.h"
 #include "App/EditorStartup.h"
@@ -87,6 +88,17 @@ namespace World
 		std::vector<std::string> arguments;
 		for (int i = 1; i < __argc; ++i)
 			arguments.emplace_back(__argv[i] ? __argv[i] : "");
+
+		bool isCook = false;
+		for (const auto& arg : arguments)
+		{
+			if (arg == "--cook" || arg.rfind("--cook=", 0) == 0)
+			{
+				isCook = true;
+				break;
+			}
+		}
+		EngineEnvironment::SetHostMode(isCook ? EngineHostMode::Tool : EngineHostMode::Editor);
 		// PROJ-1/T3:运行期项目根覆盖 —— `--project <dir>`(优先级高于 `WLD_PROJECT_DIR`
 		// 环境变量与编译期默认值)。必须先于任何项目路径使用点生效:下面的 glTF 导入、
 		// cook、本地化层注册都按运行期项目根解析。

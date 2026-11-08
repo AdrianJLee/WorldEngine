@@ -77,6 +77,7 @@ struct World::BiomePCGComponent
 struct World::BehaviorTreeComponent
 struct World::FoliageInteractionComponent
 struct World::LocalWindComponent
+struct World::EditorOnlyComponent
 struct World::UUID
 struct World::CameraSettings
 enum World::MeshRendererComponent::PrimitiveShape

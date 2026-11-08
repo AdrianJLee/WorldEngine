@@ -87,6 +87,7 @@ const TypeSchema& WeSchemaOf_BiomePCGComponent();
 const TypeSchema& WeSchemaOf_BehaviorTreeComponent();
 const TypeSchema& WeSchemaOf_FoliageInteractionComponent();
 const TypeSchema& WeSchemaOf_LocalWindComponent();
+const TypeSchema& WeSchemaOf_EditorOnlyComponent();
 const TypeSchema& WeSchemaOf_UUID();
 const TypeSchema& WeSchemaOf_CameraSettings();
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape();
@@ -17783,6 +17784,63 @@ struct GeneratedAccess<World::LocalWindComponent>
 };
 
 template <>
+struct GeneratedAccess<World::EditorOnlyComponent>
+{
+    static Value Get_IncludeChildren(const void* instance)
+    {
+        const World::EditorOnlyComponent* self = static_cast<const World::EditorOnlyComponent*>(instance);
+        return Value(self->IncludeChildren);
+    }
+    static void Set_IncludeChildren(void* instance, const Value& value)
+    {
+        World::EditorOnlyComponent* self = static_cast<World::EditorOnlyComponent*>(instance);
+        self->IncludeChildren = std::get<uint8_t>(value);
+    }
+    static const FieldSchema& Field_IncludeChildren()
+    {
+        static const FieldSchema schema = {
+            FieldId{ 0x6F3E34AD94275DFEull },
+            "IncludeChildren",
+            Kind::UInt8,
+            &Get_IncludeChildren,
+            &Set_IncludeChildren,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            FieldMetadata{ "", "", std::nullopt, std::nullopt, false, false, "When enabled, all child entities attached to this entity in the hierarchy are also treated as editor-only.", false, "", {  }, "", std::nullopt },
+            Value(1),
+        };
+        return schema;
+    }
+    static const StorageBinding& StorageBindingOf()
+    {
+        static const StorageBinding binding = MakeComponentStorage<World::EditorOnlyComponent>();
+        return binding;
+    }
+    static const TypeSchema& WeSchema()
+    {
+        static const TypeSchema schema = {
+            TypeId{ "World::EditorOnlyComponent" },
+            "EditorOnlyComponent",
+            WE_SCHEMA_ABI_VERSION,
+            sizeof(World::EditorOnlyComponent),
+            TypeCategory::Component,
+            {
+                Field_IncludeChildren(),
+            },
+            &StorageBindingOf(),
+            "Editor",
+            "Marks this entity as editor-only. Stripped during level cooking and ignored in game runtime.",
+            false,
+            false,
+        };
+        return schema;
+    }
+};
+
+template <>
 struct GeneratedAccess<World::UUID>
 {
     static Value Get_m_UUID(const void* instance)
@@ -18463,6 +18521,7 @@ const TypeSchema& WeSchemaOf_BiomePCGComponent() { return GeneratedAccess<World:
 const TypeSchema& WeSchemaOf_BehaviorTreeComponent() { return GeneratedAccess<World::BehaviorTreeComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_FoliageInteractionComponent() { return GeneratedAccess<World::FoliageInteractionComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_LocalWindComponent() { return GeneratedAccess<World::LocalWindComponent>::WeSchema(); }
+const TypeSchema& WeSchemaOf_EditorOnlyComponent() { return GeneratedAccess<World::EditorOnlyComponent>::WeSchema(); }
 const TypeSchema& WeSchemaOf_UUID() { return GeneratedAccess<World::UUID>::WeSchema(); }
 const TypeSchema& WeSchemaOf_CameraSettings() { return GeneratedAccess<World::CameraSettings>::WeSchema(); }
 const EnumSchema& WeEnumSchemaOf_PrimitiveShape() { return GeneratedEnum<World::MeshRendererComponent::PrimitiveShape>::WeEnumSchema(); }
@@ -18579,6 +18638,7 @@ const EnumSchema& WeEnumSchemaOf_RootMotionMode() { return GeneratedEnum<World::
 			WeSchemaOf_BehaviorTreeComponent(),
 			WeSchemaOf_FoliageInteractionComponent(),
 			WeSchemaOf_LocalWindComponent(),
+			WeSchemaOf_EditorOnlyComponent(),
 			WeSchemaOf_UUID(),
 			WeSchemaOf_CameraSettings(),
 		};

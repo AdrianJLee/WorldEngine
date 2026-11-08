@@ -19,8 +19,11 @@ namespace World
 
 	struct SceneRendererOptions
 	{
-		bool ShowGrid = true;
-		bool ShowNavMesh = false;
+		bool ShowGrid = false;               // 地面参考网格 (默认关闭，仅 Editor 视口在编辑态开启)
+		bool ShowDebugColliders = false;     // 2D 碰撞体、Tilemap 碰撞、单向平台 (默认 false)
+		bool ShowDebugLights = false;        // 2D 点光源/阴影投射器调试圈 (默认 false)
+		bool ShowSelectionOutline = false;   // 选中实体描边与十字线 (默认 false)
+		bool ShowNavMesh = false;            // 3D 导航网格叠加层 (默认 false)
 		bool ShowNavPolygons = true;
 		bool ShowNavPaths = true;
 		bool ShowNavObstacles = true;

@@ -3471,7 +3471,9 @@ float PropertiesPanel::DrawComponentInspector(Wui::WuiContext& ctx, const Wui::W
 		}
 
 		// 自定义检查器:与迁移前一致的三行 Location/Rotation(度)/Scale。
-		if (schema.Id.Name == "World::TransformComponent")
+		if (schema.Id.Name == "World::EditorOnlyComponent")
+			height = DrawEditorOnlyInspector(ctx, rect, instance, schema, visibleRect, &changedFields);
+		else if (schema.Id.Name == "World::TransformComponent")
 			height = DrawTransformInspector(ctx, rect, *static_cast<TransformComponent*>(instance), schema,
 				visibleRect, &changedFields);
 		// 自定义检查器:Primary / Fixed Aspect Ratio + 投影类型下拉 + 对应参数组。
@@ -6422,12 +6424,30 @@ float PropertiesPanel::DrawSmartObjectInspector(Wui::WuiContext& ctx, const Wui:
 	return (curY - rect.Y);
 }
 
+
+
+float PropertiesPanel::DrawEditorOnlyInspector(Wui::WuiContext& ctx, const Wui::WuiRect& rect, void* instance,
+	const Schema::TypeSchema& schema, const Wui::WuiRect& visibleRect,
+	std::vector<std::string>* changedFields)
+{
+	const Wui::WuiTheme& theme = m_Host.Theme();
+	float y = rect.Y;
+
+	const float cardH = 46.0f;
+	const Wui::WuiRect cardRect{ rect.X, y, rect.W, cardH };
+	Wui::PanelBackground(ctx, cardRect, Wui::WuiColor{ 0.15f, 0.10f, 0.05f, 0.85f }, 6.0f);
+	Wui::HighlightOutline(ctx, cardRect, Wui::WuiColor{ 0.95f, 0.55f, 0.15f, 0.90f }, 6.0f, 1.0f);
+
+	Wui::Label(ctx, { cardRect.X + 8.0f, cardRect.Y + 6.0f },
+		"● 仅编辑器实体 (Editor-Only Entity)", Wui::WuiColor{ 0.95f, 0.60f, 0.18f, 1.0f }, 12.0f);
+	Wui::Label(ctx, { cardRect.X + 8.0f, cardRect.Y + 24.0f },
+		"关卡烘焙打包与独立游戏运行时将自动剔除该实体及其子层级。", theme.TextMuted, 11.0f);
+
+	y += cardH + 8.0f;
+
+	const Wui::WuiRect fieldsRect{ rect.X, y, rect.W, rect.H };
+	const float fieldsHeight = DrawSchemaFields(ctx, y, fieldsRect, instance, schema.DisplayName, schema, visibleRect, changedFields);
+
+	return (y - rect.Y) + fieldsHeight;
 }
-
-
-
-
-
-
-
-
+}

@@ -1,3 +1,4 @@
+#include "World/Core/EngineHostMode.h"
 #include "wldpch.h"
 #include "World/Script/Bindings/BindServices.h"
 #include "World/Core/Input.h"
@@ -1021,6 +1022,34 @@ namespace World
 			return ScriptValue::Boolean(false);
 		}
 
+		ScriptValue AppIsEditorImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			return ScriptValue::Boolean(EngineEnvironment::IsEditor());
+		}
+
+		ScriptValue AppIsRuntimeImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			return ScriptValue::Boolean(EngineEnvironment::IsRuntime());
+		}
+
+		ScriptValue AppIsPackagedImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			return ScriptValue::Boolean(EngineEnvironment::IsPackaged());
+		}
+
+		ScriptValue AppHostModeImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			return ScriptValue::String(std::string(EngineEnvironment::GetHostModeName()));
+		}
+
 const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 	{
 		// 方法描述是纯数据;方法体是独立函数,因此可以在描述表里直接引用、无需数组自引用。
@@ -1386,6 +1415,26 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 				return InputWindowSizeImpl(args, count);
 			}, nullptr, 0, 0, "vec2",
 				"Current physical window client size in pixels." },
+			{ "IsEditor", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppIsEditorImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the current process is running inside the editor host." },
+			{ "IsRuntime", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppIsRuntimeImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the current process is running in standalone development runtime mode." },
+			{ "IsPackaged", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppIsPackagedImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the current process is running as a packaged standalone game release." },
+			{ "HostMode", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppHostModeImpl(args, count);
+			}, nullptr, 0, 0, "string",
+				"Current engine host environment mode string ('Editor', 'Runtime', 'Packaged', 'Headless', 'Tool')." },
 		};
 		static const ScriptServiceBinding services[] = {
 			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, sizeof(inputMethods) / sizeof(inputMethods[0]) },

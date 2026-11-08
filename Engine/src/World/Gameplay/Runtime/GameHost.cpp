@@ -525,7 +525,13 @@ namespace World::Gameplay
 		if (!ResolvePrimaryCamera(m_Scene, camera, transform))
 			return;
 
-		m_SceneRenderer->BeginScene(m_Scene.get(), SceneRendererOptions());
+				SceneRendererOptions runtimeOptions;
+		runtimeOptions.ShowGrid = false;
+		runtimeOptions.ShowDebugColliders = false;
+		runtimeOptions.ShowDebugLights = false;
+		runtimeOptions.ShowSelectionOutline = false;
+		runtimeOptions.ShowNavMesh = false;
+		m_SceneRenderer->BeginScene(m_Scene.get(), runtimeOptions);
 		// D5c-4a:骨骼动画步长(与编辑器同一口径:推进组件 Time)。
 		m_SceneRenderer->SetDeltaSeconds(m_LastTickSeconds);
 		const glm::mat4 camMatrix = transform->GetLocalMatrix();

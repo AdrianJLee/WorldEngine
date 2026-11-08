@@ -2823,3 +2823,24 @@ set_tests_properties(World.MeshSimplifier PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     TIMEOUT 90
 )
+
+add_executable(WorldRuntimeBoundaryTests World/RuntimeBoundaryTests.cpp)
+target_link_libraries(WorldRuntimeBoundaryTests PRIVATE World)
+target_compile_features(WorldRuntimeBoundaryTests PRIVATE cxx_std_17)
+target_compile_definitions(WorldRuntimeBoundaryTests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    NOMINMAX
+)
+if(WIN32)
+    target_compile_definitions(WorldRuntimeBoundaryTests PRIVATE WLD_PLATFORM_WINDOWS)
+endif()
+if(MSVC)
+    target_compile_options(WorldRuntimeBoundaryTests PRIVATE /utf-8)
+endif()
+
+add_test(NAME World.RuntimeBoundary COMMAND WorldRuntimeBoundaryTests)
+set_tests_properties(World.RuntimeBoundary PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 90
+)
+add_dependencies(WorldRuntimeBoundaryTests WeCopyRuntimeDllForTests)
