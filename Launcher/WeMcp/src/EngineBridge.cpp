@@ -57,6 +57,43 @@ namespace World::Mcp
 			}
 		}
 
+		fs::path GetExecutableDir()
+		{
+#if defined(_WIN32)
+			char buf[MAX_PATH];
+			DWORD len = GetModuleFileNameA(NULL, buf, MAX_PATH);
+			if (len > 0 && len < MAX_PATH)
+			{
+				return fs::u8path(buf).parent_path();
+			}
+#endif
+			return fs::current_path();
+		}
+
+		fs::path ResolveEngineRoot()
+		{
+			const fs::path exeDir = GetExecutableDir();
+			fs::path cur = exeDir;
+			for (int i = 0; i < 6; ++i)
+			{
+				std::error_code ec;
+				if (fs::exists(cur / "Engine", ec) && (fs::exists(cur / "CMakeLists.txt", ec) || fs::exists(cur / "projects", ec)))
+					return cur;
+				if (fs::exists(cur / "Editor" / "Editor.exe", ec) || fs::exists(cur / "Editor.exe", ec))
+					return cur;
+				if (!cur.has_parent_path() || cur == cur.parent_path())
+					break;
+				cur = cur.parent_path();
+			}
+
+#if defined(WLD_REPO_ROOT)
+			std::error_code ec;
+			if (fs::exists(fs::path(WLD_REPO_ROOT) / "Engine", ec))
+				return fs::path(WLD_REPO_ROOT);
+#endif
+			return fs::current_path();
+		}
+
 #if defined(_WIN32)
 		// 使用非阻塞 connect + select 控制本地回环探测超时，避免 Windows 默认 2 秒 SYN 超时拖慢握手
 		SOCKET ConnectLoopbackWithTimeout(uint16_t port, int timeoutMs)
@@ -179,18 +216,28 @@ namespace World::Mcp
 		m_Context = std::make_unique<World::WorldContext>();
 		m_PluginManager = std::make_unique<World::Plugins::PluginManager>();
 
-		const fs::path repoRoot = fs::exists(fs::path(WLD_REPO_ROOT) / "plugins")
-			? fs::path(WLD_REPO_ROOT)
-			: fs::current_path();
-		const fs::path engineRoot = repoRoot / "plugins";
+		const fs::path exeDir = GetExecutableDir();
+		const fs::path repoRoot = ResolveEngineRoot();
+
+		std::error_code ec;
+		const fs::path engineRoot = fs::exists(repoRoot / "plugins", ec)
+			? (repoRoot / "plugins")
+			: (exeDir / "plugins");
 		const fs::path projectRoot = World::Paths::ProjectDir() / "plugins";
 
 		std::vector<fs::path> binSearchRoots = {
+			exeDir,
+			exeDir / "plugins",
+			exeDir / ".." / "plugins",
+			repoRoot / "plugins",
+			repoRoot / "build" / "x64-Debug" / "bin" / "Debug" / "plugins" / "Debug",
+			repoRoot / "build" / "x64-Debug" / "plugins",
+			repoRoot / "build" / "x64-Release" / "plugins",
+#if defined(WLD_BINARY_ROOT)
 			fs::path(WLD_BINARY_ROOT) / "bin" / WLD_BUILD_TYPE / "plugins" / WLD_BUILD_TYPE,
 			fs::path(WLD_BINARY_ROOT) / "bin" / "Debug" / "plugins" / "Debug",
-			fs::path(WLD_BINARY_ROOT) / "bin" / "Release" / "plugins" / "Release",
-			repoRoot / "build" / "x64-Debug" / "bin" / "Debug" / "plugins" / "Debug",
-			repoRoot / "build" / "x64-Debug" / "plugins"
+			fs::path(WLD_BINARY_ROOT) / "bin" / "Release" / "plugins" / "Release"
+#endif
 		};
 
 		m_PluginManager->Discover(engineRoot, projectRoot, binSearchRoots);
@@ -219,23 +266,34 @@ namespace World::Mcp
 	bool EngineBridge::TryLaunchHeadlessHost(uint16_t port, const std::string& projectDir)
 	{
 #if defined(_WIN32)
-		const fs::path repoRoot = fs::exists(fs::path(WLD_REPO_ROOT) / "Engine")
-			? fs::path(WLD_REPO_ROOT)
-			: fs::current_path();
+		const fs::path exeDir = GetExecutableDir();
+		const fs::path repoRoot = ResolveEngineRoot();
 
 		std::vector<fs::path> hostCandidates = {
+			exeDir / "Editor.exe",
+			exeDir / "Editor" / "Editor.exe",
+			exeDir / ".." / "Editor" / "Editor.exe",
+			exeDir / ".." / ".." / "build" / "x64-Debug" / "Editor" / "Debug" / "Editor.exe",
+			repoRoot / "build" / "x64-Debug" / "Editor" / "Debug" / "Editor.exe",
+			repoRoot / "build" / "x64-Release" / "Editor" / "Release" / "Editor.exe",
+			repoRoot / "Editor" / "Debug" / "Editor.exe",
+			repoRoot / "bin" / "Editor.exe",
+#if defined(WLD_BINARY_ROOT)
 			fs::path(WLD_BINARY_ROOT) / "Editor" / WLD_BUILD_TYPE / "Editor.exe",
 			fs::path(WLD_BINARY_ROOT) / "Editor" / "Debug" / "Editor.exe",
-			repoRoot / "build" / "x64-Debug" / "Editor" / "Debug" / "Editor.exe",
-			fs::path(WLD_BINARY_ROOT) / "Runtime" / WLD_BUILD_TYPE / "Runtime.exe",
-			fs::path(WLD_BINARY_ROOT) / "Runtime" / "Debug" / "Runtime.exe",
-			repoRoot / "build" / "x64-Debug" / "Runtime" / "Debug" / "Runtime.exe"
+#endif
+			exeDir / "Runtime.exe",
+			exeDir / "Runtime" / "Runtime.exe",
+			repoRoot / "build" / "x64-Debug" / "Runtime" / "Debug" / "Runtime.exe",
+			repoRoot / "build" / "x64-Release" / "Runtime" / "Release" / "Runtime.exe",
+			repoRoot / "bin" / "Runtime.exe"
 		};
 
 		fs::path hostExe;
 		for (const auto& cand : hostCandidates)
 		{
-			if (fs::exists(cand))
+			std::error_code ec;
+			if (fs::exists(cand, ec))
 			{
 				hostExe = cand;
 				break;
@@ -260,6 +318,13 @@ namespace World::Mcp
 		std::vector<char> mutableCmd(cmdLine.begin(), cmdLine.end());
 		mutableCmd.push_back('\0');
 
+		std::string workDir = repoRoot.string();
+		std::error_code ec;
+		if (workDir.empty() || !fs::exists(workDir, ec))
+		{
+			workDir = exeDir.string();
+		}
+
 		if (!CreateProcessA(
 			nullptr,
 			mutableCmd.data(),
@@ -268,7 +333,7 @@ namespace World::Mcp
 			FALSE,
 			CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB,
 			nullptr,
-			repoRoot.string().c_str(),
+			workDir.c_str(),
 			&si,
 			&pi))
 		{
@@ -281,7 +346,7 @@ namespace World::Mcp
 				FALSE,
 				CREATE_NO_WINDOW,
 				nullptr,
-				repoRoot.string().c_str(),
+				workDir.c_str(),
 				&si,
 				&pi))
 			{
@@ -418,63 +483,70 @@ namespace World::Mcp
 			buf[bytes] = '\0';
 			respLine.append(buf, static_cast<size_t>(bytes));
 			if (respLine.size() > 16 * 1024 * 1024) // 16MB 安全上限
-				break;
+			{
+				closesocket(s);
+				outError = "Response exceeded 16MB limit";
+				return false;
+			}
 		}
 
-		// 立即关闭短连接，确保多客户端并发访问 Editor 控制通道互不阻塞
 		closesocket(s);
 
-		const size_t newlinePos = respLine.find('\n');
-		if (newlinePos != std::string::npos)
-			respLine.resize(newlinePos);
-
-		auto jsonOpt = JsonValue::Parse(respLine, nullptr);
-		if (!jsonOpt)
+		std::string parseErr;
+		auto parsed = JsonValue::Parse(respLine, &parseErr);
+		if (!parsed || parsed->type != JsonValue::Type::Object)
 		{
-			outError = "Malformed JSON from remote host: " + respLine;
-			outCommandOk = false;
-			return true;
+			outError = "Invalid JSON response from host: " + parseErr;
+			return false;
 		}
 
-		const auto* okVal = jsonOpt->Find("ok");
+		const auto* okVal = parsed->Find("ok");
 		outCommandOk = okVal ? okVal->AsBool() : false;
 
-		if (outCommandOk)
+		const auto* resVal = parsed->Find("result");
+		if (resVal)
 		{
-			const auto* resVal = jsonOpt->Find("result");
-			if (resVal)
-			{
-				outResult = (resVal->type == JsonValue::Type::String) ? resVal->AsString() : resVal->Dump();
-			}
-			else
-			{
-				outResult = respLine;
-			}
+			outResult = (resVal->type == JsonValue::Type::String) ? resVal->AsString() : resVal->Dump();
 		}
-		else
+
+		const auto* errVal = parsed->Find("error");
+		if (errVal)
 		{
-			const auto* errVal = jsonOpt->Find("error");
-			outError = errVal ? errVal->AsString() : "Remote command failed";
+			outError = errVal->AsString();
 		}
 
 		return true;
 #else
 		(void)cmd;
 		(void)args;
+		(void)outCommandOk;
 		(void)outResult;
 		(void)outError;
 		return false;
 #endif
 	}
 
-	bool EngineBridge::Dispatch(const std::string& cmd, const std::map<std::string, std::string>& args, std::string& outResult, std::string& outError)
+	bool EngineBridge::Dispatch(const std::string& cmd,
+		const std::map<std::string, std::string>& args,
+		std::string& outResult,
+		std::string& outError)
 	{
 		EnsureInitialized();
 
-		// §3.5 只读降级保护：当无受控宿主时，严禁放行任何 Write / Exec 命令
+		// 1. 尝试通过 Socket 发往运行中的宿主
+		if (m_ConnectedToRemote)
+		{
+			bool cmdOk = false;
+			if (SendSocketCommand(cmd, args, cmdOk, outResult, outError))
+			{
+				return cmdOk;
+			}
+		}
+
+		// 2. 宿主离线或 Socket 传输中断：根据只读策略决定是否降级到无头进程内分发
+		const auto* desc = Ai::CommandRegistry::Get().GetDescriptor(cmd);
 		if (m_ReadOnlyFallback)
 		{
-			const auto* desc = Ai::CommandRegistry::Get().GetDescriptor(cmd);
 			if (!desc || desc->effect != Ai::CommandEffect::Read)
 			{
 				outError = "Forbidden (§3.5): Host rule engine unavailable; WeMcp is restricted to read-only mode.";
@@ -482,20 +554,8 @@ namespace World::Mcp
 			}
 		}
 
-		if (m_ConnectedToRemote)
-		{
-			bool remoteCmdOk = false;
-			if (SendSocketCommand(cmd, args, remoteCmdOk, outResult, outError))
-			{
-				return remoteCmdOk;
-			}
-		}
-
-		if (!m_PluginManager && m_LazyConfigured)
-		{
-			LoadHeadlessPlugins();
-		}
-
+		// 3. 进程内执行（只读/离线命令）
 		return Ai::CommandRegistry::Get().Dispatch(cmd, args, outResult, outError);
 	}
 }
+

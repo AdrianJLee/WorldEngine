@@ -846,6 +846,7 @@ namespace World
 		// P4-U6b:View 菜单(相机模式/预览 + 范围可视化开关)。
 		std::shared_ptr<Wui::WuiButton> m_WindowButton;
 		std::shared_ptr<Wui::WuiButton> m_AudioButton;
+		std::shared_ptr<Wui::WuiButton> m_ToolsButton;
 		// PROJ-2/T1:运行菜单(运行 ▸ 启动项目(Runtime))。
 		std::shared_ptr<Wui::WuiButton> m_RunButton;
 		// P4-U6b:当前显示帧级模态的面板(空 = 无)。帧初封锁输入,渲染该面板前解开。
@@ -875,6 +876,7 @@ namespace World
 		float m_ImportTreeScroll = 0.0f;
 	};
 }
+
 
 
 

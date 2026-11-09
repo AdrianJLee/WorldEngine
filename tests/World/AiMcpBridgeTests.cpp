@@ -46,6 +46,11 @@ int main()
 		const auto* toolsCap = caps->Find("tools");
 		CHECK(toolsCap != nullptr);
 		CHECK(toolsCap->Find("listChanged")->AsBool() == true);
+
+		// 验证 resources 能力宣告
+		const auto* resCap = caps->Find("resources");
+		CHECK(resCap != nullptr);
+		CHECK(resCap->Find("listChanged")->AsBool() == true);
 	}
 
 	// 2. 验证未指定角色时的工具裁剪 (仅暴露只读查询与 session.open)
@@ -118,8 +123,7 @@ int main()
 		auto json = JsonValue::Parse(pingResp, nullptr);
 		CHECK(json.has_value());
 		CHECK(json->Find("result") != nullptr);
-		}
-
+	}
 
 	// 6. 验证 JSON-RPC 2.0 整型 ID 保真 (Codex / rmcp 客户端发送 "id": 1 时必须返回数字 1 而非字符串 "1")
 	{
@@ -153,6 +157,186 @@ int main()
 				foundAssetImport = true;
 		}
 		CHECK(foundAssetImport);
+	}
+
+	// 8. 验证 MCP Resources 资源列表 (resources/list)
+	{
+		const std::string resListReq = "{\"jsonrpc\":\"2.0\",\"id\":\"res_list_1\",\"method\":\"resources/list\",\"params\":{}}";
+		const std::string resListResp = server.HandleMessage(resListReq);
+		auto json = JsonValue::Parse(resListResp, nullptr);
+		CHECK(json.has_value());
+		const auto* resArr = json->Find("result")->Find("resources");
+		CHECK(resArr != nullptr && resArr->type == JsonValue::Type::Array);
+
+		bool foundProj = false;
+		bool foundSchemas = false;
+		bool foundStubs = false;
+		bool foundGroups = false;
+		for (const auto& item : resArr->Array)
+		{
+			const std::string uri = item.Find("uri")->AsString();
+			if (uri == "worldengine://project/info") foundProj = true;
+			if (uri == "worldengine://schemas") foundSchemas = true;
+			if (uri == "worldengine://api/stubs") foundStubs = true;
+			if (uri == "worldengine://tool-groups") foundGroups = true;
+		}
+		CHECK(foundProj && foundSchemas && foundStubs && foundGroups);
+	}
+
+	// 9. 验证 MCP Resources 读取 (resources/read)
+	{
+		// 读 project/info
+		const std::string readReq = "{\"jsonrpc\":\"2.0\",\"id\":\"res_read_1\",\"method\":\"resources/read\",\"params\":{\"uri\":\"worldengine://project/info\"}}";
+		const std::string readResp = server.HandleMessage(readReq);
+		auto json = JsonValue::Parse(readResp, nullptr);
+		CHECK(json.has_value());
+		const auto* contents = json->Find("result")->Find("contents");
+		CHECK(contents != nullptr && !contents->Array.empty());
+		const std::string text = contents->Array[0].Find("text")->AsString();
+		CHECK(text.find("engineVersion") != std::string::npos);
+
+		// 读 tool-groups
+		const std::string readGrpReq = "{\"jsonrpc\":\"2.0\",\"id\":\"res_read_2\",\"method\":\"resources/read\",\"params\":{\"uri\":\"worldengine://tool-groups\"}}";
+		const std::string readGrpResp = server.HandleMessage(readGrpReq);
+		auto grpJson = JsonValue::Parse(readGrpResp, nullptr);
+		CHECK(grpJson.has_value());
+		const auto* grpContents = grpJson->Find("result")->Find("contents");
+		CHECK(grpContents != nullptr && !grpContents->Array.empty());
+		const std::string grpText = grpContents->Array[0].Find("text")->AsString();
+		CHECK(grpText.find("core") != std::string::npos);
+
+		// 读非法 URI 返回错误
+		const std::string readErrReq = "{\"jsonrpc\":\"2.0\",\"id\":\"res_read_err\",\"method\":\"resources/read\",\"params\":{\"uri\":\"worldengine://invalid\"}}";
+		const std::string readErrResp = server.HandleMessage(readErrReq);
+		auto errJson = JsonValue::Parse(readErrResp, nullptr);
+		CHECK(errJson.has_value());
+		CHECK(errJson->Find("error") != nullptr);
+	}
+
+	// 10. 验证 Tool Groups 动态激活与裁剪 (manage_tools)
+	{
+		server.SetCurrentRole("producer");
+		server.ResetToolGroups(); // 默认 core, scene, asset, playtest
+
+		// 默认情况下 vfx 组未激活，tools/list 不应包含 vfx.list
+		{
+			const std::string listReq = "{\"jsonrpc\":\"2.0\",\"id\":\"grp_list_1\",\"method\":\"tools/list\",\"params\":{}}";
+			const std::string listResp = server.HandleMessage(listReq);
+			auto json = JsonValue::Parse(listResp, nullptr);
+			CHECK(json.has_value());
+			const auto* tools = json->Find("result")->Find("tools");
+			bool foundVfx = false;
+			for (const auto& t : tools->Array)
+			{
+				if (t.Find("name")->AsString() == "vfx.list") foundVfx = true;
+			}
+			CHECK(!foundVfx);
+		}
+
+		// 调用 manage_tools 激活 vfx 组
+		{
+			bool notify = false;
+			const std::string actReq = "{\"jsonrpc\":\"2.0\",\"id\":\"act_1\",\"method\":\"tools/call\",\"params\":{\"name\":\"manage_tools\",\"arguments\":{\"action\":\"activate\",\"group\":\"vfx\"}}}";
+			const std::string actResp = server.HandleMessage(actReq, &notify);
+			CHECK(notify == true); // 触发 list_changed
+			auto json = JsonValue::Parse(actResp, nullptr);
+			CHECK(json.has_value());
+			CHECK(!json->Find("result")->Find("isError")->AsBool());
+		}
+
+		// 激活后，tools/list 应包含 vfx.list
+		{
+			const std::string listReq = "{\"jsonrpc\":\"2.0\",\"id\":\"grp_list_2\",\"method\":\"tools/list\",\"params\":{}}";
+			const std::string listResp = server.HandleMessage(listReq);
+			auto json = JsonValue::Parse(listResp, nullptr);
+			CHECK(json.has_value());
+			const auto* tools = json->Find("result")->Find("tools");
+			bool foundVfx = false;
+			for (const auto& t : tools->Array)
+			{
+				if (t.Find("name")->AsString() == "vfx.list") foundVfx = true;
+			}
+			CHECK(foundVfx);
+		}
+
+		// 尝试停用 core 组应被拦截
+		{
+			bool notify = false;
+			const std::string deactCoreReq = "{\"jsonrpc\":\"2.0\",\"id\":\"act_err\",\"method\":\"tools/call\",\"params\":{\"name\":\"manage_tools\",\"arguments\":{\"action\":\"deactivate\",\"group\":\"core\"}}}";
+			const std::string deactCoreResp = server.HandleMessage(deactCoreReq, &notify);
+			auto json = JsonValue::Parse(deactCoreResp, nullptr);
+			CHECK(json.has_value());
+			CHECK(json->Find("result")->Find("isError")->AsBool());
+		}
+	}
+
+	// 11. 验证批量执行能力 (batch_execute)
+	{
+		server.SetCurrentRole("producer");
+		// 构造一个批量执行两条只读指令的请求
+		const std::string batchReq = R"raw({
+			"jsonrpc": "2.0",
+			"id": "batch_1",
+			"method": "tools/call",
+			"params": {
+				"name": "batch_execute",
+				"arguments": {
+					"commands": [
+						{ "tool": "project.validate", "params": {} },
+						{ "tool": "schema.list", "params": {} }
+					],
+					"fail_fast": false
+				}
+			}
+		})raw";
+
+		bool notify = false;
+		const std::string batchResp = server.HandleMessage(batchReq, &notify);
+		CHECK(!batchResp.empty());
+
+		auto json = JsonValue::Parse(batchResp, nullptr);
+		CHECK(json.has_value());
+		const auto* res = json->Find("result");
+		CHECK(res != nullptr);
+		CHECK(!res->Find("isError")->AsBool());
+
+		const auto* contentArr = res->Find("content");
+		CHECK(contentArr && !contentArr->Array.empty());
+		const std::string payload = contentArr->Array[0].Find("text")->AsString();
+
+		auto batchData = JsonValue::Parse(payload, nullptr);
+		CHECK(batchData.has_value());
+		CHECK(batchData->Find("total")->AsNumber() == 2);
+		CHECK(batchData->Find("executed")->AsNumber() == 2);
+		CHECK(batchData->Find("succeeded")->AsNumber() == 2);
+		CHECK(batchData->Find("failed")->AsNumber() == 0);
+	}
+
+	// 12. 验证 batch_execute 的嵌套拦截与 fail_fast
+	{
+		server.SetCurrentRole("producer");
+		// 构造包含嵌套 batch_execute 的请求
+		const std::string nestedReq = R"raw({
+			"jsonrpc": "2.0",
+			"id": "batch_nested",
+			"method": "tools/call",
+			"params": {
+				"name": "batch_execute",
+				"arguments": {
+					"commands": [
+						{ "tool": "batch_execute", "params": {} }
+					]
+				}
+			}
+		})raw";
+
+		const std::string nestedResp = server.HandleMessage(nestedReq);
+		auto json = JsonValue::Parse(nestedResp, nullptr);
+		CHECK(json.has_value());
+		const auto* contentArr = json->Find("result")->Find("content");
+		CHECK(contentArr && !contentArr->Array.empty());
+		const std::string text = contentArr->Array[0].Find("text")->AsString();
+		CHECK(text.find("Nested batch_execute is not permitted") != std::string::npos);
 	}
 
 	std::printf("WorldAiMcpBridgeTests PASSED.\n"); fflush(stdout);

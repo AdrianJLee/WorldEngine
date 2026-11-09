@@ -870,6 +870,7 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		const Wui::WuiId menuEdit = Wui::HashId("menu.edit");
 		const Wui::WuiId menuWindow = Wui::HashId("menu.window");
 		const Wui::WuiId menuRun = Wui::HashId("menu.run");
+		const Wui::WuiId menuTools = Wui::HashId("menu.tools");
 		if (!m_MenuBar)
 		{
 			m_MenuBar = std::make_shared<Wui::WuiBox>();
@@ -945,7 +946,24 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 					else
 						m_Ctx->ClosePopup(menuAudio);
 				};
-			m_MenuBar->Add(m_AudioButton, { 64, 64, 0, 22, 0 });
+						m_MenuBar->Add(m_AudioButton, { 64, 64, 0, 22, 0 });
+			m_ToolsButton = std::make_shared<Wui::WuiButton>();
+			m_ToolsButton->SetId(menuTools);
+			m_ToolsButton->Label = Wui::Tr("menu.tools", "Tools");
+			m_ToolsButton->OnClick = [this, menuTools]
+				{
+					const bool opening = m_OpenMenu != menuTools;
+					m_OpenMenu = opening ? menuTools : 0;
+					if (opening)
+					{
+						m_Ctx->CloseAllPopups();
+						m_MenuHeaderRect = m_ToolsButton->Rect();
+						m_Ctx->OpenPopup(menuTools);
+					}
+					else
+						m_Ctx->ClosePopup(menuTools);
+				};
+			m_MenuBar->Add(m_ToolsButton, { 64, 64, 0, 22, 0 });
 			// PROJ-2/T1:运行菜单 —— 独立 Runtime 进程的"启动项目"入口(不重启编辑器)。
 			m_RunButton = std::make_shared<Wui::WuiButton>();
 			m_RunButton->SetId(menuRun);
@@ -1642,7 +1660,43 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 		audioEntries.push_back({ Wui::Tr("menu.audio.stop_all", "停止全部声音 (Stop All Audio)"), false,
 			[] { Audio::AudioSystem::Get().StopAll(0.05f); }, false,
 			Wui::Tr("menu.audio.stop_all.tooltip", "立即停止所有播放中与试听中的声音") });
-		drawMenu(menuAudio, "menu.audio", audioEntries);
+				drawMenu(menuAudio, "menu.audio", audioEntries);
+
+		std::vector<MenuEntry> toolsEntries;
+		toolsEntries.push_back({
+			Wui::Tr("menu.tools.setup_ai_clients", "配置 AI 助手客户端 (Configure AI MCP Clients)..."),
+			false,
+			[] {
+#if defined(_WIN32)
+				namespace fs = std::filesystem;
+				fs::path repoRoot = World::Paths::EngineContentRoot().parent_path().parent_path();
+				fs::path script = repoRoot / "tools" / "we-mcp" / "setup-mcp.ps1";
+				std::error_code ec;
+				if (!fs::exists(script, ec))
+				{
+					script = World::Paths::ProjectDir() / "tools" / "we-mcp" / "setup-mcp.ps1";
+				}
+				if (fs::exists(script, ec))
+				{
+					const std::string proj = World::Paths::ProjectDir().string();
+					std::string cmd = "powershell.exe -ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File \"" +
+						script.string() + "\" -ProjectDir \"" + proj + "\"";
+					STARTUPINFOA si {}; si.cb = sizeof(si); si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+					PROCESS_INFORMATION pi {};
+					std::vector<char> mut(cmd.begin(), cmd.end()); mut.push_back('\0');
+					if (CreateProcessA(nullptr, mut.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+					{
+						CloseHandle(pi.hThread);
+						CloseHandle(pi.hProcess);
+					}
+				}
+#endif
+			},
+			false,
+			Wui::Tr("menu.tools.setup_ai_clients.tooltip", "自动为 Cursor、Claude Desktop、Codex、Windsurf 写入 WorldEngine MCP 服务配置"),
+			Wui::HashId("menu.tools.setup_ai_clients")
+		});
+		drawMenu(menuTools, "menu.tools", toolsEntries);
 
 		// P4-U8a:菜单栏不再有 View 菜单 —— "看"的开关**全部搬进视口自己的悬浮 `视图 ▼`**
 		// (用户 2026-09-21:「视图菜单栏的功能能否放到 view 里」;Unity 的 Scene 视图工具条/
@@ -2088,3 +2142,5 @@ void EditorShell::DrawAssetPickerModal(Wui::WuiContext& ctx){
 	}
 
 }
+
+

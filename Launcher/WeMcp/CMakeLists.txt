@@ -51,3 +51,20 @@ add_custom_command(TARGET WeMcp POST_BUILD
     COMMENT "Mirroring WeMcp.exe to we-mcp.exe"
     VERBATIM
 )
+
+# 3. 部署自包含工具包目录 tools/we-mcp/bin/
+add_custom_command(TARGET WeMcp POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_SOURCE_DIR}/tools/we-mcp/bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:WeMcp>"
+        "${CMAKE_SOURCE_DIR}/tools/we-mcp/bin/WeMcp$<TARGET_FILE_SUFFIX:WeMcp>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:WeMcp>"
+        "${CMAKE_SOURCE_DIR}/tools/we-mcp/bin/we-mcp$<TARGET_FILE_SUFFIX:WeMcp>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:World>"
+        "${CMAKE_SOURCE_DIR}/tools/we-mcp/bin/"
+    COMMENT "Deploying WeMcp bundle to tools/we-mcp/bin/"
+    VERBATIM
+)
