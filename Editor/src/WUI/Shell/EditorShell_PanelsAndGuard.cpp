@@ -1670,11 +1670,11 @@ void EditorShell::DrawMenuBar(Wui::WuiContext& ctx){
 #if defined(_WIN32)
 				namespace fs = std::filesystem;
 				fs::path repoRoot = World::Paths::EngineContentRoot().parent_path().parent_path();
-				fs::path script = repoRoot / "tools" / "we-mcp" / "setup-mcp.ps1";
+				fs::path script = repoRoot / "Launcher" / "WeMcp" / "setup-mcp.ps1";
 				std::error_code ec;
 				if (!fs::exists(script, ec))
 				{
-					script = World::Paths::ProjectDir() / "tools" / "we-mcp" / "setup-mcp.ps1";
+					script = World::Paths::ProjectDir() / "Launcher" / "WeMcp" / "setup-mcp.ps1";
 				}
 				if (fs::exists(script, ec))
 				{
@@ -2142,5 +2142,6 @@ void EditorShell::DrawAssetPickerModal(Wui::WuiContext& ctx){
 	}
 
 }
+
 
 

@@ -10,10 +10,12 @@ $ErrorActionPreference = "Stop"
 
 # 1. 解析 we-mcp.exe 绝对路径
 $exeCandidates = @(
-    (Join-Path $PSScriptRoot "bin\we-mcp.exe"),
-    (Join-Path $PSScriptRoot "bin\WeMcp.exe"),
     (Join-Path $PSScriptRoot "..\..\build\x64-Debug\Launcher\Debug\we-mcp.exe"),
-    (Join-Path $PSScriptRoot "..\..\build\x64-Debug\Launcher\Debug\WeMcp.exe")
+    (Join-Path $PSScriptRoot "..\..\build\x64-Debug\Launcher\Debug\WeMcp.exe"),
+    (Join-Path $PSScriptRoot "..\..\build\x64-Release\Launcher\Release\we-mcp.exe"),
+    (Join-Path $PSScriptRoot "..\..\build\x64-Release\Launcher\Release\WeMcp.exe"),
+    (Join-Path $PSScriptRoot "bin\we-mcp.exe"),
+    (Join-Path $PSScriptRoot "bin\WeMcp.exe")
 )
 
 $mcpExe = $null

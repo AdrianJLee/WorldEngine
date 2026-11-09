@@ -1,23 +1,25 @@
-# WorldEngine MCP Suite (we-mcp)
+# WorldEngine MCP Suite (WeMcp)
 
 WorldEngine MCP Suite is an industrial-grade Model Context Protocol (MCP) server for WorldEngine, providing AI assistants (Claude, Codex, Cursor, Windsurf, Cline) with high-throughput authoring and verification capabilities.
 
-## Directory Layout
+## Source & Module Layout
 
 ```text
-tools/we-mcp/
-├── bin/                          # Standalone binary package (zero external dependencies)
-│   ├── we-mcp.exe                # MCP server entrypoint (JSON-RPC over stdio)
-│   ├── WeMcp.exe                 # Binary mirror
-│   └── WorldRuntime.dll          # Engine shared runtime DLL
+Launcher/WeMcp/
+├── CMakeLists.txt                # Build configuration (outputs WeMcp.exe & we-mcp.exe)
+├── README.md                     # Documentation
+├── setup-mcp.ps1                 # One-click client auto-configurator
+├── src/                          # Server source code (native C++17)
+│   ├── main.cpp                  # stdio JSON-RPC entrypoint
+│   ├── EngineBridge.h / .cpp     # Self-locating IPC bridge to Editor host / headless Job Object
+│   ├── McpServer.h / .cpp        # Tool groups, batch execution, and MCP resources
+│   └── McpProtocol.h             # JSON-RPC protocol types
 ├── templates/                    # Ready-to-use client configurations
 │   ├── cursor-mcp.json           # Cursor configuration
 │   ├── claude_desktop_config.json # Claude Desktop configuration
 │   └── codex-mcp.json            # Codex CLI configuration
-├── skills/                       # Accompanying AI agent skill
-│   └── SKILL.md                  # Mental model, guidelines, and quality gates
-├── setup-mcp.ps1                 # One-click client auto-configurator
-└── README.md                     # Documentation
+└── skills/                       # Accompanying AI agent skill
+    └── SKILL.md                  # Mental model, guidelines, and quality gates
 ```
 
 ## Quick Start (One-Click Setup)
@@ -26,10 +28,10 @@ Run `setup-mcp.ps1` in PowerShell to automatically configure detected AI clients
 
 ```powershell
 # Configure all installed clients (Cursor, Claude Desktop, Codex, Windsurf, Cline)
-.\tools\we-mcp\setup-mcp.ps1
+.\Launcher\WeMcp\setup-mcp.ps1
 
 # Configure specific client
-.\tools\we-mcp\setup-mcp.ps1 -TargetClient cursor
+.\Launcher\WeMcp\setup-mcp.ps1 -TargetClient cursor
 ```
 
 ## Core Ergonomics & Features
