@@ -28,6 +28,7 @@ namespace World
 		m_Window = Window::CreateAuxiliary(props, main);
 		if (!m_Window)
 			return;
+		m_Window->SetWindowKey("float:" + m_Panel);
 		m_Window->SetPosition(static_cast<int>(screenRect.X), static_cast<int>(screenRect.Y));
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(FloatWindowHost::OnEvent));
 		WLD_CORE_INFO("[float] independent window created: {0} ({1}x{2})", m_Panel,
@@ -244,6 +245,7 @@ namespace World
 		m_Window = Window::CreateAuxiliary(props, main);
 		if (!m_Window)
 			return;
+		m_Window->SetWindowKey("float:" + m_Panel);
 		m_Window->SetPosition(x, y);
 		m_Window->SetEventCallback(WLD_BIND_EVENT_FN(FloatWindowHost::OnEvent));
 		if (!visible)

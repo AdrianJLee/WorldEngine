@@ -771,21 +771,6 @@ void EditorLayer::OnUpdate(Timestep ts){
 			}
 		}
 
-#ifdef WLD_PLATFORM_WINDOWS
-		// 视口输入法防护: 当处于视口焦点或正在按住右键飞行漫游时, 临时抑制中文输入法组合, 防止 WASD/F 被输入法拦截
-		{
-			const bool viewportActive = (m_ViewportFocused && m_ViewportHovered) || (m_Viewport3DDragging != Viewport3DDrag::None);
-			const bool textActive = Wui::WuiTextFocus::Get().Active();
-			HWND hwnd = static_cast<HWND>(Application::Get().GetWindow().GetPlatformWindowHandle());
-			if (hwnd)
-			{
-				if (viewportActive && !textActive)
-					Platform::WindowsIme::SetImeEnabled(hwnd, false);
-				else if (textActive)
-					Platform::WindowsIme::SetImeEnabled(hwnd, true);
-			}
-		}
-#endif
 
 		m_HasRenderedScene = false;
 		// 视口目标重建节流:尺寸稳定(约 100ms)后再真正重建渲染目标。

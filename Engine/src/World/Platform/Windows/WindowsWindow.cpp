@@ -11,6 +11,9 @@
 #ifdef WLD_PLATFORM_WINDOWS
 #include "World/Platform/Windows/WindowsRawInput.h"
 #include "World/Platform/Windows/WindowsIme.h"
+#include "World/WUI/WuiContext.h"
+#include <algorithm>
+#include <vector>
 #endif
 
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -62,14 +65,18 @@ namespace World
 		return new WindowsWindow(props, shareWindow, true);
 	}
 
+	static std::vector<WindowsWindow*> s_ActiveWindows;
+
 	WindowsWindow::WindowsWindow(const WindowProps& props)
 	{
+		s_ActiveWindows.push_back(this);
 		Init(props);
 	}
 
 	WindowsWindow::WindowsWindow(const WindowProps& props, GLFWwindow* shareWindow, bool auxiliary)
 		: m_Auxiliary(auxiliary), m_ShareWindow(shareWindow)
 	{
+		s_ActiveWindows.push_back(this);
 		// Vulkan 模式下附加窗口不建 GL 上下文(交换链由 RHI 的 present target 创建)。
 		m_HasGLContext = Renderer::GetBackendName() != "vulkan";
 		Init(props);
@@ -77,6 +84,9 @@ namespace World
 
 	WindowsWindow::~WindowsWindow()
 	{
+		auto it = std::find(s_ActiveWindows.begin(), s_ActiveWindows.end(), this);
+		if (it != s_ActiveWindows.end())
+			s_ActiveWindows.erase(it);
 		if (m_DropHint)
 		{
 			DestroyWindow(m_DropHint);
@@ -171,6 +181,8 @@ namespace World
 #ifdef WLD_PLATFORM_WINDOWS
 			if (!m_Auxiliary)
 				Platform::WindowsRawInput::RegisterDevice(hwnd);
+			// 默认脱钩禁用输入法，仅在文本输入活跃时临时开启
+			Platform::WindowsIme::SetImeEnabled(hwnd, false);
 #endif
 		}
 		if (m_HasGLContext)
@@ -332,7 +344,7 @@ namespace World
 			{
 				DragAcceptFiles(hwnd, FALSE);
 #ifdef WLD_PLATFORM_WINDOWS
-				Platform::WindowsIme::SetImeEnabled(hwnd, false);
+				Platform::WindowsIme::OnWindowDestroyed(hwnd);
 #endif
 				if (GetWindowLongPtrW(hwnd, GWLP_WNDPROC) == reinterpret_cast<LONG_PTR>(&WindowsWindow::StaticWndProc))
 				{
@@ -360,6 +372,9 @@ namespace World
 		// Poll for and process events
 		{
 			WLD_TRACE_SCOPE("Platform.PollEvents");
+#ifdef WLD_PLATFORM_WINDOWS
+			SyncAllImeStates();
+#endif
 			glfwPollEvents();
 		}
 
@@ -721,6 +736,9 @@ namespace World
 			if (msg == WM_ACTIVATE || msg == WM_KILLFOCUS || msg == WM_SETFOCUS)
 			{
 				self->UpdateCursorClip();
+#ifdef WLD_PLATFORM_WINDOWS
+				self->SyncImeState();
+#endif
 			}
 			else if (msg == WM_WINDOWPOSCHANGED && self->m_CursorLocked)
 			{
@@ -897,5 +915,69 @@ namespace World
 	}
 
 
+
+	void WindowsWindow::SyncAllImeStates()
+	{
+#ifdef WLD_PLATFORM_WINDOWS
+		for (WindowsWindow* win : s_ActiveWindows)
+		{
+			if (win)
+				win->SyncImeState();
+		}
+#endif
+	}
+
+	void WindowsWindow::SyncImeState()
+	{
+#ifdef WLD_PLATFORM_WINDOWS
+		if (!m_Window)
+			return;
+		HWND hwnd = glfwGetWin32Window(m_Window);
+		if (!hwnd)
+			return;
+
+		const bool textActive = Wui::WuiTextFocus::Get().Active();
+		bool shouldEnable = false;
+
+		if (textActive && IsFocused())
+		{
+			const std::string& targetWindow = Wui::WuiTextFocus::Get().Window();
+			if (targetWindow.empty() || targetWindow == m_WindowKey)
+			{
+				shouldEnable = true;
+			}
+		}
+
+		SetImeEnabled(shouldEnable);
+#endif
+	}
+
+	void WindowsWindow::SetImeEnabled(bool enabled)
+	{
+#ifdef WLD_PLATFORM_WINDOWS
+		if (!m_Window)
+			return;
+		HWND hwnd = glfwGetWin32Window(m_Window);
+		if (!hwnd)
+			return;
+		Platform::WindowsIme::SetImeEnabled(hwnd, enabled);
+#else
+		(void)enabled;
+#endif
+	}
+
+	bool WindowsWindow::IsImeEnabled() const
+	{
+#ifdef WLD_PLATFORM_WINDOWS
+		if (!m_Window)
+			return false;
+		HWND hwnd = glfwGetWin32Window(m_Window);
+		if (!hwnd)
+			return false;
+		return Platform::WindowsIme::IsImeEnabled(hwnd);
+#else
+		return false;
+#endif
+	}
 
 }

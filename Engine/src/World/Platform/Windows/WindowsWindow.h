@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "World/Core/Window.h"
 
 #include <GLFW/glfw3.h>
@@ -58,6 +58,15 @@ namespace World
 		bool IsCursorVisible() const override { return m_CursorVisible; }
 		void SyncCursorState() override;
 
+		// 平台输入法 (IME)
+		void SetImeEnabled(bool enabled) override;
+		bool IsImeEnabled() const override;
+		void SyncImeState() override;
+		void SetWindowKey(std::string key) override { m_WindowKey = std::move(key); }
+		const std::string& GetWindowKey() const override { return m_WindowKey; }
+
+		static void SyncAllImeStates();
+
 		// ---- D10:OS 文件拖放(资源管理器 → 窗口)----
 		// 本窗口自己的队列:WndProc 收 WM_DROPFILES 时写入,这里取出并清空。
 		std::vector<std::string> ConsumeDroppedFiles() override;
@@ -66,6 +75,7 @@ namespace World
 		virtual void Init(const WindowProps& props);
 		virtual void Shutdown();
 	private:
+		std::string m_WindowKey = "main";
 		GLFWwindow* m_Window;
 		bool m_CursorLocked = false;
 		bool m_CursorVisible = true;

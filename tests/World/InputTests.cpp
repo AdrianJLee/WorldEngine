@@ -687,8 +687,39 @@ int main()
 				CHECK(World::Platform::WindowsRawInput::GetAccumulatedRawX() == 0);
 
 				// (b) IME 状态容器
+#ifdef WLD_PLATFORM_WINDOWS
+				// (b1) IME 状态容器初始契约
 				const auto& ime = World::Platform::WindowsIme::GetCurrentState();
 				CHECK(!ime.Active);
+
+				// (b2) WindowsIme 真实 HWND 上下文脱钩/启用/幂等性/注销测试
+				HWND testHwnd = CreateWindowExW(0, L"STATIC", L"ImeUnitTest", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
+				if (testHwnd)
+				{
+					// 初始脱钩禁用输入法（原生游戏/视口默认状态）
+					World::Platform::WindowsIme::SetImeEnabled(testHwnd, false);
+					CHECK(!World::Platform::WindowsIme::IsImeEnabled(testHwnd));
+
+					// 幂等性：连续多次禁用输入法不破坏内部保存的默认上下文
+					World::Platform::WindowsIme::SetImeEnabled(testHwnd, false);
+					CHECK(!World::Platform::WindowsIme::IsImeEnabled(testHwnd));
+
+					// 文本输入聚焦时恢复/启用输入法
+					World::Platform::WindowsIme::SetImeEnabled(testHwnd, true);
+					CHECK(World::Platform::WindowsIme::IsImeEnabled(testHwnd));
+
+					// 文本输入失焦后再次脱钩禁用
+					World::Platform::WindowsIme::SetImeEnabled(testHwnd, false);
+					CHECK(!World::Platform::WindowsIme::IsImeEnabled(testHwnd));
+
+					// 销毁窗口与清理
+					World::Platform::WindowsIme::OnWindowDestroyed(testHwnd);
+					DestroyWindow(testHwnd);
+				}
+#else
+				const auto& ime = World::Platform::WindowsIme::GetCurrentState();
+				CHECK(!ime.Active);
+#endif
 
 				// (c) 触控输入预留结构 POD 验证
 				TouchPoint touch;

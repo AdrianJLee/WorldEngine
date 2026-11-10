@@ -269,6 +269,14 @@ namespace World
 		if (!m_Enabled)
 			return;
 
+		// 游戏 UI 编辑态与输入法文本独占联动：
+		// 当游戏 UI 文本控件处于编辑态时，通知 WuiContext 登记文本输入焦点，从而触发底层临时启用输入法；
+		// 失去焦点或退出编辑时自动失效，彻底消除平时游戏操作中 WASD 被输入法拦截的问题。
+		if (m_Router.IsEditing())
+		{
+			ctx.SetTextInputActive(true);
+		}
+
 		// 默认(Runtime):`input.ViewportSize` 已是 WUI 的设计单位视口(物理像素 / 平台内容缩放,
 		// 见 WuiRhiBackend::BeginFrame);`.wui` 的物理面取它,DPI 系数填**真实平台内容缩放**
 		// (GLFW `glfwGetWindowContentScale`,`UiHost::PlatformContentScale()`;无窗口 ⇒ 1.0)。

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "wldpch.h"
 
 #include "World/Core/Core.h"
@@ -114,6 +114,15 @@ namespace World
 		// 只依赖一次性的 SetCursor 不够 —— WUI 每帧按悬停控件设置光标形状、
 		// 窗口缩放带也会走系统 WM_SETCURSOR，任何一条都可能把箭头重新显示出来。
 		virtual void SyncCursorState() {}
+
+		// ---- 平台输入法 (IME) 控制与同步 ----
+		// 默认在非文本输入状态下彻底禁用输入法，防止游戏中或视口漫游时 WASD、数字键、快捷键等被输入法拦截。
+		// 仅当文本输入活跃（如 WuiTextFocus 处于激活状态）时才临时启用。
+		virtual void SetImeEnabled(bool enabled) { (void)enabled; }
+		virtual bool IsImeEnabled() const { return false; }
+		virtual void SyncImeState() {}
+		virtual void SetWindowKey(std::string key) { (void)key; }
+		virtual const std::string& GetWindowKey() const { static const std::string def = "main"; return def; }
 
 		// ---- D10:OS 文件拖放(资源管理器 → 窗口)----
 		// 返回自上次调用以来拖入的文件绝对路径并清空队列;没有拖放时返回空 vector。

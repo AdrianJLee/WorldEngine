@@ -1,5 +1,6 @@
-﻿#include "wldpch.h"
+#include "wldpch.h"
 #include "World/Utils/PlatformUtils.h"
+#include "World/Platform/Windows/WindowsIme.h"
 #include "World/Core/Application.h"
 
 // Windows 相关的头文件
@@ -94,28 +95,6 @@ namespace World
 	{
 		HWND hwnd = (HWND)windowHandle;
 		if (!hwnd) return;
-
-		static HIMC s_hImc = NULL;
-
-		if (!enable)
-		{
-			// 想要禁用输入法时，获取现有输入法上下文并剥离
-			HIMC current = ImmGetContext(hwnd);
-			if (current != NULL)
-			{
-				s_hImc = current; // 暂存备份
-				ImmAssociateContext(hwnd, NULL); // 取消关联，操作系统将停止抛出输入法弹窗
-				ImmReleaseContext(hwnd, current);
-			}
-		}
-		else
-		{
-			// 想要启用输入法时，将暂存的输入法还给操作系统
-			if (s_hImc != NULL)
-			{
-				ImmAssociateContext(hwnd, s_hImc);
-				s_hImc = NULL;
-			}
-		}
+		Platform::WindowsIme::SetImeEnabled(hwnd, enable);
 	}
 }

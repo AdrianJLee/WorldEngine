@@ -27,6 +27,8 @@ namespace World::Platform
 		static const ImeState& GetCurrentState();
 #ifdef WLD_PLATFORM_WINDOWS
 		static void SetImeEnabled(HWND hwnd, bool enabled);
+		static bool IsImeEnabled(HWND hwnd);
+		static void OnWindowDestroyed(HWND hwnd);
 #endif
 	};
 }
