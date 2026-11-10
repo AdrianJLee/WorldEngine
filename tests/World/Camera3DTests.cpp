@@ -507,6 +507,56 @@ int main()
 			CHECK(glm::distance(posBefore, posAfter) < 1e-4f);
 		}
 
+		// 15. 正视方位 (Front, Yaw=180°) 下空间基底右手系与飞行方向物理不变量验证
+		{
+			EditorCamera3D cam(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f, 10.0f);
+			cam.SetTarget({ 0.0f, 0.0f, 0.0f });
+			cam.SetViewpoint(ViewportViewpoint::Front);
+
+			// Front 方位下视线必须指向世界 -Z, 右向量严格指向世界 +X, 上向量严格指向世界 +Y
+			CHECK(glm::dot(cam.GetForward(), glm::vec3(0.0f, 0.0f, -1.0f)) > 0.999f);
+			CHECK(glm::dot(cam.GetRight(), glm::vec3(1.0f, 0.0f, 0.0f)) > 0.999f);
+			CHECK(glm::dot(cam.GetUp(), glm::vec3(0.0f, 1.0f, 0.0f)) > 0.999f);
+
+			// 向右飞行 (Fly right=+5.0f) 目标点 X 必须正向增加 +5.0f, 严禁向左反飞
+			const glm::vec3 targetBefore = cam.GetTarget();
+			cam.Fly(0.0f, 5.0f, 0.0f);
+			CHECK(std::fabs(cam.GetTarget().x - (targetBefore.x + 5.0f)) < 1e-4f);
+		}
+
+		// 16. Orbit 环绕模式下俯仰角 (Pitch) 与相机世界高度单调性验证
+		{
+			EditorCamera3D cam(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f, 10.0f);
+			cam.SetTarget({ 0.0f, 0.0f, 0.0f });
+			cam.SetYawPitch(180.0f, 0.0f);
+			const float initialY = cam.GetPosition().y;
+
+			// Pitch 增加 (向上推鼠标抬高相机俯视) -> 相机 Y 坐标必须严格上升
+			cam.Orbit(0.0f, 25.0f);
+			CHECK(cam.GetPosition().y > initialY + 1.0f);
+
+			// Pitch 减小 (向下拖鼠标降低相机仰视) -> 相机 Y 坐标必须严格下降
+			cam.Orbit(0.0f, -50.0f);
+			CHECK(cam.GetPosition().y < initialY - 1.0f);
+		}
+
+		// 17. RotateInPlace 原位自由观察视线朝向单调性验证
+		{
+			EditorCamera3D cam(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f, 10.0f);
+			cam.SetTarget({ 0.0f, 0.0f, 0.0f });
+			cam.SetYawPitch(180.0f, 0.0f);
+
+			// 原位向上仰视 (鼠标上推 dy < 0 -> deltaPitch < 0 -> pitch 减小)
+			// 此时视线 Forward.y 必须上升 (向上看天)
+			cam.RotateInPlace(0.0f, -20.0f);
+			CHECK(cam.GetForward().y > 0.1f);
+
+			// 原位向下俯视 (鼠标下拖 dy > 0 -> deltaPitch > 0 -> pitch 增加)
+			// 此时视线 Forward.y 必须下降 (向下看地)
+			cam.RotateInPlace(0.0f, 40.0f);
+			CHECK(cam.GetForward().y < -0.1f);
+		}
+
 		std::printf("World.Camera3D: all checks passed\n");
 		return 0;
 	}

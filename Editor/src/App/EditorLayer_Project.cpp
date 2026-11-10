@@ -1117,7 +1117,7 @@ void EditorLayer::FocusOnSelectedEntity()
 			const float extent = std::max(widthWorld, heightWorld);
 			targetPos += glm::vec3(widthWorld * 0.5f, std::min(12.0f, extent * 0.15f), heightWorld * 0.5f);
 			targetDistance = std::clamp(extent * 0.72f, 18.0f, 180.0f);
-			m_EditorCamera3D.SetYawPitch(0.0f, 26.0f);
+			m_EditorCamera3D.SetYawPitch(180.0f, 26.0f);
 		}
 		else if (m_SelectedEntity.HasComponent<MeshRendererComponent>())
 			targetDistance = 5.0f;

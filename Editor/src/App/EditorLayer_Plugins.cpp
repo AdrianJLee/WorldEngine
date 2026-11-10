@@ -1580,6 +1580,7 @@ void EditorLayer::OnEvent(Event& event){
 					return true;
 				}
 				const bool spacePressed = Input::IsKeyPressed(KeyCodes::Space);
+				const bool altPressed = Input::IsKeyPressed(KeyCodes::LeftAlt) || Input::IsKeyPressed(KeyCodes::RightAlt);
 				if (e.GetMouseButton() == 0 && spacePressed)
 				{
 					m_Viewport3DDragging = Viewport3DDrag::Pan;
@@ -1592,9 +1593,22 @@ void EditorLayer::OnEvent(Event& event){
 				}
 				else
 				{
-					m_Viewport3DDragging = e.GetMouseButton() == 1
-						? Viewport3DDrag::Orbit
-						: (e.GetMouseButton() == 2 ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+					if (altPressed && e.GetMouseButton() == 0)
+					{
+						// 行业标准快捷键(Unity/UE/Maya): Alt + 鼠标左键进入 Orbit 轨道环绕
+						m_Viewport3DDragging = Viewport3DDrag::Orbit;
+					}
+					else if (altPressed && e.GetMouseButton() == 2)
+					{
+						// Alt + 鼠标中键进入 Pan 平移
+						m_Viewport3DDragging = Viewport3DDrag::Pan;
+					}
+					else
+					{
+						m_Viewport3DDragging = e.GetMouseButton() == 1
+							? Viewport3DDrag::Orbit
+							: (e.GetMouseButton() == 2 ? Viewport3DDrag::Pan : Viewport3DDrag::None);
+					}
 				}
 				if (m_Viewport3DDragging != Viewport3DDrag::None)
 				{
@@ -1616,7 +1630,7 @@ void EditorLayer::OnEvent(Event& event){
 			});
 			cameraDispatcher.Dispatch<MouseButtonReleasedEvent>([this](MouseButtonReleasedEvent& e)
 			{
-				if (e.GetMouseButton() == 1)
+				if (e.GetMouseButton() == 1 || (e.GetMouseButton() == 0 && m_Viewport3DDragging == Viewport3DDrag::Orbit))
 				{
 					auto& win = Application::Get().GetWindow();
 					if (win.IsCursorLocked())
@@ -1649,15 +1663,22 @@ void EditorLayer::OnEvent(Event& event){
 				if (m_Viewport3DDragging == Viewport3DDrag::Orbit)
 				{
 					constexpr float kSensitivity = 0.18f;
-					const float deltaYaw = dx * kSensitivity;
-					const float deltaPitch = dy * kSensitivity;
 					const bool altPressed = Input::IsKeyPressed(KeyCodes::LeftAlt) || Input::IsKeyPressed(KeyCodes::RightAlt);
 					if (altPressed)
 					{
+						// Orbit 环绕模式(Alt + 左键/右键拖拽):
+						// 水平: 鼠标向右拖(dx > 0)物体顺着鼠标向右转动(自然跟手 Turntable);
+						// 垂直: 严格对齐 ViewChrome::ApplyOrbitDrag 规范(pitch += dy, 跟手翻转)。
+						const float deltaYaw = dx * kSensitivity;
+						const float deltaPitch = dy * kSensitivity;
 						m_EditorCamera3D.Orbit(deltaYaw, deltaPitch);
 					}
 					else
 					{
+						// RotateInPlace 自由漫游模式(按住右键拖拽):
+						// 水平向右看, 鼠标向前推(dy < 0)俯视看地面, 向后拉(dy > 0)抬头看天。
+						const float deltaYaw = dx * kSensitivity;
+						const float deltaPitch = -dy * kSensitivity;
 						m_EditorCamera3D.RotateInPlace(deltaYaw, deltaPitch);
 					}
 					return true;
@@ -1674,7 +1695,7 @@ void EditorLayer::OnEvent(Event& event){
 					const float unitsPerDesignUnit = kPanUnitsPerViewportHeight
 						* viewportHeightWorld / std::max(viewportHeight, 1.0f);
 					const float panDx = -dx / uiScale * unitsPerDesignUnit;
-					const float panDy = dy / uiScale * unitsPerDesignUnit;
+					const float panDy = -dy / uiScale * unitsPerDesignUnit;
 					m_EditorCamera3D.Pan(panDx, panDy);
 					return true;
 				}
@@ -1808,7 +1829,7 @@ void EditorLayer::DoOpenScene(const std::filesystem::path& path){
 				m_Viewport3D = true;
 				m_EditorCamera3D.Set2DMode(false);
 				m_EditorCamera3D.FocusOn(targetPos, targetDist);
-				m_EditorCamera3D.SetYawPitch(0.0f, 26.0f);
+				m_EditorCamera3D.SetYawPitch(180.0f, 26.0f);
 				m_EditorCamera.SetFocalPoint(targetPos);
 				m_EditorCamera.SetOrthographicSize(targetDist * 1.5f);
 				focused = true;
@@ -1836,7 +1857,7 @@ void EditorLayer::DoOpenScene(const std::filesystem::path& path){
 						m_Viewport3D = true;
 						m_EditorCamera3D.Set2DMode(false);
 						m_EditorCamera3D.FocusOn(targetPos, targetDist);
-						m_EditorCamera3D.SetYawPitch(0.0f, 22.0f);
+						m_EditorCamera3D.SetYawPitch(180.0f, 22.0f);
 						m_EditorCamera.SetFocalPoint(targetPos);
 						m_EditorCamera.SetOrthographicSize(targetDist * 1.5f);
 					}
