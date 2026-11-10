@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000020
+  World::TagComponent:
+    Tag: "Area: Lava Fissure (10.0x Cost)"
+  World::TransformComponent:
+    Location: [45.0, 2.2, 22.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::NavMeshAreaModifierComponent:
+    Extents: [2.8, 0.8, 3.0]
+    CostMultiplier: 10.0
+    AreaType: 3
+  World::LevelEntityComponent:
+    DataLayerMask: 1

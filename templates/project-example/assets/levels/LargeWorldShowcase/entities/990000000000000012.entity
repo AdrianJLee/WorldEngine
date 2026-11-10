@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000012
+  World::TagComponent:
+    Tag: "HLOD Cluster Alpha - Far Fortress (200m Switch)"
+  World::TransformComponent:
+    Location: [0.0, 30.0, -280.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [24.0, 50.0, 24.0]
+  World::HLODComponent:
+    ProxyMesh: "engine/models/primitives/cube.wmodel"
+    TransitionDistance: 200.0
+    CullDistance: 1200.0
+    ChildEntityCount: 32
+    IsActive: true
+    CastShadow: true
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.45, 0.42, 0.38, 1.0]
+    Mesh: "engine/models/primitives/cube.wmodel"
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 8

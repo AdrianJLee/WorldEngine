@@ -1,0 +1,175 @@
+#pragma once
+
+// P2 W9.5-1:编辑器补全的符号表 + 光标上下文(纯逻辑,不依赖 WUI/VM)。
+//
+// 口径:
+//   - 符号源一:入库存根 tests/fixtures/content/scripts/intermediate/WorldEngineAPI.luau(测试夹具;项目里的存根由编辑器生成)
+//     (LuaStubGenerator 渲染,World.ScriptWorkflow 的逐字节漂移门禁守着它)。行级扫描:
+//     `---@class Name[: Base]`、`---@field name type desc`、`Name = {}`、
+//     `function Name:Method(...)` / `function Name.Method(...)`;方法/表前连续 `---`
+//     注释块的首条散文行进 Doc,块里第一个 `---@return` 的类型进 Type
+//     (`---@param` / `---@overload` / `---@operator` 与未知 tag 忽略)。
+//   - 符号源二:SetFileSource 传入的当前脚本文件(`---@class X[: Base]`/`local x`/
+//     `function x`/`X = {...}`),作为"文件内符号"参与无接收者查询,并给 `self.` 提供类成员。
+//   - 符号源三:Luau 关键字(Keyword)与沙箱允许的内置库/基础函数(Global;清单与
+//     LuauVm.cpp 的 kAllowedLibraries + lbaselib 减去 kForbiddenGlobals 对齐)。
+//   - V9(用户反馈「注释中填类型时没有提示」「鼠标在字段上时没有类型提示」):
+//     * **类型位补全**:`---@type <前缀>` / `---@field <名字> <前缀>` / `---@param <名字> <前缀>` /
+//       `---@class <名字> : <前缀>`(继承位)按四档给候选(每档带一句话说明):常用基础类型(6,固定顺序)
+//       → 引擎类型(vec2/vec3/vec4/mat3/mat4/Entity/WorldScript;只有存根/当前文件真的声明了
+//       `---@class` 才出现)→ 其余基础类型 → 其余类型/类名(按字典序);说明之后的位置不是类型位。
+//     * **注解字段悬停/裸名解析**:当前文件 `---@field Speed number 移动速度` 里的字段
+//       (不要求先写 `---@class`)进 `m_AnnotationFields`;悬停注解行里的字段名、代码里的
+//       `self.Speed` 或裸 `Speed` 都能拿到"类型 + 注解第三段说明"。
+//   - VEC-F1(2026-09-27 用户口径「Level 也要修复」):`Describe` 的**来源优先级** —— 接收者能解析成
+//     已知类(`self` / 存根或文件类)时类成员(注解,带 Doc)优先;接收者未知(如 `self.InferredStats.`)
+//     或没有接收者时,**本文件推断**(接收者链 / 局部变量 / 表构造字段)优先于存根同名符号。否则
+//     文件里的裸 `Level` 字段会被存根 `---@class Level` 服务表的说明抢走。
+//   - `self` 绑定"带推断表的脚本类":文件里可能有多个 `---@class`(子结构体声明在脚本类之前),
+//     `m_FileClasses.front()` 不一定是脚本类。
+//
+// Query 流程 = 上下文(光标前片段)→ 候选(接收者成员 / 全局+文件符号+关键字)→
+// 过滤(前缀大小写不敏感;前缀零命中时子串兜底)→ 排序(Field→Method→Global→Class→
+// Keyword,同档按名字大小写不敏感升序)→ maxItems 截断。
+// 索引**不**判断"光标是否在字符串/注释里":那是编辑器拿 LuauHighlighter 的 token 做的事。
+
+#include "World/Core/Export.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+namespace World
+{
+	// 一条补全候选。Type/Doc 允许为空(例如关键字与本地符号)。
+	struct LuauCompletionItem
+	{
+		std::string Name;
+		std::string Type;
+		std::string Doc;
+		// W9.8:函数/方法的参数名(`---@param` 顺序,已去掉 self)。接受补全时插入
+		// `name(p1, p2)` 并选中第一个参数。
+		std::vector<std::string> Params;
+		// 函数/方法的形参类型列表(`---@param` 顺序,与 Params 一一对应)
+		std::vector<std::string> ParamTypes;
+
+		enum class Kind : uint8_t
+		{
+			Field,     // ---@field 注解字段(含 WorldScript 的 OnCreate? 这类可选字段)
+			Method,    // function X:Y / function X.Y
+			Global,    // 全局表(X = {})、文件内符号、Luau 沙箱内置
+			Keyword,   // Luau 关键字/字面量
+			Class,     // 只有 ---@class 注解、没有运行时全局的名字(WorldScript/组件类)
+		};
+		// 冻结接口的字段名与枚举名相同,同名成员会遮蔽枚举类型(C2597),
+		// 外部引用枚举请用这个别名:`item.Kind == LuauCompletionItem::KindType::Method`。
+		using KindType = Kind;
+		// 字段名与类型同名是冻结接口的一部分;`= {}` 值初始化到第一个枚举值 Field(0),
+		// 避免在初始化式里再写 Kind::(那时 Kind 已被成员名遮蔽)。
+		Kind Kind = {};
+	};
+
+	class WLD_API LuauCompletionIndex
+	{
+	public:
+		// 清空全部符号(存根 + 文件符号 + 关键字/内置)。
+		void Clear();
+
+		// 解析存根文本。空文本返回 false 并填 error(可传 null);其余畸形输入按"跳过该行"
+		// 容错处理,不抛异常、不截断。成功后可继续 SetFileSource。
+		bool LoadStub(std::string_view text, std::string* error);
+
+		// 读取并解析存根文件(通常是 WLD_ASSETPATH/scripts/intermediate/WorldEngineAPI.luau);
+		// 读不到文件返回 false 并填 error(可传 null)。
+		bool LoadStubFile(const std::string& path, std::string* error);
+
+		// 当前脚本文件源码:行级扫描 ---@class X[: Base]、local x、function x、X = {...}
+		// 作为文件内符号(默认 Kind=Global;只有 ---@class 没有赋值时是 Class),并记录文件类
+		// 供 self. 解析。重复调用替换上一次的文件符号。
+		void SetFileSource(std::string_view fileText);
+
+		// 符号总数 = 顶层查询项(全局/类/关键字/内置/文件符号)+ 各类成员(字段/方法)。
+		std::size_t SymbolCount() const;
+
+		// VEC-H1:当前文件的"文件内符号"只读快照(高亮区分"数据字段/局部"与全局服务表用):
+		//   - outLocals = 本文件声明过的局部/文件符号(`local x` / `function x` / `X = {}`);
+		//   - outFields = 本文件里作为**字段名**出现过的名字(表构造键 / 字段赋值 / 子表递归推断,
+		//     以及 `---@field` 注解字段)。
+		// 顺序 = 记录顺序,可能重复(`Set` 侧会去重);只读,不改任何索引状态。
+		// 还没 SetFileSource(或空文件)时两表都为空。
+		void CollectFileSymbols(std::vector<std::string>& outLocals,
+			std::vector<std::string>& outFields) const;
+
+		// 按光标前片段补全:先清空 out,再填候选,最多 maxItems 条(0 = 不截断)。
+		void Query(std::string_view linePrefix, std::size_t maxItems,
+			std::vector<LuauCompletionItem>& out) const;
+
+		// 悬停提示:按上下文(linePrefix = 词之前的整行片段)解析 word 的类型与文档。
+		// 找到返回 true 并填 out;未找到返回 false。
+		bool Describe(std::string_view linePrefix, std::string_view word, LuauCompletionItem& out) const;
+
+		// 光标前片段 → 接收者 / 分隔符('.',':') / 前缀标识符。无接收者时 separator='\0'。
+		// 例:"ui.bu" → ("ui",'.',"bu");"entity:Get" → ("entity",':',"Get");
+		// "local x = en" → ("",'\0',"en");"for i = 1, " → ("",'\0',"")。
+		static void ParseContext(std::string_view linePrefix, std::string& receiver,
+			char& separator, std::string& prefix);
+
+	private:
+		struct ClassInfo
+		{
+			std::string Name;
+			std::string Base;
+			std::vector<LuauCompletionItem> Members;
+		};
+
+		void ParseStubText(std::string_view text);
+		void ParseFileText(std::string_view text);
+		const ClassInfo* ResolveClass(std::string_view name) const;
+		// E2(2026-09-27 用户口径):表达式推断用的**精确大小写**类查找(Lua 标识符大小写敏感;
+		// ResolveClass 的不敏感兜底只服务补全列表,不参与"这个表达式是什么类型"的判断)。
+		const ClassInfo* FindClassExact(std::string_view name) const;
+		// 类成员查找(含基类链,精确大小写)。
+		const LuauCompletionItem* FindMember(const ClassInfo* info, std::string_view name) const;
+		void CollectClassMembers(const ClassInfo* info,
+			std::vector<const LuauCompletionItem*>& out) const;
+		void CollectGlobals(std::vector<const LuauCompletionItem*>& out, bool includeKeywords) const;
+		// V9:注解类型位的候选(基础类型在前 + 已声明的类型/类名按字典序)。
+		void CollectTypeCandidates(std::string_view prefix, std::vector<LuauCompletionItem>& out) const;
+
+		// D3(2026-09-27 用户口径):**文件内局部变量与表字段的类型推断**(纯文本层,不引入 VM)。
+		// 一条推断出来的符号:`Type` = 复用既有类型名口径(number/string/boolean/nil/function/table/
+		// 引擎类型名…;空 = 推不出来,悬停保持现状不弹);`Fields` = 表构造/赋值里认识的字段。
+		// 作用域按**文件级**近似:同名后出现的声明/赋值覆盖先前的类型(悬停拿不到行号,
+		// 只能按"最后一次已知"回答;推不出来就不弹,不猜)。
+		struct InferredSymbol
+		{
+			std::string Name;
+			std::string Type;
+			std::vector<InferredSymbol> Fields;   // 表构造/字段赋值里认识的字段(递归:`t.stats.hp`)
+		};
+		// SetFileSource 时扫描:`local x = <字面量|表构造|X.new(...)>`、
+		// `x = <…>`(已登记的局部)、`t.a.b = <…>`(表字段;中间层按 table 自动补)。
+		void ParseInferredLocals(std::string_view text);
+		std::vector<InferredSymbol>::iterator FindInferred(std::string_view name);
+		const InferredSymbol* FindInferred(std::string_view name) const;
+		static const InferredSymbol* FindInferredField(const InferredSymbol* symbol, std::string_view name);
+		// E3②/E4:当前文件的推断表里按名找字段(先根符号的字段,再任意结构化表的字段,深度 ≤ 2)。
+		// 精确大小写 —— 修复前悬停 `ExtraInfo = { level = 1 }` 的 `level` 会串到存根里的 `Level` 服务。
+		const InferredSymbol* FindInferredFieldAnywhere(std::string_view name) const;
+
+		std::vector<LuauCompletionItem> m_Items;   // 存根顶层项 + 关键字 + 沙箱内置
+		std::vector<LuauCompletionItem> m_Tags;    // `---@` 注解标签(只在注解上下文给候选)
+		std::vector<ClassInfo> m_StubClasses;
+		std::vector<LuauCompletionItem> m_FileItems;   // 文件内符号(SetFileSource)
+		std::vector<ClassInfo> m_FileClasses;          // 文件内 ---@class(通常 1 个)
+		// V9:当前文件 `---@field` 注解(名称 → 类型/说明)。悬停与"裸名/注解里字段名"解析用;
+		// 与 m_FileClasses 的成员是**两回事**:这里不要求先写 `---@class`(用户实测的缺提示场景)。
+		std::vector<LuauCompletionItem> m_AnnotationFields;
+		// D3:当前文件推断出来的局部变量/表字段(SetFileSource 整份重建)。
+		std::vector<InferredSymbol> m_Inferred;
+		std::unordered_map<std::string, std::size_t> m_ItemByName;   // 名字 → m_Items 下标(去重)
+	};
+}

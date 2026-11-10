@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000008
+  World::TagComponent:
+    Tag: Glow Beacon (Bloom & Outline)
+  World::TransformComponent:
+    Location: [4.5, 3.8, 0]
+    Rotation: [0, 0, 0]
+    Scale: [0.8, 1.6, 0.8]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [1.0, 0.3, 0.7, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

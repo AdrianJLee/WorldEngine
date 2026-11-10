@@ -1,0 +1,27 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 920000000000000002
+  World::TagComponent:
+    Tag: "Audio Demo Camera"
+  World::TransformComponent:
+    Location: [0, 2.2, -9]
+    Rotation: [-8, 180, 0]
+    Scale: [1, 1, 1]
+  World::CameraComponent:
+    Camera:
+      m_ProjectionType: 0
+      m_OrthographicZoom: 1
+      m_OrthographicNearClip: -1
+      m_OrthographicFarClip: 1
+      m_PerspectiveFOV: 45
+      m_PerspectiveNearClip: 0.1
+      m_PerspectiveFarClip: 200
+    Primary: true
+    FixedAspectRatio: false
+  World::AudioListenerComponent:
+    Active: true
+    VolumeScale: 1.0
+  World::LevelEntityComponent:
+    DataLayerMask: 1

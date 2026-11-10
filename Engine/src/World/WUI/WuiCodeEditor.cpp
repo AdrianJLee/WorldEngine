@@ -1,0 +1,1802 @@
+#include "WuiCodeEditor_Internal.h"
+
+namespace World::Wui
+{
+
+using namespace WuiCodeEditorDetail;
+
+
+	// ---- 编辑器主体 ----
+
+WuiCodeEditorResult CodeEditor(WuiContext& ctx, WuiId id, const WuiRect& rect, WuiTextBuffer& buffer, const WuiCodeEditorOptions& options){
+		WuiCodeEditorResult result;
+		if (rect.W <= 0.0f || rect.H <= 0.0f)
+			return result;
+
+		WuiCodeEditorState& state = ctx.Persist<WuiCodeEditorState>(id, {});
+		// MAT-UI6a:会话缩放(生效字号 = FontSize × UiZoom,行高同倍)。只在本实例第一次出现时读
+		// options.UiZoom 播种,之后以内核状态为准;宿主要持久化就回写 result.UiZoom。
+		if (!state.ZoomSeeded)
+		{
+			state.UiZoom = ClampZoom(options.UiZoom);
+			state.ZoomSeeded = true;
+		}
+		state.UiZoom = ClampZoom(state.UiZoom);
+		const float zoom = state.UiZoom;
+		const float fontSize = (options.FontSize > 0.0f ? options.FontSize : 14.0f) * zoom;
+		const float lineHeight = (options.LineHeight > 0.0f ? options.LineHeight : 20.0f) * zoom;
+		result.UiZoom = zoom;
+		const uint64_t revisionAtStart = buffer.Revision();
+		// MAT-UI6d:代码区选区是否"这一帧刚变"(与上一帧的落点比)。条内 Ctrl+F 只在
+		// 刚变了才重播种 —— 上一次查找留下的旧选区不会被当成"用户的新选择"。
+		bool selectionChangedThisFrame = false;
+		{
+			const auto [selStartNow, selEndNow] = buffer.Selection();
+			selectionChangedThisFrame = state.LastSelectionStart != static_cast<int>(selStartNow)
+				|| state.LastSelectionEnd != static_cast<int>(selEndNow);
+			state.LastSelectionStart = static_cast<int>(selStartNow);
+			state.LastSelectionEnd = static_cast<int>(selEndNow);
+		}
+		const int lineCount = std::max(1, buffer.LineCount());
+		const float digitWidth = ctx.MeasureTextWidth("0", fontSize, WuiFontFamily::Monospace);
+		const float gutterWidth = options.GutterWidth > 0.0f
+			? options.GutterWidth
+			: kGutterPaddingLeft + digitWidth * static_cast<float>(std::to_string(lineCount).size()) + kGutterPaddingRight;
+		const float scrollbarWidth = rect.W > gutterWidth + kScrollbarWidth ? kScrollbarWidth : 0.0f;
+		const float textWidth = std::max(0.0f, rect.W - gutterWidth - scrollbarWidth);
+		// M4-TEX-P6b:水平滚动的唯一口径 ——
+		//   内容宽 = 行号槽 + 最长行像素宽 + 右内边距(= 2 个字符宽,与 caret 跟随的边距同一条口径);
+		//   可视宽 = 行号槽 + 文本区宽(= 编辑器宽 - 竖向滚动条槽);
+		//   ScrollX ∈ [0, max(0, 内容宽 - 可视宽)]。装得下时上限为 0 ⇒ ScrollX 恒为 0。
+		// 最长行宽按 (文本版本, 生效字号, 单字宽) 缓存:正文/缩放真的变了才全文件量一遍。
+		const auto MeasureMaxLineWidth = [&]() -> float
+		{
+			const uint64_t revision = buffer.Revision();
+			if (state.MaxLineWidthValid && state.MaxLineWidthRevision == revision
+				&& state.MaxLineWidthFontSize == fontSize && state.MaxLineWidthDigit == digitWidth)
+				return state.MaxLineWidth;
+			float widest = 0.0f;
+			for (int line = 0; line < lineCount; ++line)
+			{
+				size_t lineOffset = 0;
+				widest = std::max(widest, ctx.MeasureTextWidth(
+					LineView(buffer, line, lineOffset), fontSize, WuiFontFamily::Monospace));
+			}
+			state.MaxLineWidth = widest;
+			state.MaxLineWidthRevision = revision;
+			state.MaxLineWidthFontSize = fontSize;
+			state.MaxLineWidthDigit = digitWidth;
+			state.MaxLineWidthValid = true;
+			return widest;
+		};
+		const float hScrollPadRight = digitWidth * kCaretScrollMarginChars;
+		// 注意:这两个值在**帧首**算一次(布局/滚动条用);caret 跟随之前会用同一个 lambda 重算一次 ——
+		// 本帧刚插入文本时帧首的缓存还是旧 revision,不重算会出现"刚打完长行却不跟随"的 bug(实测)。
+		float contentWidth = gutterWidth + MeasureMaxLineWidth() + hScrollPadRight;
+		const float viewWidth = gutterWidth + textWidth;
+		float maxScrollX = std::max(0.0f, contentWidth - viewWidth);
+		// 横条占位:装得下 / 编辑器矮到连一条滚动条都放不下时不占位(此时文本区仍是整高)。
+		const float hbarHeight = (maxScrollX > 0.0f && rect.H > kScrollbarWidth * 2.0f) ? kScrollbarWidth : 0.0f;
+		const WuiRect textRect { rect.X + gutterWidth, rect.Y, textWidth,
+			std::max(0.0f, rect.H - hbarHeight) };
+		const WuiRect hbarTrack { rect.X, rect.Y + rect.H - hbarHeight, viewWidth, hbarHeight };
+		const WuiRect track { rect.X + rect.W - kScrollbarWidth, rect.Y, kScrollbarWidth, rect.H };
+		const float contentHeight = static_cast<float>(lineCount) * lineHeight;
+		const float maxScroll = std::max(0.0f, contentHeight - textRect.H);
+		const bool needScrollbar = scrollbarWidth > 0.0f && maxScroll > 0.0f;
+		bool focused = ctx.Focus() == id;
+		const bool readOnly = options.ReadOnly;
+		// MAT-UI6a:查找条的固定 a11y id(共享内核:两个宿主自动同一条口径,探针可驱动)。
+		const WuiId findFieldId = HashId("code-editor.find");
+		const WuiId findReplaceFieldId = HashId("code-editor.replace");
+		// "Aa"/"ab" 两个开关:与查找条同生命周期地跨帧保留(内核状态,不写偏好文件)。
+		bool& findCaseSetting = ctx.Persist<bool>(HashId("code-editor.find.case"), false);
+		bool& findWordSetting = ctx.Persist<bool>(HashId("code-editor.find.word"), false);
+		const WuiInputState& input = ctx.Input();
+		// 本帧开始时的浮层可见性(帧内会被"打字关闭/点外关闭"改写,刷新判断要用这个)。
+		const bool popupVisibleAtFrameStart = state.PopupVisible;
+		// P1c-a:编辑器本体的 a11y 节点(以前只有补全浮层/悬停时才登记节点)。点它 = 聚焦并把
+		// caret 放到该点(真实鼠标路径),之后的 ui.type/ui.key 都落在这个焦点上;只读模式仍然
+		// 可聚焦/选择,但 enabled=false 让人一眼看出"不能改内容"。
+		if (WuiAccessibility::Get().Enabled() && id != 0)
+		{
+			WuiAccessNode node;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Id = id;
+			node.Kind = "code-editor";
+			node.Label = options.CompletionIdPrefix;
+			node.Value = std::to_string(lineCount) + (readOnly ? " lines, read-only" : " lines");
+			node.Rect = rect;
+			node.Enabled = !readOnly;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+
+		// 命中:行 = 鼠标 y 对应的行,列 = 该行内真实度量得到的字节偏移。
+		const auto HitOffset = [&](float mouseY, float mouseX)
+		{
+			int line = static_cast<int>(std::floor((mouseY - textRect.Y + state.ScrollY) / lineHeight));
+			line = std::max(0, std::min(line, lineCount - 1));
+			size_t lineStart = 0;
+			const std::string_view view = LineView(buffer, line, lineStart);
+			// M4-TEX-P6b:命中也跟着水平滚动走 —— 看到的字与点到的地方必须是同一套 x。
+			const float x = std::max(0.0f, mouseX - textRect.X + state.ScrollX);
+			return lineStart + OffsetAtX(ctx, view, x, fontSize);
+		};
+
+		// ---- 鼠标:点击定位 / 拖拽选择 / 双击选词 ----
+		if (input.MouseClicked[0] && ctx.IsHovered(textRect))
+		{
+			ctx.SetFocus(id);
+			focused = true;
+			const size_t offset = HitOffset(input.MousePos.y, input.MousePos.x);
+			if (input.MouseDoubleClicked[0])
+			{
+				SelectWordAt(buffer, buffer.Text(), offset);
+				state.MouseSelecting = false;
+			}
+			else
+			{
+				buffer.SetCaret(offset, input.Shift);
+				state.MouseSelecting = true;
+			}
+			state.FollowCaret = true;
+		}
+		if (state.MouseSelecting && input.MouseDown[0])
+		{
+			buffer.SetCaret(HitOffset(input.MousePos.y, input.MousePos.x), true);
+			state.FollowCaret = true;
+		}
+		if (state.MouseSelecting && input.MouseReleased[0])
+			state.MouseSelecting = false;
+		// 浮层打开时点击编辑区空白(浮层矩形之外)= 关闭浮层;点击候选行稍后处理。
+		if (state.PopupVisible && input.MouseClicked[0]
+			&& !state.PopupBounds.Contains(input.MousePos))
+			state.PopupVisible = false;
+		// "点到编辑器之外就失焦"必须用**原始**矩形判定:浮层(登记过遮挡)盖在编辑器上时,
+		// IsHovered(rect) 会因为遮挡区返回 false,把"点浮层候选行"误判成"点了外面"而失焦关浮层。
+		if (focused && input.MouseClicked[0] && !ctx.HitTestRaw(rect, input.MousePos))
+		{
+			ctx.SetFocus(0);
+			ctx.SetTextInputActive(false);
+			focused = false;
+			state.PopupVisible = false;
+		}
+
+		// ---- 滚轮(悬停文本区):只滚动,不动 caret ----
+		// MAT-UI6a:Ctrl+滚轮 = 会话缩放(每格 0.05,夹到 [0.5, 3.0]);普通滚轮仍只滚动。
+		// 浮层内滚轮由下面的浮层逻辑消费(滚动列表,不滚编辑器)。
+		const bool wheelOverPopup = state.PopupVisible
+			&& state.PopupBounds.Contains(input.MousePos);
+		if (ctx.IsHovered(textRect) && input.Wheel != 0.0f && !wheelOverPopup)
+		{
+			if (input.Ctrl)
+			{
+				const float next = ClampZoom(state.UiZoom + input.Wheel * kCodeEditorZoomStep);
+				if (std::fabs(next - state.UiZoom) > 1e-6f)
+				{
+					state.UiZoom = next;
+					result.ZoomChanged = true;
+					result.UiZoom = next;
+				}
+			}
+			else if (input.Shift)
+			{
+				// M4-TEX-P6b:Shift+滚轮 = 水平滚动。WUI 的输入状态只有单轴 Wheel(GLFW 的
+				// deltaX 没有传上来),所以横向用"Shift + 纵向滚轮"这一条口径;每格 ~3 个字符宽。
+				state.ScrollX -= input.Wheel * digitWidth * 3.0f;
+			}
+			else
+				state.ScrollY -= input.Wheel * lineHeight * 3.0f;
+		}
+
+		// ---- W9.5 补全触发:本帧插入可见字符、TextInput 含 '.'/':'、或 Ctrl+Space 沿 ----
+		struct CompletionRequest
+		{
+			bool Wanted = false;
+			bool CtrlSpace = false;
+			bool Explicit = false;   // 点号/冒号或 Ctrl+Space:Enter 可以接受
+		};
+		CompletionRequest completionRequest;
+
+		// ---- 键盘(仅聚焦时;浮层可见时下列键优先被浮层消费,caret 不动)----
+		// MAT-UI6c:补全浮层吃掉的那一次 Esc(只关浮层、代码区仍持焦)不能在同一个 frame 里
+		// 再把查找条也关掉;查找条的 Esc 统一收口在下面的条内路由段(见那里的注释)。
+		bool escapeConsumedByPopup = false;
+		if (focused)
+		{
+			ctx.SetTextInputActive(true);
+			if (ctx.IsHovered(textRect))
+				ctx.SetCursor(WuiCursor::IBeam);
+
+			// Esc 的双重语义:浮层可见时只关浮层、保持焦点;浮层不可见时才失焦。
+			const bool escapeTriggered = ctx.WasKeyTriggered(KeyCodes::Escape);
+			bool escapeHandledByPopup = false;
+			bool popupConsumedKey = false;
+			if (state.PopupVisible)
+			{
+				const int count = static_cast<int>(state.PopupItems.size());
+				// 浮层可见时普通字符仍然照常输入(输入后重新过滤候选);这里只消费
+				// 导航/接受/关闭键。Enter/Tab 的按键分支在下面统一处理。
+				if (escapeTriggered)
+				{
+					// Esc 只关浮层:保持文本焦点(浮层不可见时 Esc 仍是失焦)。
+					state.PopupVisible = false;
+					escapeHandledByPopup = true;
+					escapeConsumedByPopup = true;
+				}
+				else if (ctx.WasKeyTriggered(KeyCodes::Up))
+				{
+					popupConsumedKey = true;
+					state.PopupAcceptEnter = true;   // 手动选过之后 Enter 才可以接受
+					if (count > 0)
+						state.PopupSelected = (state.PopupSelected - 1 + count) % count;
+					state.PopupScroll = std::max(0, std::min(
+						std::max(0, count - kSuggestMaxRows), state.PopupSelected - kSuggestMaxRows / 2));
+				}
+				else if (ctx.WasKeyTriggered(KeyCodes::Down))
+				{
+					popupConsumedKey = true;
+					state.PopupAcceptEnter = true;
+					if (count > 0)
+						state.PopupSelected = (state.PopupSelected + 1) % count;
+					state.PopupScroll = std::max(0, std::min(
+						std::max(0, count - kSuggestMaxRows), state.PopupSelected - kSuggestMaxRows / 2));
+				}
+				else if (ctx.WasKeyTriggered(KeyCodes::PageUp))
+				{
+					popupConsumedKey = true;
+					state.PopupSelected = std::max(0, state.PopupSelected - kSuggestMaxRows);
+					state.PopupScroll = std::max(0, std::min(
+						std::max(0, count - kSuggestMaxRows), state.PopupSelected - kSuggestMaxRows / 2));
+				}
+				else if (ctx.WasKeyTriggered(KeyCodes::PageDown))
+				{
+					popupConsumedKey = true;
+					if (count > 0)
+						state.PopupSelected = std::min(count - 1, state.PopupSelected + kSuggestMaxRows);
+					state.PopupScroll = std::max(0, std::min(
+						std::max(0, count - kSuggestMaxRows), state.PopupSelected - kSuggestMaxRows / 2));
+				}
+			}
+			// 接受:浮层可见时 Enter/Tab 优先给补全(不换行/不缩进)。
+			// Tab 永远接受;Enter 只在"用户明确召唤过浮层"时接受(点号/冒号、Ctrl+Space 或
+			// Up/Down 选过)——普通打字自动弹出的浮层里 Enter 保持换行语义。
+			if (state.PopupVisible && ctx.WasKeyTriggered(KeyCodes::Enter) && !state.PopupAcceptEnter)
+				state.PopupVisible = false;
+			bool acceptedCompletion = false;
+			if (state.PopupVisible
+				&& (ctx.WasKeyTriggered(KeyCodes::Tab)
+					|| (state.PopupAcceptEnter && ctx.WasKeyTriggered(KeyCodes::Enter))))
+			{
+				acceptedCompletion = true;
+				const std::string& text = buffer.Text();
+				const std::size_t caretNow = std::min(buffer.Caret(), text.size());
+				const std::size_t replaceStart = std::min(state.ReplaceStart, caretNow);
+				const int count = static_cast<int>(state.PopupItems.size());
+				if (state.PopupSelected >= 0 && state.PopupSelected < count)
+				{
+					const World::LuauCompletionItem& item =
+						state.PopupItems[static_cast<std::size_t>(state.PopupSelected)];
+					const std::string insertName = CompletionInsertName(item.Name);
+					std::string inserted = insertName;
+					const bool call = InsertAsCall(item);
+					// 光标后同行若已经是 '('(在已有调用里补名字)就只插名字;否则补完整的一对
+					// "name()" 并把 caret 放进括号。修复:此前只在整个**文件末尾**才补 '(',
+					// 文件中间接受函数会得到 "Name)"(用户实测 `self.OnCreate)`)。
+					bool hasCallParens = false;
+					for (std::size_t i = caretNow; i < text.size(); ++i)
+					{
+						if (text[i] == ' ' || text[i] == '\t')
+							continue;
+						hasCallParens = (text[i] == '(');
+						break;
+					}
+					if (call && !hasCallParens)
+					{
+						inserted += "(";
+						// W9.8:参数占位(---@param 顺序),接受后自动选中第一个参数。
+						for (std::size_t i = 0; i < item.Params.size(); ++i)
+						{
+							if (i > 0)
+								inserted += ", ";
+							inserted += item.Params[i];
+						}
+					}
+					buffer.SetCaret(replaceStart, false);
+					buffer.SetCaret(caretNow, true);
+					buffer.InsertAtCaret(inserted);
+					if (call && !hasCallParens)
+					{
+						const std::size_t caretAfterName = buffer.Caret();
+						buffer.InsertAtCaret(")");
+						// 参数区起点 = replaceStart + name + '(';逐个记录 [start,end)。
+						state.SnippetRanges.clear();
+						state.SnippetIndex = 0;
+						std::size_t paramCursor = replaceStart + insertName.size() + 1;
+						for (std::size_t i = 0; i < item.Params.size(); ++i)
+						{
+							state.SnippetRanges.push_back(paramCursor);
+							state.SnippetRanges.push_back(paramCursor + item.Params[i].size());
+							paramCursor += item.Params[i].size() + (i + 1 < item.Params.size() ? 2 : 0);
+						}
+						if (state.SnippetRanges.size() >= 2)
+						{
+							buffer.SetCaret(state.SnippetRanges[0], false);
+							buffer.SetCaret(state.SnippetRanges[1], true);   // 选中第一个参数
+						}
+						else
+							buffer.SetCaret(caretAfterName, false);          // 无参数:caret 在括号内
+					}
+				}
+				state.PopupVisible = false;
+				state.FollowCaret = true;
+			}
+			// W9.8:参数占位导航 —— 仍选中参数时 Tab 跳到下一个参数;输入/点击/滚动/Esc 取消。
+			if (!state.SnippetRanges.empty() && !acceptedCompletion)
+			{
+				if (ctx.WasKeyTriggered(KeyCodes::Tab))
+				{
+					popupConsumedKey = true;   // 不落到编辑分支当缩进
+					const std::size_t count = state.SnippetRanges.size() / 2;
+					++state.SnippetIndex;
+					if (state.SnippetIndex < count)
+					{
+						buffer.SetCaret(state.SnippetRanges[state.SnippetIndex * 2], false);
+						buffer.SetCaret(state.SnippetRanges[state.SnippetIndex * 2 + 1], true);
+					}
+					else
+					{
+						buffer.SetCaret(state.SnippetRanges.back(), false);
+						state.SnippetRanges.clear();
+					}
+				}
+				else if (!input.TextInput.empty() || escapeTriggered
+					|| input.MouseClicked[0] || input.Wheel != 0.0f)
+					state.SnippetRanges.clear();
+			}
+			// MAT-UI6a:查找条打开时 Esc = 关条并**保持代码区焦点**(再按一次才走原来的"失焦")。
+			bool escapeHandledByFind = false;
+			if (escapeTriggered && !escapeHandledByPopup && state.FindVisible)
+			{
+				state.FindVisible = false;
+				state.FindReplaceMode = false;
+				escapeHandledByFind = true;
+			}
+			if (escapeTriggered && !escapeHandledByPopup && !escapeHandledByFind && focused)
+			{
+				// Escape 失焦:后续输入回到引擎全局快捷键。
+				ctx.SetFocus(0);
+				ctx.SetTextInputActive(false);
+				focused = false;
+			}
+			// 可见字符:始终输入(浮层打开时先关闭,随后由触发逻辑重新查询)。
+			// 这保证普通打字永远不会被浮层吞掉(实测:多行注入含 '.' 时曾丢字符)。
+			const bool popupConsuming = popupConsumedKey || acceptedCompletion;
+			bool caretAction = false;
+			// 普通编辑/导航键;被浮层消费的键(Up/Down/PageUp/PageDown/接受)不再落到 buffer。
+			if (!popupConsuming)
+			{
+				const bool ctrl = input.Ctrl;
+				const bool shift = input.Shift;
+				const int pageLines = std::max(1, static_cast<int>(textRect.H / lineHeight) - 1);
+				if (ctrl)
+				{
+					if (ctx.WasKeyTriggered(KeyCodes::S) && !readOnly)
+						result.SaveRequested = true;
+					// MAT-UI6a:Ctrl+F / Ctrl+H 打开查找条(顶部覆盖条),焦点进查找输入框。
+					// Ctrl+H(替换)只读模式不开;Ctrl+Shift+F 留给宿主(两个宿主都拿它当"格式化"),
+					// 所以这里**不带 Shift** 才算查找。打开时关掉补全浮层,避免两层浮层叠着。
+					// MAT-UI6c:选中即搜索 —— 有单行非空选区就用它预填查询并立即搜索
+					// (FindAnchor = 选区起点 ⇒ 首个命中落在选区处/之后,通常就是选区自己);
+					// 没有可用选区时保持旧行为(锚点 = caret,查询沿用上一次)。
+					if (!input.Shift && ctx.WasKeyTriggered(KeyCodes::F))
+					{
+						state.FindVisible = true;
+						state.PopupVisible = false;
+						if (!ApplyFindQueryFromSelection(state, buffer))
+							state.FindAnchor = std::min(buffer.Caret(), buffer.Text().size());
+						ctx.SetFocus(findFieldId);
+					}
+					if (!input.Shift && ctx.WasKeyTriggered(KeyCodes::H) && !readOnly)
+					{
+						state.FindVisible = true;
+						state.FindReplaceMode = true;
+						state.FindAnchor = std::min(buffer.Caret(), buffer.Text().size());
+						state.PopupVisible = false;
+						ctx.SetFocus(findFieldId);
+					}
+					// Ctrl+0:会话缩放复位到 1.0(= 基础字号回到偏好值;**偏好文件一律不写**)。
+					if (ctx.WasKeyTriggered(KeyCodes::D0) && std::fabs(state.UiZoom - 1.0f) > 1e-6f)
+					{
+						state.UiZoom = 1.0f;
+						result.ZoomChanged = true;
+						result.UiZoom = 1.0f;
+					}
+					if (ctx.WasKeyTriggered(KeyCodes::A))
+						buffer.SelectAll();
+					if (ctx.WasKeyTriggered(KeyCodes::C) && options.GetClipboard)
+					{
+						std::string selection;
+						if (buffer.Copy(selection) && options.SetClipboard)
+							options.SetClipboard(selection);
+					}
+					if (!readOnly && ctx.WasKeyTriggered(KeyCodes::X))
+					{
+						std::string selection;
+						if (buffer.Cut(selection) && options.SetClipboard)
+							options.SetClipboard(selection);
+						caretAction = true;
+					}
+					if (!readOnly && ctx.WasKeyTriggered(KeyCodes::V) && options.GetClipboard)
+					{
+						std::string clip;
+						if (options.GetClipboard(clip))
+							buffer.Paste(clip);
+						caretAction = true;
+					}
+					if (!readOnly && ctx.WasKeyTriggered(KeyCodes::Z))
+					{
+						shift ? buffer.Redo() : buffer.Undo();
+						caretAction = true;
+					}
+					if (!readOnly && ctx.WasKeyTriggered(KeyCodes::Y))
+					{
+						buffer.Redo();
+						caretAction = true;
+					}
+				}
+				// 编辑键;ReadOnly 只导航/选择/复制。
+				if (!readOnly && !ctrl)
+				{
+					if (ctx.WasKeyTriggered(KeyCodes::Enter))
+					{
+						buffer.InsertNewline();
+						caretAction = true;
+					}
+					if (ctx.WasKeyTriggered(KeyCodes::Backspace))
+					{
+						buffer.Backspace();
+						caretAction = true;
+					}
+					if (ctx.WasKeyTriggered(KeyCodes::Delete))
+					{
+						buffer.DeleteForward();
+						caretAction = true;
+					}
+					if (ctx.WasKeyTriggered(KeyCodes::Tab))
+					{
+						buffer.IndentSelection(shift);
+						caretAction = true;
+					}
+				}
+				// 导航键(ReadOnly 同样可用)。
+				if (ctx.WasKeyTriggered(KeyCodes::Left))
+				{
+					buffer.MoveCaret(ctrl ? WuiTextBuffer::Motion::WordLeft : WuiTextBuffer::Motion::Left, shift);
+					caretAction = true;
+				}
+				if (ctx.WasKeyTriggered(KeyCodes::Right))
+				{
+					buffer.MoveCaret(ctrl ? WuiTextBuffer::Motion::WordRight : WuiTextBuffer::Motion::Right, shift);
+					caretAction = true;
+				}
+				if (ctx.WasKeyTriggered(KeyCodes::Up))
+				{
+					buffer.MoveCaret(WuiTextBuffer::Motion::Up, shift);
+					caretAction = true;
+				}
+				if (ctx.WasKeyTriggered(KeyCodes::Down))
+				{
+					buffer.MoveCaret(WuiTextBuffer::Motion::Down, shift);
+					caretAction = true;
+				}
+				if (ctx.WasKeyTriggered(KeyCodes::Home))
+				{
+					buffer.MoveCaret(WuiTextBuffer::Motion::LineStart, shift);
+					caretAction = true;
+				}
+				if (ctx.WasKeyTriggered(KeyCodes::End))
+				{
+					buffer.MoveCaret(WuiTextBuffer::Motion::LineEnd, shift);
+					caretAction = true;
+				}
+				if (ctx.WasKeyTriggered(KeyCodes::PageUp))
+				{
+					buffer.MoveCaret(WuiTextBuffer::Motion::PageUp, shift, pageLines);
+					caretAction = true;
+				}
+				if (ctx.WasKeyTriggered(KeyCodes::PageDown))
+				{
+					buffer.MoveCaret(WuiTextBuffer::Motion::PageDown, shift, pageLines);
+					caretAction = true;
+				}
+			}
+			if (caretAction)
+				state.FollowCaret = true;
+		}
+		else if (ctx.IsHovered(textRect))
+		{
+			ctx.SetCursor(WuiCursor::IBeam);
+		}
+
+		// ---- MAT-UI6a:查找/替换条(键路由 + 命中重扫;绘制在函数末尾的覆盖层)----
+		// 焦点语义:打开时焦点落在查找输入框;Esc 关条并把焦点还给代码区;点条上的按钮不抢输入焦点。
+		const bool findFieldFocused = ctx.Focus() == findFieldId;
+		const bool findReplaceFocused = ctx.Focus() == findReplaceFieldId;
+		const bool barFocused = findFieldFocused || findReplaceFocused;
+		const auto SelectFindMatch = [&](int index)
+		{
+			if (index < 0 || index >= static_cast<int>(state.FindMatches.size()))
+				return false;
+			state.FindCurrent = index;
+			const WuiCodeFindMatch& match = state.FindMatches[static_cast<size_t>(index)];
+			buffer.SetCaret(match.Start, false);
+			buffer.SetCaret(match.End, true);
+			state.FindAnchor = match.Start;
+			state.FollowCaret = true;
+			return true;
+		};
+		// 命中重扫(节流):只在 查询文本 / Aa / ab / 文本版本 变化时重算 —— 大文件不逐帧全扫。
+		const auto RefreshFindMatches = [&]()
+		{
+			if (!state.FindVisible)
+				return;
+			const std::string& text = buffer.Text();
+			const uint64_t revision = buffer.Revision();
+			const bool queryChanged = !state.FindScanned
+				|| state.FindScannedQuery != state.FindQuery
+				|| state.FindScannedCase != findCaseSetting
+				|| state.FindScannedWord != findWordSetting;
+			if (!queryChanged && state.FindScannedRevision == revision)
+				return;
+			// 重扫前的"当前命中起点"= 重扫后的搜索起点(查询变了就落到它之后的第一个命中)。
+			size_t from = state.FindAnchor;
+			if (state.FindCurrent >= 0 && state.FindCurrent < static_cast<int>(state.FindMatches.size()))
+				from = state.FindMatches[static_cast<size_t>(state.FindCurrent)].Start;
+			state.FindMatches = FindCodeMatches(text, state.FindQuery,
+				WuiCodeFindOptions { findCaseSetting, findWordSetting });
+			state.FindScanned = true;
+			state.FindScannedQuery = state.FindQuery;
+			state.FindScannedCase = findCaseSetting;
+			state.FindScannedWord = findWordSetting;
+			state.FindScannedRevision = revision;
+			if (!queryChanged)
+			{
+				// 只是正文被编辑/撤销:不拽走 caret,只把当前下标夹回范围。
+				state.FindCurrent = state.FindMatches.empty() ? -1 : std::max(0, std::min(
+					state.FindCurrent, static_cast<int>(state.FindMatches.size()) - 1));
+				return;
+			}
+			SelectFindMatch(NextCodeMatchIndex(state.FindMatches, from));
+		};
+		// 替换当前:走 WuiTextBuffer 的区间替换(单次撤销步)。替换后跳到替换点之后的第一个命中。
+		const auto ReplaceCurrentMatch = [&]()
+		{
+			if (readOnly)
+				return;
+			RefreshFindMatches();
+			if (state.FindCurrent < 0 || state.FindCurrent >= static_cast<int>(state.FindMatches.size()))
+				return;
+			const WuiCodeFindMatch match = state.FindMatches[static_cast<size_t>(state.FindCurrent)];
+			if (!buffer.ReplaceRange(match.Start, match.End, state.FindReplaceQuery))
+				return;
+			state.FindScanned = false;   // 文本已变 → 强制重扫
+			state.FindCurrent = -1;      // 从替换点重新挑当前命中
+			state.FindAnchor = match.Start;
+			RefreshFindMatches();
+		};
+		// 全部替换:一次区间替换 = **一步撤销**(Ctrl+Z 直接回到替换前)。
+		const auto ReplaceAllMatches = [&]()
+		{
+			if (readOnly)
+				return;
+			RefreshFindMatches();
+			if (state.FindMatches.empty())
+				return;
+			const std::string text = buffer.Text();
+			const size_t spanStart = state.FindMatches.front().Start;
+			const size_t spanEnd = state.FindMatches.back().End;
+			std::string rewritten;
+			rewritten.reserve(text.size());
+			size_t cursor = spanStart;
+			for (const WuiCodeFindMatch& match : state.FindMatches)
+			{
+				if (match.Start > cursor)
+					rewritten.append(text, cursor, match.Start - cursor);
+				rewritten.append(state.FindReplaceQuery);
+				cursor = match.End;
+			}
+			if (cursor < spanEnd)
+				rewritten.append(text, cursor, spanEnd - cursor);
+			if (!buffer.ReplaceRange(spanStart, spanEnd, rewritten))
+				return;
+			state.FindScanned = false;
+			state.FindCurrent = -1;
+			state.FindAnchor = spanStart;
+			RefreshFindMatches();
+		};
+		if (state.FindVisible)
+		{
+			// MAT-UI6c:Esc 在**绘制之前**关条 —— 关闭当帧就不再登记查找条 a11y 节点。
+			// 旧实现:焦点在查找框里时,`focused` 分支不跑,是 TextField 的 cancelledOut 在
+			// 画完(节点已登记)之后才关 ⇒ 节点多留一帧,脚本"关条后立即读树"会读到幽灵行。
+			// 被补全浮层吃掉的那一次 Esc 只关浮层(与 focused 分支同一条口径),不动查找条。
+			if (!escapeConsumedByPopup && ctx.WasKeyTriggered(KeyCodes::Escape)
+				&& (focused || barFocused))
+			{
+				state.FindVisible = false;
+				state.FindReplaceMode = false;
+				if (!focused)
+				{
+					// 焦点在查找框/替换框:关条后还给代码区。本帧没画 TextField,所以这里要按
+					// 代码区补登记一次"文本输入态" —— 否则本帧文本焦点登记为空,宿主帧末的
+					// 文本焦点快照(= 场景撤销/重做让位的依据)会掉一拍,下帧 Ctrl+Z 可能双重撤销。
+					ctx.SetFocus(id);
+					ctx.SetTextInputActive(true);
+				}
+			}
+		}
+		if (state.FindVisible)
+		{
+			// 条内再按 Ctrl+F / Ctrl+H:焦点回到查找输入框(不改查询、不关条)。
+			// MAT-UI6c 口径:条已打开时在代码区选中**别的内容**再 Ctrl+F = 用新选区刷新查询。
+			// MAT-UI6d:只认"这一帧刚变"的选区。实测 bug:播种把命中选中后,用户在查找框里
+			// 改成别的查询(命中表随新查询重算,旧选区不再是"当前命中"),此时 Ctrl+F 会把
+			// 查询改写回旧选区文字 —— 等于吃掉用户刚打的字。新选区在代码区做,焦点必然会
+			// 先交给代码区(走上面的 focused 分支),这条路径只需覆盖"选区刚被改动"的帧。
+			const bool findKey = input.Ctrl && !input.Shift && ctx.WasKeyTriggered(KeyCodes::F);
+			const bool replaceKey = input.Ctrl && !input.Shift && !readOnly
+				&& ctx.WasKeyTriggered(KeyCodes::H);
+			if (findKey || replaceKey)
+			{
+				if (findKey && !focused && selectionChangedThisFrame)
+					ApplyFindQueryFromSelection(state, buffer);
+				ctx.SetFocus(findFieldId);
+			}
+			// 条内 Ctrl+Z/Ctrl+Y:撤销/重做**代码缓冲**(替换完不用先 Esc 再撤销;文本焦点在条里
+			// 时宿主的场景撤销本来就让位,不会双重撤销)。
+			if (!readOnly && barFocused && input.Ctrl && ctx.WasKeyTriggered(KeyCodes::Z))
+			{
+				if (input.Shift)
+					buffer.Redo();
+				else
+					buffer.Undo();
+				state.FollowCaret = true;
+			}
+			if (!readOnly && barFocused && input.Ctrl && ctx.WasKeyTriggered(KeyCodes::Y))
+			{
+				buffer.Redo();
+				state.FollowCaret = true;
+			}
+			if (barFocused || focused)
+			{
+				const bool shift = input.Shift;
+				bool navNext = false;
+				bool navPrev = false;
+				if (ctx.WasKeyTriggered(KeyCodes::F3))
+					(shift ? navPrev : navNext) = true;
+				else if (findFieldFocused && ctx.WasKeyTriggered(KeyCodes::Enter))
+					(shift ? navPrev : navNext) = true;
+				if (navNext || navPrev)
+				{
+					RefreshFindMatches();
+					const auto [selStart, selEnd] = buffer.Selection();
+					SelectFindMatch(navNext ? NextCodeMatchIndex(state.FindMatches, selEnd)
+						: PrevCodeMatchIndex(state.FindMatches, selStart));
+				}
+			}
+		}
+		// 命中表在"依赖它的东西"(同词高亮 / 计数 / 绘制)之前刷新一次:查询/开关/文本版本没变
+		// 时是纯命中缓存的 no-op。这样"查找选中的命中"与"同词高亮算的词"在同一帧内一致。
+		RefreshFindMatches();
+
+		// ---- MAT-UI6a:同词高亮(光标/选区落在标识符上 → 全文档同词;只在变化时重扫)----
+		{
+			const std::string& text = buffer.Text();
+			size_t wordStart = 0;
+			size_t wordEnd = 0;
+			const auto [selStart, selEnd] = buffer.Selection();
+			if (selEnd > selStart && IsIdentifierRange(text, selStart, selEnd))
+			{
+				wordStart = selStart;
+				wordEnd = selEnd;
+			}
+			else
+				WordAtOffset(text, buffer.Caret(), wordStart, wordEnd);
+			if (wordEnd > wordStart)
+			{
+				const std::string word = text.substr(wordStart, wordEnd - wordStart);
+				if (!state.OccurrenceScanned || state.OccurrenceScannedRevision != buffer.Revision()
+					|| state.OccurrenceScannedWord != word || state.OccurrenceScannedCase != findCaseSetting)
+				{
+					// 与查找共用同一套匹配器;当前词本身一定整体是一个标识符 ⇒ WholeWord = true。
+					state.OccurrenceMatches = FindCodeMatches(text, word,
+						WuiCodeFindOptions { findCaseSetting, /*WholeWord=*/true });
+					state.OccurrenceScanned = true;
+					state.OccurrenceScannedRevision = buffer.Revision();
+					state.OccurrenceScannedWord = word;
+					state.OccurrenceScannedCase = findCaseSetting;
+				}
+				state.OccurrenceWord = word;
+				state.OccurrenceWordStart = wordStart;
+				state.OccurrenceWordEnd = wordEnd;
+			}
+			else
+			{
+				state.OccurrenceWord.clear();
+				state.OccurrenceMatches.clear();
+				state.OccurrenceScanned = false;
+			}
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			if (accessibility.Enabled() && !state.OccurrenceWord.empty())
+			{
+				WuiAccessNode node;
+				node.Id = HashId("code-editor.occurrences");
+				node.Window = accessibility.CurrentWindow();
+				node.Panel = accessibility.CurrentPanel();
+				node.Kind = "status";
+				node.Label = "occurrences";
+				node.Value = std::to_string(state.OccurrenceMatches.size()) + " occurrences: "
+					+ state.OccurrenceWord;
+				node.Rect = rect;
+				node.Interactive = false;
+				accessibility.Register(node);
+			}
+		}
+
+		// ---- 可见字符:始终插入(浮层打开时先关闭,随后按新前缀重新查询)----
+		// 注意顺序:必须在补全查询**之前**插入并刷新 caret,否则 linePrefix 是插入前的行内容。
+		bool keepPopupOpen = false;
+		bool textHadSeparator = false;
+		bool typedVisible = false;
+		bool typedBlank = false;
+		if (focused && !readOnly && !input.Ctrl)
+		{
+			for (uint32_t codepoint : input.TextInput)
+			{
+				// Enter/Tab/Escape 的 char 事件走按键分支,这里只收可见字符。
+				if (codepoint < 0x20 || codepoint == 0x7F)
+					continue;
+				std::string encoded;
+				EncodeUtf8(encoded, codepoint);
+				buffer.InsertAtCaret(encoded);
+				typedVisible = true;
+				if (codepoint == ' ')
+					typedBlank = true;
+				if (codepoint == '.' || codepoint == ':')
+					textHadSeparator = true;
+			}
+			if (typedVisible)
+			{
+				// 输入可见字符:浮层原本打开 → 按新前缀刷新;原本关闭 → 由下面的查询决定
+				// 是否弹出(输入 ≥1 字符自动提示,无候选不弹——W9.5 方案 A)。
+				keepPopupOpen = popupVisibleAtFrameStart;
+				state.PopupVisible = false;
+				state.FollowCaret = true;
+			}
+		}
+		// 补全触发:Ctrl+Space 手动;'.'/':' 自动;普通可见字符也自动(方案 A)。
+		if (focused && input.Ctrl && ctx.WasKeyTriggered(KeyCodes::Space))
+			completionRequest = { true, true, true };
+		else if (focused && (textHadSeparator || typedVisible || keepPopupOpen))
+			completionRequest = { true, false, textHadSeparator };
+		else if (focused && popupVisibleAtFrameStart
+			&& (ctx.WasKeyTriggered(KeyCodes::Backspace) || ctx.WasKeyTriggered(KeyCodes::Delete)))
+		{
+			// 删除同样要刷新候选:否则删掉一个字母后列表还停在旧前缀的候选
+			// (用户实测"输入一个字母后删除,提示还是原来的")。前缀变空/不再有意义时,
+			// 下面的 meaningfulPrefix 检查会让列表自动关闭。
+			completionRequest = { true, false, false };
+		}
+
+		// ---- W9.5 补全查询:字符串/注释内不弹(用高亮 token 判定,不数引号)----
+		const int caretLine = buffer.LineOfOffset(buffer.Caret());
+		size_t caretLineStart = 0;
+		const std::string_view caretLineText = LineView(buffer, caretLine, caretLineStart);
+		std::vector<WuiCodeToken> caretTokens;
+		if (options.Highlight)
+			options.Highlight(caretLineText, caretTokens);
+		bool caretInStringOrComment = false;
+		{
+			const size_t localCaret = std::min(buffer.Caret(), caretLineStart + caretLineText.size())
+				- caretLineStart;
+			for (const WuiCodeToken& token : caretTokens)
+			{
+				if (token.Kind != WuiCodeTokenKind::String && token.Kind != WuiCodeTokenKind::Comment)
+					continue;
+				const size_t start = std::min<size_t>(token.StartByte, caretLineText.size());
+				const size_t end = std::max(start, std::min<size_t>(token.EndByte, caretLineText.size()));
+				if (localCaret > start && localCaret <= end)
+				{
+					caretInStringOrComment = true;
+					break;
+				}
+			}
+		}
+		// 注解上下文:注释行里的 `---@` 标记,且光标仍在标签名或类型位
+		// (`---@cl` 标签候选;`---@field Speed ` / `---@type ` / `---@param dt ` /
+		//  `---@class Player : ` 类型候选)。`---@` 之前必须是空白,避免代码/散文注释误判;
+		//  说明文字位不算,候选不会被无关全局符号污染。
+		bool annotationContext = false;
+		{
+			const size_t localCaret = std::min(buffer.Caret(), caretLineStart + caretLineText.size())
+				- caretLineStart;
+			const std::string_view caretLinePrefixBytes = caretLineText.substr(0, localCaret);
+			const std::size_t at = caretLinePrefixBytes.rfind("---@");
+			if (at != std::string_view::npos)
+			{
+				bool markerAtLineIndent = true;
+				for (const char c : caretLinePrefixBytes.substr(0, at))
+					if (!IsBlankByte(c))
+					{
+						markerAtLineIndent = false;
+						break;
+					}
+				if (markerAtLineIndent)
+					annotationContext = IsAnnotationContextBody(caretLinePrefixBytes.substr(at + 4));
+			}
+		}
+		// 注解上下文里刚输入空白(`---@field Speed ` 的尾空格)要主动请求一次补全;
+		// Explicit=false → Enter 保持换行,候选仍完全由索引 provider 决定。
+		if (focused && annotationContext && typedBlank && !completionRequest.Wanted)
+			completionRequest = { true, false, false };
+		if (completionRequest.Wanted && focused && options.Completion && !readOnly
+			&& (!caretInStringOrComment || annotationContext))
+		{
+			const std::size_t caretNow = std::min(buffer.Caret(), buffer.Text().size());
+			const std::size_t replaceStart = CompletionReplaceStart(buffer.Text(), caretNow);
+			std::string linePrefix;
+			if (caretNow >= caretLineStart)
+				linePrefix.assign(buffer.Text(), caretLineStart, caretNow - caretLineStart);
+			std::vector<World::LuauCompletionItem> items;
+			// 行首到现在的纯空白(空行/自动缩进)不查询:全量候选既没有信息量,又会让
+			// 随后的 Enter 被当成"接受候选"(实测:注入多行文本时插入了 assert)。
+			const bool meaningfulPrefix = !linePrefix.empty()
+				&& (IsIdentByte(linePrefix.back()) || linePrefix.back() == '.' || linePrefix.back() == ':'
+					|| annotationContext);
+			if (meaningfulPrefix)
+				options.Completion(linePrefix, items);
+			if (!items.empty())
+			{
+				if (!state.PopupVisible)
+				{
+					// 打开/刷新时决定 Enter 语义:显式召唤(点号/冒号/Ctrl+Space)才接受;自动提示不吞 Enter。
+					// 刷新(上一帧本已打开)时保留已经升级过的语义(例如打完 "." 再打字母)。
+					state.PopupAcceptEnter = completionRequest.Explicit
+						|| (popupVisibleAtFrameStart && state.PopupAcceptEnter);
+					WLD_CORE_INFO("[wui] completion popup: {0} items, prefix '{1}'", items.size(), linePrefix);
+				}
+				state.PopupVisible = true;
+				state.ReplaceStart = replaceStart;
+				state.CaretAtOpen = caretNow;
+				state.PopupLinePrefix = linePrefix;
+				state.PopupItems = std::move(items);
+				state.PopupSelected = 0;
+				state.PopupScroll = 0;
+				// 锚点固定在打开/刷新时的 caret 位置:避免浮层逐帧漂移导致鼠标命中错位。
+				{
+					size_t anchorLineStart = 0;
+					const std::string_view anchorLineText = LineView(buffer, caretLine, anchorLineStart);
+					const std::size_t anchorLocal = std::min(caretNow,
+						anchorLineStart + anchorLineText.size()) - anchorLineStart;
+					state.PopupAnchorX = textRect.X + ctx.MeasureTextWidth(
+						anchorLineText.substr(0, anchorLocal), fontSize, WuiFontFamily::Monospace);
+					state.PopupAnchorY = textRect.Y + static_cast<float>(caretLine) * lineHeight
+						- state.ScrollY;
+				}
+			}
+			else
+			{
+				state.PopupVisible = false;   // 空候选不弹
+				state.PopupLinePrefix.clear();
+			}
+		}
+		// ReadOnly / 未聚焦 / 无 provider / 光标落在字符串·注释内:一律不弹。
+		if (state.PopupVisible && (!focused || readOnly || !options.Completion
+			|| (caretInStringOrComment && !annotationContext)))
+			state.PopupVisible = false;
+
+		// ---- W9.6 悬停提示:同一标识符静止停留 ~0.4s → 名称/类型/文档 ----
+		{
+			constexpr uint64_t kHoverDelayFrames = 24;
+			const bool inputQuiet = input.TextInput.empty() && input.KeyPressed.empty()
+				&& input.KeyRepeated.empty() && input.Wheel == 0.0f;
+			const bool candidate = options.Hover && ctx.IsHovered(textRect) && !state.PopupVisible
+				&& inputQuiet && !state.MouseSelecting;
+			size_t wordStart = 0;
+			size_t wordEnd = 0;
+			std::string linePrefix;
+			std::string word;
+			if (candidate)
+			{
+				const size_t hoverOffset = HitOffset(input.MousePos.y, input.MousePos.x);
+				const int hoverLine = buffer.LineOfOffset(hoverOffset);
+				size_t hoverLineStart = 0;
+				const std::string_view hoverLineText = LineView(buffer, hoverLine, hoverLineStart);
+				const size_t local = std::min(hoverOffset - hoverLineStart, hoverLineText.size());
+				size_t start = local;
+				while (start > 0)
+				{
+					const size_t prev = PrevBoundary(hoverLineText, start);
+					size_t length = 1;
+					if (!IsWordCodepoint(DecodeCodepoint(hoverLineText, prev, length)))
+						break;
+					start = prev;
+				}
+				size_t end = start;
+				while (end < hoverLineText.size())
+				{
+					size_t length = 1;
+					if (!IsWordCodepoint(DecodeCodepoint(hoverLineText, end, length)))
+						break;
+					end += length;
+				}
+				if (end > start && local >= start && local <= end)
+				{
+					wordStart = hoverLineStart + start;
+					wordEnd = hoverLineStart + end;
+					linePrefix.assign(buffer.Text(), hoverLineStart, start);
+					word.assign(hoverLineText, start, end - start);
+				}
+			}
+			if (!word.empty())
+			{
+				const bool sameWord = state.HoverWordStart == wordStart && state.HoverWordEnd == wordEnd;
+				const bool samePos = std::fabs(input.MousePos.x - state.HoverMousePos.x) <= 4.0f
+					&& std::fabs(input.MousePos.y - state.HoverMousePos.y) <= 4.0f;
+				if (!sameWord || !samePos)
+				{
+					state.HoverSinceFrame = ctx.Frame();
+					state.HoverWordStart = wordStart;
+					state.HoverWordEnd = wordEnd;
+					state.HoverMousePos = input.MousePos;
+					state.HoverVisible = false;
+				}
+				else if (ctx.Frame() >= state.HoverSinceFrame + kHoverDelayFrames)
+				{
+					World::LuauCompletionItem item;
+					if (options.Hover(linePrefix, word, item) && !item.Name.empty())
+					{
+						state.HoverName = item.Name;
+						state.HoverType = item.Type;
+						state.HoverDoc = item.Doc;
+						state.HoverVisible = true;
+					}
+					else
+						state.HoverVisible = false;
+				}
+			}
+			else
+			{
+				state.HoverWordStart = state.HoverWordEnd = 0;
+				state.HoverVisible = false;
+			}
+			if (!candidate)
+				state.HoverVisible = false;
+		}
+
+		// ---- caret 跟随:滚动到刚移动/编辑的 caret 行(竖向)与 caret 列(横向,M4-TEX-P6b)----
+		if (state.FollowCaret && maxScroll > 0.0f)
+		{
+			const float caretTop = static_cast<float>(buffer.LineOfOffset(buffer.Caret())) * lineHeight;
+			// MAT-UI6a:查找条盖住顶部时,跳转到的命中不要在条下面藏着(关条时 barHeight = 0,
+			// 与原逻辑逐字段相同)。
+			const float barHeight = FindBarHeight(state.FindVisible, state.FindReplaceMode, readOnly);
+			if (caretTop < state.ScrollY + barHeight)
+				state.ScrollY = std::max(0.0f, caretTop - barHeight);
+			else if (caretTop + lineHeight > state.ScrollY + textRect.H)
+				state.ScrollY = caretTop + lineHeight - textRect.H;
+		}
+		if (state.FollowCaret)
+		{
+			// M4-TEX-P6b:caret 的 X 超出可视区就滚(左右各留 ~2 个字符)。打字 / 点击定位 /
+			// Home·End / Ctrl+←→ / 接受补全 / 查找跳转都会置 FollowCaret,统一走这里。
+			// 内容宽在这里**重算**(缓存键含 revision ⇒ 只有正文真变过才全文件量):帧首那次是给
+			// 布局用的,本帧的插入/删除还没发生。
+			contentWidth = gutterWidth + MeasureMaxLineWidth() + hScrollPadRight;
+			maxScrollX = std::max(0.0f, contentWidth - viewWidth);
+			const float margin = digitWidth * kCaretScrollMarginChars;
+			const size_t localCaret = std::min(buffer.Caret(),
+				caretLineStart + caretLineText.size()) - caretLineStart;
+			const float caretX = ctx.MeasureTextWidth(caretLineText.substr(0, localCaret),
+				fontSize, WuiFontFamily::Monospace);
+			const float scrollXBefore = state.ScrollX;
+			if (caretX - state.ScrollX < margin)
+				state.ScrollX = std::max(0.0f, caretX - margin);
+			else if (caretX - state.ScrollX > textRect.W - margin)
+				state.ScrollX = caretX - textRect.W + margin;
+			// 补全浮层的锚点是"打开时固定的 caret 屏幕位置";横向跟着 caret 走时锚点也要平移,
+			// 否则浮层与 caret 会错位(竖向滚动时锚点固定不动是既有口径)。
+			if (state.PopupVisible && std::fabs(state.ScrollX - scrollXBefore) > 1e-6f)
+				state.PopupAnchorX -= state.ScrollX - scrollXBefore;
+		}
+		state.FollowCaret = false;
+		state.ScrollY = std::max(0.0f, std::min(state.ScrollY, maxScroll));
+		state.ScrollX = std::max(0.0f, std::min(state.ScrollX, maxScrollX));
+
+		// ---- W9.5 补全浮层:位置(空间不足翻到上方)/鼠标 hover·点击/绘制/无障碍 ----
+		{
+			const int itemCount = static_cast<int>(state.PopupItems.size());
+			if (state.PopupVisible && itemCount > 0)
+			{
+				// 锚点:打开/刷新时固定的 caret 位置(不是当前 caret,浮层不逐帧漂移)。
+				const float caretX = state.PopupAnchorX;
+				const float caretTop = state.PopupAnchorY;
+				const bool showDoc = state.PopupSelected >= 0 && state.PopupSelected < itemCount
+					&& !state.PopupItems[static_cast<std::size_t>(state.PopupSelected)].Doc.empty();
+				const int rows = std::min(itemCount, kSuggestMaxRows);
+				const float width = std::max(180.0f, std::min(kSuggestWidth, textRect.W));
+				const float height = static_cast<float>(rows) * kSuggestRowHeight
+					+ (showDoc ? 24.0f : 6.0f) + 6.0f;
+				float x = std::min(caretX, textRect.X + textRect.W - width);
+				x = std::max(textRect.X, x);
+				float y = caretTop + lineHeight;   // caret 下方
+				if (y + height > rect.Y + rect.H)
+					y = caretTop - height;         // 空间不足 → 翻到上方
+				if (y < rect.Y)
+					y = std::max(rect.Y, rect.Y + rect.H - height);
+				state.PopupBounds = { x, y, width, height };
+
+				// 滚轮在浮层内滚动列表(不滚编辑器)。
+				// 浮层自己的命中一律走 HitTestRaw:浮层矩形是登记过的覆盖层,
+				// 普通 IsHovered 在下一帧会被自己的遮挡区挡掉(见下面的绘制块)。
+				if (ctx.HitTestRaw(state.PopupBounds, input.MousePos) && input.Wheel != 0.0f)
+				{
+					const int maxFirst = std::max(0, itemCount - kSuggestMaxRows);
+					state.PopupSelected = std::max(0, std::min(itemCount - 1,
+						state.PopupSelected - (input.Wheel > 0.0f ? 1 : -1)));
+					state.PopupScroll = std::max(0, std::min(maxFirst,
+						state.PopupSelected - kSuggestMaxRows / 2));
+				}
+				if (state.PopupScroll > itemCount - rows)
+					state.PopupScroll = std::max(0, itemCount - rows);
+				if (state.PopupScroll < 0)
+					state.PopupScroll = 0;
+
+				const float firstRowY = state.PopupBounds.Y + 3.0f;
+				int hoveredItem = -1;
+				for (int row = 0; row < rows; ++row)
+				{
+					const int itemIndex = state.PopupScroll + row;
+					if (itemIndex >= itemCount)
+						break;
+					const WuiRect rowRect { state.PopupBounds.X,
+						firstRowY + static_cast<float>(row) * kSuggestRowHeight,
+						state.PopupBounds.W, kSuggestRowHeight };
+					if (ctx.HitTestRaw(rowRect, input.MousePos))
+						hoveredItem = itemIndex;
+				}
+				if (hoveredItem >= 0)
+				{
+					state.PopupSelected = hoveredItem;
+					ctx.SetCursor(WuiCursor::Hand);
+					if (input.MouseClicked[0])
+					{
+						// 点击接受(替换前缀,caret 落插入内容之后)。用浮层打开时记录的区间,
+						// 而不是当前 caret:点击可能先被文本命中测试重新定位 caret
+						// (自动化 ui.invoke 点击节点中心时实测会发生)。
+						const World::LuauCompletionItem& item =
+							state.PopupItems[static_cast<std::size_t>(state.PopupSelected)];
+						const std::string& text = buffer.Text();
+						const std::size_t caretNow = std::min(state.CaretAtOpen, text.size());
+						const std::size_t replaceStart = std::min(state.ReplaceStart, caretNow);
+						std::string inserted = CompletionInsertName(item.Name);
+						const bool call = InsertAsCall(item);
+						if (call && caretNow >= text.size())
+							inserted += "(";
+						buffer.SetCaret(replaceStart, false);
+						buffer.SetCaret(caretNow, true);
+						buffer.InsertAtCaret(inserted);
+						if (call)
+						{
+							const std::size_t afterName = replaceStart + inserted.size();
+							if (afterName > text.size() || text[afterName] != ')')
+							{
+								const std::size_t caretAfterName = buffer.Caret();
+								buffer.InsertAtCaret(")");
+								buffer.SetCaret(caretAfterName, false);
+							}
+						}
+						state.PopupVisible = false;
+						state.FollowCaret = true;
+					}
+				}
+				if (state.PopupVisible)
+				{
+					// 绘制放在编辑区主体之后(函数末尾):否则会被正文背景/文本盖住
+					// (用户实测:能 Tab 补全但看不到候选列表)。
+					// 无障碍:仅浮层可见期间登记 <前缀>.<i>(Interactive,点击=接受)
+					// 与 <前缀>.status(只读)。
+					WuiAccessibility& accessibility = WuiAccessibility::Get();
+					if (accessibility.Enabled())
+					{
+						const std::string prefix = options.CompletionIdPrefix.empty()
+							? std::string("editor.suggest") : options.CompletionIdPrefix;
+						for (int row = 0; row < rows; ++row)
+						{
+							const int itemIndex = state.PopupScroll + row;
+							if (itemIndex >= itemCount)
+								break;
+							const World::LuauCompletionItem& item =
+								state.PopupItems[static_cast<std::size_t>(itemIndex)];
+							WuiAccessNode node;
+							node.Id = HashId((prefix + "." + std::to_string(itemIndex)).c_str());
+							node.Window = accessibility.CurrentWindow();
+							node.Panel = accessibility.CurrentPanel();
+							node.Kind = "suggest";
+							node.Label = item.Name;
+							node.Value = item.Type;
+							node.Rect = { state.PopupBounds.X + 3.0f,
+								firstRowY + static_cast<float>(row) * kSuggestRowHeight,
+								state.PopupBounds.W - 6.0f, kSuggestRowHeight };
+							node.Focused = itemIndex == state.PopupSelected;
+							node.Interactive = true;
+							accessibility.Register(node);
+						}
+						WuiAccessNode statusNode;
+						statusNode.Id = HashId((prefix + ".status").c_str());
+						statusNode.Window = accessibility.CurrentWindow();
+						statusNode.Panel = accessibility.CurrentPanel();
+						statusNode.Kind = "suggest";
+						statusNode.Label = "completion status";
+						statusNode.Value = "prefix '" + state.PopupLinePrefix + "', "
+							+ std::to_string(itemCount) + " items, selected "
+							+ (state.PopupSelected >= 0 && state.PopupSelected < itemCount
+								? state.PopupItems[static_cast<std::size_t>(state.PopupSelected)].Name
+								: std::string());
+						statusNode.Rect = { state.PopupBounds.X, state.PopupBounds.Y,
+							state.PopupBounds.W, state.PopupBounds.H };
+						statusNode.Interactive = false;
+						accessibility.Register(statusNode);
+					}
+				}
+			}
+			else
+			{
+				state.PopupVisible = false;
+			}
+			state.PopupVisibleLastFrame = state.PopupVisible;
+		}
+
+		// ---- 竖向滚动条:thumb 可拖拽,点击轨道翻页 ----
+		float thumbHeight = 0.0f;
+		float thumbY = 0.0f;
+		if (needScrollbar)
+		{
+			thumbHeight = std::min(textRect.H, std::max(kThumbMinHeight, textRect.H * (textRect.H / contentHeight)));
+			float travel = std::max(1.0f, textRect.H - thumbHeight);
+			thumbY = rect.Y + (maxScroll > 0.0f ? state.ScrollY / maxScroll : 0.0f) * travel;
+			const WuiRect thumb { track.X + 2.0f, thumbY, track.W - 4.0f, thumbHeight };
+			if (input.MouseClicked[0] && ctx.IsHovered(track))
+			{
+				if (ctx.IsHovered(thumb))
+				{
+					state.DraggingThumb = true;
+					state.ThumbGrabOffset = input.MousePos.y - thumbY;
+				}
+				else
+				{
+					state.ScrollY += (input.MousePos.y < thumbY ? -1.0f : 1.0f) * textRect.H;
+				}
+			}
+			if (state.DraggingThumb && input.MouseDown[0])
+			{
+				const float travelNow = std::max(1.0f, textRect.H - thumbHeight);
+				state.ScrollY = (input.MousePos.y - state.ThumbGrabOffset - rect.Y) / travelNow * maxScroll;
+			}
+			if (state.DraggingThumb && input.MouseReleased[0])
+				state.DraggingThumb = false;
+			state.ScrollY = std::max(0.0f, std::min(state.ScrollY, maxScroll));
+			travel = std::max(1.0f, textRect.H - thumbHeight);
+			thumbY = rect.Y + (maxScroll > 0.0f ? state.ScrollY / maxScroll : 0.0f) * travel;
+		}
+
+		// ---- M4-TEX-P6b:水平滚动条(复用竖向那套画法/命中口径)----
+		// 文本区装得下时 hbarHeight = 0:不画、不命中、也不登记节点。thumb 比例 = 可视宽 / 内容宽,
+		// 位置 = ScrollX / maxScrollX;点轨道左右翻一页,按住 thumb 拖动逐像素跟随。
+		float hThumbWidth = 0.0f;
+		float hThumbX = 0.0f;
+		if (hbarHeight > 0.0f)
+		{
+			const float hThumbHeight = std::max(0.0f, hbarTrack.H - 4.0f);
+			hThumbWidth = std::min(viewWidth, std::max(kThumbMinWidth, viewWidth * (viewWidth / contentWidth)));
+			float travel = std::max(1.0f, viewWidth - hThumbWidth);
+			hThumbX = hbarTrack.X + (maxScrollX > 0.0f ? state.ScrollX / maxScrollX : 0.0f) * travel;
+			const WuiRect thumb { hThumbX, hbarTrack.Y + 2.0f, hThumbWidth, hThumbHeight };
+			if (input.MouseClicked[0] && ctx.IsHovered(hbarTrack))
+			{
+				if (ctx.IsHovered(thumb))
+				{
+					state.DraggingHThumb = true;
+					state.HThumbGrabOffset = input.MousePos.x - hThumbX;
+				}
+				else
+					state.ScrollX += (input.MousePos.x < hThumbX ? -1.0f : 1.0f) * textRect.W;
+			}
+			if (state.DraggingHThumb && input.MouseDown[0])
+			{
+				const float travelNow = std::max(1.0f, viewWidth - hThumbWidth);
+				state.ScrollX = (input.MousePos.x - state.HThumbGrabOffset - hbarTrack.X) / travelNow * maxScrollX;
+			}
+			if (state.DraggingHThumb && input.MouseReleased[0])
+				state.DraggingHThumb = false;
+			state.ScrollX = std::max(0.0f, std::min(state.ScrollX, maxScrollX));
+			travel = std::max(1.0f, viewWidth - hThumbWidth);
+			hThumbX = hbarTrack.X + (maxScrollX > 0.0f ? state.ScrollX / maxScrollX : 0.0f) * travel;
+			// 无障碍:轨道 + thumb(脚本按 id 取矩形做真实拖拽注入;固定 id 口径与查找条一致)。
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			if (accessibility.Enabled())
+			{
+				WuiAccessNode trackNode;
+				trackNode.Id = HashId("code-editor.hscroll");
+				trackNode.Window = accessibility.CurrentWindow();
+				trackNode.Panel = accessibility.CurrentPanel();
+				trackNode.Kind = "scrollbar";
+				trackNode.Label = "horizontal scrollbar";
+				trackNode.Value = "x " + std::to_string(static_cast<int>(state.ScrollX))
+					+ " / max " + std::to_string(static_cast<int>(maxScrollX));
+				trackNode.Rect = hbarTrack;
+				trackNode.Interactive = false;
+				accessibility.Register(trackNode);
+				WuiAccessNode thumbNode = trackNode;
+				thumbNode.Id = HashId("code-editor.hscroll.thumb");
+				thumbNode.Kind = "scrollbar-thumb";
+				thumbNode.Label = "horizontal scroll thumb";
+				thumbNode.Rect = { hThumbX, hbarTrack.Y + 2.0f, hThumbWidth, hThumbHeight };
+				thumbNode.Interactive = true;
+				accessibility.Register(thumbNode);
+			}
+		}
+
+		// ---- 绘制(只画可见行) ----
+		const auto pushText = [&](float x, float y, const WuiColor& color, std::string text,
+			int selStart, int selEnd, int caretByte)
+		{
+			WuiDrawCommand command;
+			command.Kind = WuiDrawKind::Text;
+			command.Rect = { x, y, 0.0f, 0.0f };
+			command.Color = color;
+			command.Text = std::move(text);
+			command.FontSize = fontSize;
+			command.Family = WuiFontFamily::Monospace;
+			command.TextSelStart = selStart;
+			command.TextSelEnd = selEnd;
+			command.TextCaretByte = caretByte;
+			ctx.Commands().push_back(std::move(command));
+		};
+
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, kBackground, 0.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y, gutterWidth, rect.H }, kGutterBackground, 0.0f });
+
+		// E1(VEC-E1,2026-09-27 用户口径「脚本编辑器左侧要显示行号」):行号槽在 textRect **左边**,
+		// 必须画在 ClipPush(textRect) 之前 —— 画在文本裁剪里会被整列裁掉(修复前实测:只留下一条
+		// 空深色 gutter,亮像素 = 0)。数字与正文同一套行标:lineY 里带 -ScrollY,滚动/换行天然对齐。
+		const int drawCaretLine = focused ? buffer.LineOfOffset(buffer.Caret()) : -1;
+		const int firstVisible = std::max(0, static_cast<int>(std::floor(state.ScrollY / lineHeight)));
+		const int lastVisible = std::min(lineCount - 1,
+			static_cast<int>(std::floor((state.ScrollY + rect.H) / lineHeight)) + 1);
+		const float textPadY = (lineHeight - fontSize) * 0.5f;
+		for (int line = firstVisible; line <= lastVisible; ++line)
+		{
+			const float lineY = textRect.Y + static_cast<float>(line) * lineHeight - state.ScrollY;
+			const std::string number = std::to_string(line + 1);
+			const float numberWidth = ctx.MeasureTextWidth(number, fontSize, WuiFontFamily::Monospace);
+			pushText(rect.X + gutterWidth - kGutterPaddingRight - numberWidth, lineY + textPadY,
+				line == drawCaretLine ? kGutterTextCurrent : kGutterText, number, -1, -1, -1);
+		}
+
+		ctx.Commands().push_back({ WuiDrawKind::ClipPush, textRect, kBackground });
+		std::vector<WuiCodeToken> tokens;
+		const auto [selStart, selEnd] = buffer.Selection();
+		const size_t caretOffset = buffer.Caret();
+		for (int line = firstVisible; line <= lastVisible; ++line)
+		{
+			const float lineY = textRect.Y + static_cast<float>(line) * lineHeight - state.ScrollY;
+			size_t lineStart = 0;
+			const std::string_view lineView = LineView(buffer, line, lineStart);
+			if (line == drawCaretLine)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, { textRect.X, lineY, textRect.W, lineHeight }, kCurrentLine, 0.0f });
+			// W9.7 语法错误行:红色底 + 下划线(与当前行高亮叠加,顺序在后更醒目)。
+			if (line == options.ErrorLine)
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, { textRect.X, lineY, textRect.W, lineHeight },
+					{ 0.55f, 0.16f, 0.16f, 0.22f }, 0.0f });
+				ctx.Commands().push_back({ WuiDrawKind::Rect,
+					{ textRect.X, lineY + lineHeight - 2.0f, textRect.W, 2.0f },
+					{ 0.85f, 0.25f, 0.25f, 0.9f }, 0.0f });
+			}
+			// MAT-UI6a:同词高亮 —— 当前词强一档、其余弱一档,画在正文之前(文字/选区仍然压在上面)。
+			// 命中表按 Start 升序 + 已缓存,这里只挑与本可见行相交的那些(二分定位),不逐行扫全表。
+			if (!state.OccurrenceMatches.empty())
+			{
+				const size_t lineAbsStart = lineStart;
+				const size_t lineAbsEnd = lineStart + lineView.size();
+				auto hit = std::lower_bound(state.OccurrenceMatches.begin(), state.OccurrenceMatches.end(),
+					lineAbsStart,
+					[](const WuiCodeFindMatch& match, size_t offset) { return match.End <= offset; });
+				for (; hit != state.OccurrenceMatches.end() && hit->Start < lineAbsEnd; ++hit)
+				{
+					const size_t start = std::max(hit->Start, lineAbsStart);
+					const size_t end = std::min(hit->End, lineAbsEnd);
+					if (end <= start)
+						continue;
+					const float x1 = textRect.X - state.ScrollX + ctx.MeasureTextWidth(
+						lineView.substr(0, start - lineAbsStart), fontSize, WuiFontFamily::Monospace);
+					const float x2 = textRect.X - state.ScrollX + ctx.MeasureTextWidth(
+						lineView.substr(0, end - lineAbsStart), fontSize, WuiFontFamily::Monospace);
+					const bool current = hit->Start == state.OccurrenceWordStart
+						&& hit->End == state.OccurrenceWordEnd;
+					ctx.Commands().push_back({ WuiDrawKind::Rect, { x1, lineY, x2 - x1, lineHeight },
+						current ? kOccurrenceStrong : kOccurrenceWeak, 0.0f });
+				}
+			}
+
+			// 语法分段:token 之间按 Default 补齐(不丢字符,也不打乱像素推进)。
+			tokens.clear();
+			if (options.Highlight)
+				options.Highlight(lineView, tokens);
+			std::sort(tokens.begin(), tokens.end(),
+				[](const WuiCodeToken& a, const WuiCodeToken& b) { return a.StartByte < b.StartByte; });
+			float pen = 0.0f;
+			bool caretDrawn = false;
+			const auto drawSegment = [&](size_t start, size_t end, WuiCodeTokenKind kind)
+			{
+				if (end <= start)
+					return;
+				const std::string_view segment = lineView.substr(start, end - start);
+				const size_t absStart = lineStart + start;
+				const size_t absEnd = lineStart + end;
+				int localSelStart = -1;
+				int localSelEnd = -1;
+				if (selEnd > selStart && selStart < absEnd && selEnd > absStart)
+				{
+					const size_t s = std::max(selStart, absStart) - absStart;
+					const size_t e = std::min(selEnd, absEnd) - absStart;
+					if (e > s)
+					{
+						localSelStart = static_cast<int>(s);
+						localSelEnd = static_cast<int>(e);
+					}
+				}
+				int caretByte = -1;
+				if (focused && line == drawCaretLine && !caretDrawn && caretOffset >= absStart && caretOffset <= absEnd)
+				{
+					caretByte = static_cast<int>(caretOffset - absStart);
+					caretDrawn = true;
+				}
+				// M4-TEX-P6b:正文按 -ScrollX 平移(被 ClipPush(textRect) 裁掉左/右溢出的部分)。
+				pushText(textRect.X - state.ScrollX + pen, lineY + textPadY, kTokenColors[static_cast<size_t>(kind)],
+					std::string(segment), localSelStart, localSelEnd, caretByte);
+				pen += ctx.MeasureTextWidth(segment, fontSize, WuiFontFamily::Monospace);
+			};
+			size_t cursor = 0;
+			for (const WuiCodeToken& token : tokens)
+			{
+				const size_t tokenStart = std::min<size_t>(token.StartByte, lineView.size());
+				const size_t tokenEnd = std::max(tokenStart, std::min<size_t>(token.EndByte, lineView.size()));
+				// W9 review:重叠/乱序 token 只画尚未消费的部分,避免同一段重复绘制。
+				const size_t start = std::max(tokenStart, cursor);
+				if (start > cursor)
+					drawSegment(cursor, start, WuiCodeTokenKind::Default);
+				if (start < tokenEnd)
+					drawSegment(start, tokenEnd, token.Kind);
+				cursor = std::max(cursor, tokenEnd);
+			}
+			drawSegment(cursor, lineView.size(), WuiCodeTokenKind::Default);
+			// 空行 / caret 在行尾:补一个空文本命令,让后端按真实度量画 caret。
+			if (focused && line == drawCaretLine && !caretDrawn)
+				pushText(textRect.X - state.ScrollX + pen, lineY + textPadY, kCaretColor, std::string(), -1, -1, 0);
+			// MAT-UI45(纯追加):逐可见行装饰回调 —— 在正文之后、浮层(补全/Hover)之前,
+			// 仍在文本区裁剪内。pen = 本行文本的度量右端(相对文本区左缘)。
+			// M4-TEX-P6b:lineRect.X/W 仍是**可视文本带**(不含滚动,调用方的夹取边界必须落在看得见的
+			// 区域里);textEndX = 行内 pen 终点 + (-ScrollX),即屏幕坐标下真实的文本右端 ——
+			// 装饰跟着正文走,滚出可视区时由调用方夹回文本带内。
+			if (options.LineDecorator)
+				options.LineDecorator(ctx, line, { textRect.X, lineY, textRect.W, lineHeight },
+					textRect.X - state.ScrollX + pen);
+		}
+		ctx.Commands().push_back({ WuiDrawKind::ClipPop });
+
+		if (needScrollbar)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, track, kScrollbarTrack, 0.0f });
+			ctx.Commands().push_back({ WuiDrawKind::Rect,
+				{ track.X + 2.0f, thumbY, track.W - 4.0f, thumbHeight }, kScrollbarThumb, 2.0f });
+		}
+		if (hbarHeight > 0.0f)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, hbarTrack, kScrollbarTrack, 0.0f });
+			ctx.Commands().push_back({ WuiDrawKind::Rect,
+				{ hThumbX, hbarTrack.Y + 2.0f, hThumbWidth, std::max(0.0f, hbarTrack.H - 4.0f) },
+				kScrollbarThumb, 2.0f });
+		}
+
+		// ---- W9.5 补全浮层绘制:必须在编辑区主体之后(顺序 = 绘制顺序,先画会被正文盖掉) ----
+		if (state.PopupVisible && !state.PopupItems.empty())
+		{
+			const int itemCount = static_cast<int>(state.PopupItems.size());
+			const int rows = std::min(itemCount, kSuggestMaxRows);
+			const bool showDoc = state.PopupSelected >= 0 && state.PopupSelected < itemCount
+				&& !state.PopupItems[static_cast<std::size_t>(state.PopupSelected)].Doc.empty();
+			const float firstRowY = state.PopupBounds.Y + 3.0f;
+			ctx.Commands().push_back({ WuiDrawKind::Rect, state.PopupBounds, kSuggestBackground, 4.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, state.PopupBounds, kSuggestBorder, 4.0f, 1.0f });
+			// P4-U7:补全浮层是画在正文之上的覆盖层 —— 登记矩形,下一帧落在浮层上的
+			// 点击不再同时落到底下的把文本区(实测:点候选行会同时移动 caret)。
+			ctx.RegisterOverlayRect(state.PopupBounds);
+			for (int row = 0; row < rows; ++row)
+			{
+				const int itemIndex = state.PopupScroll + row;
+				if (itemIndex >= itemCount)
+					break;
+				const World::LuauCompletionItem& item =
+					state.PopupItems[static_cast<std::size_t>(itemIndex)];
+				const WuiRect rowRect { state.PopupBounds.X + 3.0f,
+					firstRowY + static_cast<float>(row) * kSuggestRowHeight,
+					state.PopupBounds.W - 6.0f, kSuggestRowHeight };
+				if (itemIndex == state.PopupSelected)
+					ctx.Commands().push_back({ WuiDrawKind::Rect, rowRect, kSuggestSelected, 3.0f });
+				const float textY = rowRect.Y + (kSuggestRowHeight - kSuggestFontSize) * 0.5f;
+				{
+					WuiDrawCommand nameCommand;
+					nameCommand.Kind = WuiDrawKind::Text;
+					nameCommand.Rect = { rowRect.X + 8.0f, textY, 0.0f, 0.0f };
+					nameCommand.Color = kSuggestName;
+					nameCommand.Text = TruncateBytes(item.Name, 34);
+					nameCommand.FontSize = kSuggestFontSize;
+					nameCommand.Family = WuiFontFamily::Monospace;
+					ctx.Commands().push_back(std::move(nameCommand));
+				}
+				if (!item.Type.empty())
+				{
+					const float typeWidth = ctx.MeasureTextWidth(item.Type, kSuggestFontSize,
+						WuiFontFamily::Monospace);
+					WuiDrawCommand typeCommand;
+					typeCommand.Kind = WuiDrawKind::Text;
+					typeCommand.Rect = { rowRect.X + rowRect.W - 8.0f - typeWidth, textY, 0.0f, 0.0f };
+					typeCommand.Color = kSuggestType;
+					typeCommand.Text = TruncateBytes(item.Type, 24);
+					typeCommand.FontSize = kSuggestFontSize;
+					typeCommand.Family = WuiFontFamily::Monospace;
+					ctx.Commands().push_back(std::move(typeCommand));
+				}
+			}
+			if (showDoc)
+			{
+				const World::LuauCompletionItem& item =
+					state.PopupItems[static_cast<std::size_t>(state.PopupSelected)];
+				ctx.Commands().push_back({ WuiDrawKind::Rect,
+					{ state.PopupBounds.X + 1.0f,
+						state.PopupBounds.Y + state.PopupBounds.H - 25.0f,
+						state.PopupBounds.W - 2.0f, 24.0f },
+					{ 0.10f, 0.11f, 0.12f, 0.98f }, 0.0f });
+				WuiDrawCommand docCommand;
+				docCommand.Kind = WuiDrawKind::Text;
+				docCommand.Rect = { state.PopupBounds.X + 8.0f,
+					state.PopupBounds.Y + state.PopupBounds.H - 21.0f, 0.0f, 0.0f };
+				docCommand.Color = kSuggestDoc;
+				docCommand.Text = EllipsizeToWidth(ctx, item.Doc, state.PopupBounds.W - 16.0f,
+					kSuggestDocFontSize);
+				docCommand.FontSize = kSuggestDocFontSize;
+				docCommand.Family = WuiFontFamily::Ui;
+				ctx.Commands().push_back(std::move(docCommand));
+			}
+		}
+
+		// ---- W9.6 悬停提示绘制(同样必须在正文之后) ----
+		if (state.HoverVisible && !state.HoverName.empty())
+		{
+			constexpr float kHoverFontSize = 13.0f;
+			constexpr float kHoverTitleSize = 14.0f;
+			constexpr float kHoverLineH = 16.0f;
+			const float maxTextWidth = std::min(400.0f, std::max(160.0f, rect.W - 24.0f));
+			const std::vector<std::string> docLines = state.HoverDoc.empty()
+				? std::vector<std::string> {}
+				: WrapToWidth(ctx, state.HoverDoc, maxTextWidth, kHoverFontSize, 4);
+			const float width = std::min(maxTextWidth + 16.0f, rect.W);
+			const float height = 8.0f + kHoverLineH
+				+ (state.HoverType.empty() ? 0.0f : kHoverLineH)
+				+ static_cast<float>(docLines.size()) * kHoverLineH + 4.0f;
+			float x = input.MousePos.x + 14.0f;
+			float y = input.MousePos.y + 18.0f;
+			if (x + width > rect.X + rect.W)
+				x = input.MousePos.x - width - 8.0f;
+			if (y + height > rect.Y + rect.H)
+				y = input.MousePos.y - height - 8.0f;
+			x = std::max(rect.X, std::min(x, rect.X + rect.W - width));
+			y = std::max(rect.Y, std::min(y, rect.Y + rect.H - height));
+			const WuiRect tooltip { x, y, width, height };
+			ctx.Commands().push_back({ WuiDrawKind::Rect, tooltip, { 0.10f, 0.11f, 0.13f, 0.98f }, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, tooltip, kSuggestBorder, 3.0f, 1.0f });
+			float lineY = tooltip.Y + 4.0f;
+			{
+				WuiDrawCommand title;
+				title.Kind = WuiDrawKind::Text;
+				title.Rect = { tooltip.X + 8.0f, lineY, 0.0f, 0.0f };
+				title.Color = kSuggestName;
+				title.Text = EllipsizeToWidth(ctx, state.HoverName, maxTextWidth, kHoverTitleSize);
+				title.FontSize = kHoverTitleSize;
+				title.Family = WuiFontFamily::Monospace;
+				ctx.Commands().push_back(std::move(title));
+			}
+			lineY += kHoverLineH;
+			if (!state.HoverType.empty())
+			{
+				WuiDrawCommand type;
+				type.Kind = WuiDrawKind::Text;
+				type.Rect = { tooltip.X + 8.0f, lineY, 0.0f, 0.0f };
+				type.Color = kSuggestType;
+				type.Text = EllipsizeToWidth(ctx, state.HoverType, maxTextWidth, kHoverFontSize);
+				type.FontSize = kHoverFontSize;
+				type.Family = WuiFontFamily::Monospace;
+				ctx.Commands().push_back(std::move(type));
+				lineY += kHoverLineH;
+			}
+			for (const std::string& docLine : docLines)
+			{
+				WuiDrawCommand doc;
+				doc.Kind = WuiDrawKind::Text;
+				doc.Rect = { tooltip.X + 8.0f, lineY, 0.0f, 0.0f };
+				doc.Color = kSuggestDoc;
+				doc.Text = docLine;
+				doc.FontSize = kHoverFontSize;
+				doc.Family = WuiFontFamily::Ui;
+				ctx.Commands().push_back(std::move(doc));
+				lineY += kHoverLineH;
+			}
+			WuiAccessibility& accessibility = WuiAccessibility::Get();
+			if (accessibility.Enabled())
+			{
+				const std::string prefix = options.CompletionIdPrefix.empty()
+					? std::string("editor.suggest") : options.CompletionIdPrefix;
+				WuiAccessNode node;
+				node.Id = HashId((prefix + ".hover").c_str());
+				node.Window = accessibility.CurrentWindow();
+				node.Panel = accessibility.CurrentPanel();
+				node.Kind = "hover";
+				node.Label = state.HoverName;
+				node.Value = state.HoverType.empty() ? state.HoverDoc
+					: state.HoverType + (state.HoverDoc.empty() ? "" : " | " + state.HoverDoc);
+				node.Rect = tooltip;
+				node.Interactive = false;
+				accessibility.Register(node);
+			}
+		}
+
+		// ---- MAT-UI6a:查找/替换条绘制(顶部覆盖条,画在正文/浮层之后)----
+		// 打开时登记遮挡矩形:条上的点击不再穿透到正文(改 caret),条内控件自己不受影响
+		// (PushOverlay 后登记的遮挡深度 = 1,覆盖层内部的命中不被自己的遮挡区挡掉)。
+		if (state.FindVisible)
+		{
+			RefreshFindMatches();   // 绘制前再刷一次:本帧画出来的计数/命中就是这一帧的事实
+			const bool replaceRow = state.FindReplaceMode && !readOnly;
+			const float barHeight = FindBarHeight(true, state.FindReplaceMode, readOnly);
+			const WuiRect barRect { rect.X, rect.Y, rect.W, std::min(barHeight, rect.H) };
+			const WuiTheme& theme = CurrentTheme();
+			// 行内布局:查找框 + 计数 + Aa/ab + 上/下跳 + 关闭;替换模式多一行(替换框 + Replace + All)。
+			const float fixedWidth = 44.0f + 24.0f + 24.0f + 22.0f + 22.0f + 20.0f + kFindBarGap * 5.0f;
+			const float fieldWidth = std::max(48.0f, std::min(180.0f,
+				rect.W - fixedWidth - kFindBarPad * 2.0f - kFindBarGap * 2.0f));
+			const float rowY = barRect.Y + kFindBarPad;
+			float x = barRect.X + kFindBarPad;
+			const WuiRect findFieldRect { x, rowY, fieldWidth, kFindBarRowHeight };
+			x += fieldWidth + kFindBarGap;
+			const WuiRect statusRect { x, rowY, 44.0f, kFindBarRowHeight };
+			x += 44.0f + kFindBarGap;
+			const WuiRect caseRect { x, rowY, 24.0f, kFindBarRowHeight };
+			x += 24.0f + kFindBarGap;
+			const WuiRect wordRect { x, rowY, 24.0f, kFindBarRowHeight };
+			x += 24.0f + kFindBarGap;
+			const WuiRect prevRect { x, rowY, 22.0f, kFindBarRowHeight };
+			x += 22.0f + kFindBarGap;
+			const WuiRect nextRect { x, rowY, 22.0f, kFindBarRowHeight };
+			x += 22.0f + kFindBarGap;
+			const WuiRect closeRect { x, rowY, 20.0f, kFindBarRowHeight };
+			const float row2Y = rowY + kFindBarRowHeight + kFindBarGap;
+			const WuiRect replaceFieldRect { barRect.X + kFindBarPad, row2Y, fieldWidth, kFindBarRowHeight };
+			const WuiRect replaceRect { replaceFieldRect.X + fieldWidth + kFindBarGap, row2Y, 62.0f, kFindBarRowHeight };
+			const WuiRect replaceAllRect { replaceRect.X + 62.0f + kFindBarGap, row2Y, 34.0f, kFindBarRowHeight };
+
+			// 先算按钮点击:开关本帧就生效(绘制用新状态),且都不抢输入焦点。
+			const auto barHit = [&](const WuiRect& r)
+			{
+				return ctx.HitTestRaw(r, input.MousePos) && input.MouseClicked[0];
+			};
+			const bool caseClicked = barHit(caseRect);
+			const bool wordClicked = barHit(wordRect);
+			const bool prevClicked = barHit(prevRect);
+			const bool nextClicked = barHit(nextRect);
+			const bool closeClicked = barHit(closeRect);
+			const bool replaceClicked = replaceRow && barHit(replaceRect);
+			const bool replaceAllClicked = replaceRow && barHit(replaceAllRect);
+			if (caseClicked)
+				findCaseSetting = !findCaseSetting;
+			if (wordClicked)
+				findWordSetting = !findWordSetting;
+			if (closeClicked)
+			{
+				state.FindVisible = false;
+				state.FindReplaceMode = false;
+				ctx.SetFocus(id);
+			}
+			if (state.FindVisible)
+			{
+				ctx.PushOverlay();
+				ctx.RegisterOverlayRect(barRect);
+				// 条本身也要裁剪在编辑器矩形内(窄面板下按钮行不会溢出到相邻面板)。
+				ctx.Commands().push_back({ WuiDrawKind::ClipPush, rect, kFindBarBackground });
+				ctx.Commands().push_back({ WuiDrawKind::Rect, barRect, kFindBarBackground, 0.0f });
+				ctx.Commands().push_back({ WuiDrawKind::Rect,
+					{ barRect.X, barRect.Y + barRect.H - 1.0f, barRect.W, 1.0f }, kSuggestBorder, 0.0f });
+
+				// MAT-UI6c:占位文案带快捷键(空查询时 a11y value 用 Placeholder,与框内那行同一句);
+				// 有查询时 value = 查询本身,与用户看到的一致。
+				const TextFieldA11y findA11y { "Find", "Find (Ctrl+F)" };
+				bool findCancelled = false;
+				const bool findSubmitted = TextField(ctx, findFieldId, findFieldRect, state.FindQuery,
+					theme, &findCancelled, &findA11y);
+				if (state.FindQuery.empty())
+				{
+					// 空查询时框内画一行低对比占位文案(TextField 自己只画 buffer,a11y 侧另登记)。
+					// 画在 TextField 的底色/描边之后,所以压在底色上而不会被盖住。
+					WuiDrawCommand placeholder;
+					placeholder.Kind = WuiDrawKind::Text;
+					placeholder.Rect = { findFieldRect.X + 6.0f,
+						findFieldRect.Y + (findFieldRect.H - kFindBarFontSize) * 0.5f, 0.0f, 0.0f };
+					placeholder.Color = kFindBarPlaceholder;
+					placeholder.Text = "Find (Ctrl+F)";
+					placeholder.FontSize = kFindBarFontSize;
+					ctx.Commands().push_back(std::move(placeholder));
+				}
+				bool replaceSubmitted = false;
+				bool replaceCancelled = false;
+				if (replaceRow)
+				{
+					const TextFieldA11y replaceA11y { "Replace", "Replace with" };
+					replaceSubmitted = TextField(ctx, findReplaceFieldId, replaceFieldRect,
+						state.FindReplaceQuery, theme, &replaceCancelled, &replaceA11y);
+				}
+				// 计数 n/m(查询非空但零命中时用另一档颜色提示"没找到")。
+				const int matchCount = static_cast<int>(state.FindMatches.size());
+				const int currentOrdinal = (state.FindCurrent >= 0 && state.FindCurrent < matchCount)
+					? state.FindCurrent + 1 : 0;
+				const std::string statusText = std::to_string(currentOrdinal) + "/"
+					+ std::to_string(matchCount);
+				{
+					WuiDrawCommand status;
+					status.Kind = WuiDrawKind::Text;
+					const float width = ctx.MeasureTextWidth(statusText, kFindBarFontSize, WuiFontFamily::Ui);
+					status.Rect = { statusRect.X + statusRect.W - width - 2.0f,
+						statusRect.Y + (statusRect.H - kFindBarFontSize) * 0.5f, 0.0f, 0.0f };
+					status.Color = (!state.FindQuery.empty() && matchCount == 0)
+						? kFindBarNoMatch : kFindBarText;
+					status.Text = statusText;
+					status.FontSize = kFindBarFontSize;
+					ctx.Commands().push_back(std::move(status));
+				}
+				WuiAccessibility& accessibility = WuiAccessibility::Get();
+				if (accessibility.Enabled())
+				{
+					WuiAccessNode node;
+					node.Id = HashId("code-editor.find.status");
+					node.Window = accessibility.CurrentWindow();
+					node.Panel = accessibility.CurrentPanel();
+					node.Kind = "status";
+					node.Label = "find status";
+					node.Value = statusText;
+					node.Rect = statusRect;
+					node.Interactive = false;
+					accessibility.Register(node);
+				}
+				// MAT-UI6c:每个按钮都要"说明 + 快捷键" —— hover 时登记 tooltip(宿主在面板之后
+				// 统一 DrawTooltip),同一句话同时进 a11y 节点的 Tooltip;value 给快捷键/开关态。
+				const auto barButton = [&](const WuiRect& r, const std::string& label, WuiId buttonId,
+					const std::string& kind, const std::string& value, bool active,
+					const std::string& tooltip)
+				{
+					const bool hovered = ctx.HitTestRaw(r, input.MousePos);
+					ctx.Commands().push_back({ WuiDrawKind::Rect, r,
+						active ? kFindBarButtonActive : (hovered ? kFindBarButtonHover : kFindBarButton), 3.0f });
+					ctx.Commands().push_back({ WuiDrawKind::RectOutline, r, kSuggestBorder, 3.0f, 1.0f });
+					WuiDrawCommand text;
+					text.Kind = WuiDrawKind::Text;
+					const float width = ctx.MeasureTextWidth(label, kFindBarFontSize, WuiFontFamily::Ui);
+					text.Rect = { r.X + (r.W - width) * 0.5f,
+						r.Y + (r.H - kFindBarFontSize) * 0.5f, 0.0f, 0.0f };
+					text.Color = active ? kFindBarTextActive : kFindBarText;
+					text.Text = label;
+					text.FontSize = kFindBarFontSize;
+					ctx.Commands().push_back(std::move(text));
+					if (hovered)
+					{
+						ctx.SetCursor(WuiCursor::Hand);
+						ctx.SetTooltip(tooltip);
+					}
+					if (accessibility.Enabled())
+					{
+						WuiAccessNode node;
+						node.Id = buttonId;
+						node.Window = accessibility.CurrentWindow();
+						node.Panel = accessibility.CurrentPanel();
+						node.Kind = kind;
+						node.Label = label;
+						node.Value = value;
+						node.Tooltip = tooltip;
+						node.Rect = r;
+						node.Interactive = true;
+						accessibility.Register(node);
+					}
+				};
+				barButton(caseRect, "Aa", HashId("code-editor.find.case"), "toggle",
+					findCaseSetting ? "on" : "off", findCaseSetting, "Match case");
+				barButton(wordRect, "ab", HashId("code-editor.find.word"), "toggle",
+					findWordSetting ? "on" : "off", findWordSetting, "Whole word");
+				barButton(prevRect, "<", HashId("code-editor.find.prev"), "button",
+					"Shift+Enter / Shift+F3", false, "Previous match (Shift+Enter / Shift+F3)");
+				barButton(nextRect, ">", HashId("code-editor.find.next"), "button",
+					"Enter / F3", false, "Next match (Enter / F3)");
+				barButton(closeRect, "X", HashId("code-editor.find.close"), "button",
+					"Esc", false, "Close (Esc)");
+				if (replaceRow)
+				{
+					barButton(replaceRect, "Replace", HashId("code-editor.find.replace"), "button",
+						"Ctrl+H", false, "Replace (Ctrl+H)");
+					barButton(replaceAllRect, "All", HashId("code-editor.find.replace_all"), "button",
+						"Replace all", false, "Replace all");
+				}
+				ctx.Commands().push_back({ WuiDrawKind::ClipPop });
+				ctx.PopOverlay();
+				// 焦点收尾:TextField 的"点外失焦"会把"点条上按钮/点回代码区"的焦点置 0,这里纠正回来。
+				if (findSubmitted)
+					ctx.SetFocus(findFieldId);          // 回车留在查找框里(可以连按找下一个)
+				if (findCancelled || replaceCancelled)
+				{
+					state.FindVisible = false;
+					state.FindReplaceMode = false;
+					ctx.SetFocus(id);                   // Esc:关条 + 焦点还给代码区
+				}
+				else if (input.MouseClicked[0])
+				{
+					if (ctx.HitTestRaw(barRect, input.MousePos))
+					{
+						if (ctx.Focus() == 0)
+							ctx.SetFocus(findFieldId);
+					}
+					else if (id != 0 && ctx.Focus() == 0 && ctx.HitTestRaw(rect, input.MousePos))
+						ctx.SetFocus(id);
+				}
+				// 按钮动作(与键盘同一条函数)。
+				if (nextClicked || prevClicked)
+				{
+					RefreshFindMatches();
+					const auto [selStart, selEnd] = buffer.Selection();
+					SelectFindMatch(nextClicked ? NextCodeMatchIndex(state.FindMatches, selEnd)
+						: PrevCodeMatchIndex(state.FindMatches, selStart));
+				}
+				if (replaceClicked || replaceSubmitted)
+					ReplaceCurrentMatch();
+				if (replaceAllClicked)
+					ReplaceAllMatches();
+				if (replaceSubmitted)
+					ctx.SetFocus(findReplaceFieldId);
+			}
+		}
+
+		// P1c-E4:编辑器本体进焦点表 —— 旧实现只有"点进去"(鼠标)才 SetFocus,键盘/AI 到不了它
+		// (a11y 节点一直存在、focused 也一直报,但焦点表里没有入口 → Tab 永远扫不到)。
+		// 焦点环沿用全局 token(overlay 层);文本焦点持焦后 Tab 仍是编辑器自己的缩进(见 U2e 口径),
+		// 退出用 Escape。
+		if (id != 0)
+		{
+			ctx.RegisterFocusable(id, rect);
+			DrawFocusRing(ctx, rect, id, CurrentTheme());
+		}
+		result.ScrollX = state.ScrollX;
+		result.Changed = buffer.Revision() != revisionAtStart;
+		return result;
+	}
+
+}

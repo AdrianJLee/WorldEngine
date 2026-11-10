@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000007
+  World::TagComponent:
+    Tag: Terrain Chain
+  World::TransformComponent:
+    Location: [0, -3.2, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::ChainCollider2DComponent:
+    Offset: [0, 0]
+    Points: "-6,1.5;-2.5,0;2.5,0;6,1.5"
+    Friction: 0.6
+    Restitution: 0.0
+    Loop: false
+    ShowCollider: true
+    IsSensor: false

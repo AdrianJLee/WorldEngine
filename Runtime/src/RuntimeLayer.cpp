@@ -1,132 +1,576 @@
-﻿#include "RuntimeLayer.h"
+#include "World/Core/EngineHostMode.h"
+#if defined(_WIN32)
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  pragma comment(lib, "ws2_32.lib")
+#endif
+
+#include "RuntimeLayer.h"
+#include "World/Events/KeyEvent.h"
+#include "GameHud.h"
+#include "World/Agent/WeAgentCore.h"
+#include "World/Ai/CommandRegistry.h"
+#include "World/Ai/PlaytestRunner.h"
+#include "World/Asset/ProjectManifest.h"
+#include "World/Core/Log.h"
+#include "World/Core/StringPool.h"
+#include "World/Core/WorldContext.h"
+#include "World/Gameplay/Runtime/GameApp.h"
+#include "World/Plugins/PluginManager.h"
+#include "World/Profiling/Telemetry.h"
+#include "World/Renderer/Renderer.h"
+#include "World/Renderer/RenderSettings.h"
+#include "World/Modules/GameModuleHost.h"
 #include "World/Renderer/SceneRenderer.h"
+#include "World/Scene/Components.h"
+#include "World/Script/Runtime/ScriptEngine.h"
+#include "World/UI/UiCommandRouter.h"
+#include "World/Utils/Paths.h"
+#include "World/WUI/WuiJson.h"
+#include "World/WUI/WuiRhiBackend.h"
+#include "World/WUI/WuiScriptedInput.h"
+#include "World/WUI/WuiTextureRegistry.h"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <deque>
+#include <filesystem>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <thread>
 
 namespace World
 {
+	namespace
+	{
+		// PLUG-T5:发行形态的插件目录 = exe 旁的 `bin/plugins`(与 cook 的落点
+		// `<publish>/bin/plugins/<name>.dll` 一致;取模块自身路径,与进程 CWD 无关 ——
+		// 与 RuntimeApp 的语言层锚定同一口径)。
+		std::filesystem::path ExecutableDirectory()
+		{
+			char executablePathBuffer[MAX_PATH] = {};
+			if (!GetModuleFileNameA(nullptr, executablePathBuffer, MAX_PATH))
+				return {};
+			return std::filesystem::path(executablePathBuffer).parent_path();
+		}
+	}
+
 	RuntimeLayer::RuntimeLayer()
 		:Layer("RuntimeLayer")
 	{
 
 	}
+	// PLUG-T5:析构在 .cpp 定义(unique_ptr<Plugins::PluginManager> 需要完整类型)。
+	RuntimeLayer::~RuntimeLayer() = default;
+
 	void RuntimeLayer::OnAttach()
 	{
-		WLD_PROFILE_FUNCTION();
+		WLD_TRACE_FUNCTION();
 
-		std::string dllPath;
-		// 获取当前 Runtime.exe 所在的绝对路径
-		char exePathBuf[MAX_PATH];
-		GetModuleFileNameA(NULL, exePathBuf, MAX_PATH);
-		std::filesystem::path exePath = exePathBuf;
-		std::filesystem::path exeDir = exePath.parent_path(); // 提取 exe 所在目录
+		std::string moduleError;
+		if (!Modules::GameModuleHost::LoadDefault(Application::Get().GetContext(), &moduleError))
+			WLD_CORE_ERROR("Failed to load Game module: {0}", moduleError);
 
-		std::filesystem::path binDir = exeDir / "bin";
-		WLD_INFO("Looking for Game.dll in: {0}", binDir.string());
-
-		if (std::filesystem::exists(binDir))
+		// 会话描述:项目清单是唯一事实源(内容根/启动场景/后端),也是关卡目录(assets/levels/)的定位依据。
+		Gameplay::GameAppDesc desc;
+		desc.ProjectId = "worldengine-runtime";
+		desc.FixedStepHz = 60;
+		// 启动场景只认项目清单的 start_scene(Level 2.0 关卡的入口文件,如
+		// `scenes/3DTest.wlevel`)。这里不再有硬编码兜底场景:清单缺失时给可读告警,
+		// 由 LoadLevel 报"没有启动场景",而不是偷偷去跑一个早已不存在的旧路径。
+		std::string scenePath;
+		std::filesystem::path manifestPath;
+		// PLUG-T5:发行清单里的随包插件 id(cook 写下的依赖拓扑序)。
+		std::vector<std::string> shippedPlugins;
+		if (Asset::ProjectManifest::Locate(std::filesystem::current_path(), &manifestPath))
 		{
-			for (const auto& entry : std::filesystem::recursive_directory_iterator(binDir))
+			std::string manifestError;
+			Asset::ProjectManifest manifest;
+			if (Asset::ProjectManifest::Load(manifestPath, &manifest, &manifestError))
 			{
-				if (entry.is_regular_file() && entry.path().filename() == "Game.dll")
-				{
-					dllPath = entry.path().string();
-					break;
-				}
+				if (!manifest.Id.empty())
+					desc.ProjectId = manifest.Id;
+				desc.ContentRoot = manifest.ResolveContentRoot(manifestPath);
+				desc.StartLevel = manifest.StartScene;
+				scenePath = manifest.StartScene;
+				World::Renderer::SetRequestedRenderer(manifest.Renderer);
+				// D8a2:项目级渲染设置(rendering.*)对打包运行同样生效 —— 打包产物里没有
+				// 环境变量,用户只能通过清单配置,所以这条路径必须显式 Apply。
+				World::RenderSettings::Apply(manifest);
+				shippedPlugins = manifest.Plugins.Shipped;
 			}
-		}
-
-		if (dllPath.empty())
-		{
-			// 兜底：如果在开发环境运行，退回 CMake 生成的工作区路径
-			dllPath = std::string(WLD_OUTPUT_DIR) + "bin/" + WLD_BUILD_TYPE + "/Game/" + WLD_BUILD_TYPE + "/Game.dll";
-		}
-
-		HMODULE gameModule = LoadLibraryA(dllPath.c_str());
-
-		if (gameModule)
-		{
-			WLD_CORE_INFO("Successfully loaded Game.dll from {0}", dllPath);
-			typedef void(*InitGameDLLFunc)(World::Application*);
-			InitGameDLLFunc initFunc = (InitGameDLLFunc)GetProcAddress(gameModule, "OnInitGameDLL");
-
-			if (initFunc)
-			{
-				initFunc(&World::Application::Get());
-			}
-			else
-			{
-				WLD_CORE_ERROR("Failed to find InitGameDLL function in Game.dll!");
-			}
-
-			typedef void* (*GetRegistryFunc)();
-			GetRegistryFunc getGameTypeRegistry = (GetRegistryFunc)GetProcAddress(gameModule, "GetGameTypeRegistry");
-
-			if (getGameTypeRegistry)
-			{
-				// 拿到对面的 TypeRegistry 指针
-				World::TypeRegistry* gameRegistry = static_cast<World::TypeRegistry*>(getGameTypeRegistry());
-
-				// 将对面的所有脚本、属性数据，倒灌到当前 Editor 的单例中！
-				World::TypeRegistry::Get().MergeFrom(*gameRegistry);
-			}
-			else
-			{
-				WLD_CORE_ERROR("Failed to find GetGameTypeRegistry function in Game.dll!");
-			}
+			// 启动解析结果:定位到哪份清单/内容根/启动场景 —— 排查"跑了但没画面"的第一步。
+			WLD_CORE_INFO("[runtime] manifest '{0}' contentRoot '{1}' startScene '{2}'",
+				manifestPath.string(), desc.ContentRoot.string(), scenePath);
 		}
 		else
 		{
-			WLD_CORE_ERROR("Failed to load Game.dll!");
+			WLD_CORE_ERROR("[runtime] no project.we.yaml found from cwd '{0}'; no start scene to load",
+				std::filesystem::current_path().string());
 		}
+		// 开发/验证钩子:WLD_START_SCENE 覆盖启动场景(与编辑器同名开关一致)。
+		// 端到端验收(verify-play-vs-runtime.ps1)要靠它让 Runtime 跑指定的测试关卡;
+		// 此前 Runtime 只认清单里的 start_scene,脚本传 2DTest 时它仍在跑 3DTest。
+		if (const char* fromEnvironment = std::getenv("WLD_START_SCENE"))
+			if (fromEnvironment[0])
+			{
+				scenePath = fromEnvironment;
+				desc.StartLevel = scenePath;
+				WLD_CORE_INFO("[runtime] WLD_START_SCENE override: {0}", scenePath);
+			}
+
+		// PLUG-T5:按发行清单加载 `<exe>/bin/plugins/*.dll`(闭包内插件;顺序 = cook 写下的
+		// 依赖拓扑序)。加载必须在场景/GameHost 之前 —— 插件注册的 schema 组件、资产类型与
+		// 脚本函数要在关卡加载前就位。
+		//
+		// 失败策略(与 docs/dev/plugin-framework.md §12 同步):缺失 / ABI 不符 / 注册失败
+		// 一律**记 ERROR 并继续启动**(不静默,也不把游戏卡死在启动期 —— 缺件在 cook 的引用
+		// 硬门里已经是致命错误)。Runtime 不接线编辑器扩展:只提供 editor.panel / editor.command
+		// 的插件在这里按 T3b 契约干净拒绝(与"无编辑器宿主 = 注册失败"同口径)。
+		m_PluginManager = std::make_unique<Plugins::PluginManager>();
+		if (shippedPlugins.empty())
+		{
+			WLD_CORE_INFO("[plugin] release manifest ships no plugins; bin/plugins is not consulted");
+		}
+		else
+		{
+			const std::filesystem::path pluginLibraryDir = ExecutableDirectory() / "bin" / "plugins";
+			std::string pluginError;
+			const Plugins::PluginManager::Status pluginStatus = m_PluginManager->LoadPackaged(
+				pluginLibraryDir, shippedPlugins, Application::Get().GetContext(), &pluginError);
+			if (pluginStatus != Plugins::PluginManager::Status::Ok)
+				WLD_CORE_ERROR("[plugin] {0} of {1} shipped plugin(s) failed to load from {2}: {3}",
+					shippedPlugins.size() - m_PluginManager->LoadedCount(), shippedPlugins.size(),
+					pluginLibraryDir.string(), pluginError);
+			else
+				WLD_CORE_INFO("[plugin] loaded {0} plugin(s) from {1} (release manifest order)",
+					m_PluginManager->LoadedCount(), pluginLibraryDir.string());
+		}
+		// 插件装载结论立即落盘:核心日志默认只在 WARN 及以上刷新(见 Log::Init 的 flush_on),
+		// 而"发行包到底装上了哪些插件"是启动期最需要事后核对的一条事实 —— 不强制刷一次,
+		// 进程被强杀(玩家关窗口/自动化终止)时这条 INFO 会留在 stdio 缓冲里丢掉。
+		if (const std::shared_ptr<spdlog::logger>& logger = Log::GetCoreLogger())
+			logger->flush();
 
 		m_SceneRenderer = CreateRef<SceneRenderer>();
 
 		m_SceneRenderer->Init();
+		// 场景目标跟随窗口尺寸:SceneRenderer 默认 1280×720,窗口被 WLD_WINDOW_SIZE 或用户
+		// 缩放改变时必须跟上,否则画面被拉伸、与编辑器 Play 的像素对比也不成立。
+		{
+			const uint32_t width = Application::Get().GetWindow().GetWidth();
+			const uint32_t height = Application::Get().GetWindow().GetHeight();
+			if (width > 0 && height > 0)
+				m_SceneRenderer->OnResize(width, height);
+		}
+		m_SceneTextureId = Wui::WuiTextureRegistry::Get().Register(m_SceneRenderer->GetColorTexture());
 
+		m_Host.Init(desc);
+		m_Host.SetRenderer(m_SceneRenderer);
 
-		LoadScene();
+		// GameUI(M4):把 .wui 驱动的游戏 UI 接到宿主(环境变量 WLD_UI_DOC,否则内容根 assets/ui)。
+		// 两者都取不到 = 静默关闭,不改变今天的行为。
+		m_UiHost.Initialize(desc.ContentRoot);
+		// GameUI(M11):世界空间 UI 的默认位置解析器(实体名 → 世界位置)在这里**只设一次** ——
+		// 它是 `std::function`,每帧重建会有分配;解析器内部按 tick 缓存实体名索引,换场景自己失效。
+		// 每帧只需要喂相机(见 OnUiFrame)。未启用 `.wui` 时本调用可省。
+		if (m_UiHost.Enabled())
+			m_UiHost.SetWorldPositionResolver(m_Host.GetWorldPositionResolver());
 
+		// 调试 HUD 默认关闭以呈现游戏原本模样；可通过环境变量 WLD_RUNTIME_HUD 或启动参数 --hud 开启
+		if (const char* hudEnv = std::getenv("WLD_RUNTIME_HUD"))
+		{
+			m_ShowGameHud = (std::strcmp(hudEnv, "1") == 0 || std::strcmp(hudEnv, "true") == 0);
+		}
+		for (int index = 1; index < __argc; ++index)
+		{
+			if (__argv[index] && (std::strcmp(__argv[index], "--hud") == 0 || std::strcmp(__argv[index], "--show-hud") == 0))
+			{
+				m_ShowGameHud = true;
+				break;
+			}
+		}
+
+		// GameHost 内部:清单中存在同一场景的关卡时走 LevelService(加载状态机/进度),否则退回路径加载。
+		m_Host.LoadLevel(scenePath, true);
+
+		World::Agent::WeAgentCore::Get().SetProjectRoot(World::Paths::ProjectDir().string());
+		if (GetRuntimeAiControlPort() > 0)
+		{
+			StartAiControlServer();
+		}
 	}
 	void RuntimeLayer::OnDetach()
 	{
-		WLD_PROFILE_FUNCTION();
-		m_SceneRenderer->Shutdown();
+		WLD_TRACE_FUNCTION();
+		StopAiControlServer();
+		// 顺序与改造前一致:先停运行时并释放场景,再关闭渲染器。
+		m_Host.StopRuntime();
+		m_Host.Shutdown();
+		m_UiHost.Shutdown();
+		m_SceneTextureId = 0;
+		// PLUG-T5:场景先销毁(插件组件还有活实例时 Unload 会干净拒绝),再卸载插件 ——
+		// 插件回调/组件存储因此在管理器析构前全部回收。
+		if (m_PluginManager)
+		{
+			m_PluginManager->UnloadAll(Application::Get().GetContext());
+			m_PluginManager.reset();
+		}
+		if (m_SceneRenderer)
+			m_SceneRenderer->Shutdown();
+		m_SceneRenderer.reset();
 	}
 	void RuntimeLayer::OnUpdate(Timestep ts)
 	{
-		WLD_PROFILE_FUNCTION();
-		if (m_ActiveScene)
+		WLD_TRACE_FUNCTION();
+		// contract.ui-runtime §5:本帧的脚本/AI 注入快照窗口从此帧开始(游戏 UI 采样与 UI 帧
+		// 读同一份,相位每帧只推进一次)。没有待注入事件时是纯计数,零副作用。
+		Wui::WuiScriptedInput::Get().BeginFrame();
+		// 窗口尺寸变化:等尺寸稳定约 0.1s 再重建渲染目标(拖拽缩放时逐帧重建会在 Vulkan 下
+		// 与在飞帧抢资源,和编辑器侧同一套节流策略)。
+		if (m_SceneRenderer)
 		{
-			Renderer2D::ResetStats();
-
-			auto entity = m_ActiveScene->GetPrimaryCameraEntity();
-			if (entity)
+			const uint32_t width = Application::Get().GetWindow().GetWidth();
+			const uint32_t height = Application::Get().GetWindow().GetHeight();
+			// P4-3:比较**请求尺寸**,不是渲染目标尺寸 —— 目标尺寸会被 rendering.render_scale
+			// 缩放,用 GetWidth/GetHeight 会在倍率非 1 时永远判成"窗口一直在变",每帧重进节流路径。
+			if (width > 0 && height > 0
+				&& (m_SceneRenderer->GetRequestedWidth() != width || m_SceneRenderer->GetRequestedHeight() != height))
 			{
-				m_ActiveScene->OnUpdateRuntime(ts);
-				auto& camera = entity.GetComponent<CameraComponent>().Camera;
-				auto& transform = entity.GetComponent<TransformComponent>().Transform;
-
-				m_SceneRenderer->BeginScene(m_ActiveScene.get(), SceneRendererOptions());
-				m_SceneRenderer->SubmitScene(camera, transform);
-				m_SceneRenderer->EndScene();
-
+				if (m_PendingWidth != width || m_PendingHeight != height)
+				{
+					m_PendingWidth = width;
+					m_PendingHeight = height;
+					m_ResizeDelay = 0.1f;
+				}
+				else
+				{
+					m_ResizeDelay -= ts.GetSeconds();
+					if (m_ResizeDelay <= 0.0f)
+					{
+						m_SceneRenderer->OnResize(width, height);
+						if (m_SceneTextureId)
+							Wui::WuiTextureRegistry::Get().Update(m_SceneTextureId, m_SceneRenderer->GetColorTexture());
+					}
+				}
 			}
-			else
+		}
+		Renderer2D::ResetStats();
+		// GameUI(M9):UI 优先消费输入 —— 在 GameHost::Tick(玩法帧首采样)之前组一帧**最小**输入态
+		// 并路由;命中 UI 的指针本帧不再进入玩法(contract.ui-runtime §5)。未启用 `.wui` ⇒ 零操作。
+		// 路由用上一帧 UI 帧 Layout 出来的矩形;顺序 RouteInput → Tick → OnUiFrame(DrawFrame)。
+		if (m_UiHost.Enabled())
+		{
+			const uint32_t windowWidth = Application::Get().GetWindow().GetWidth();
+			const uint32_t windowHeight = Application::Get().GetWindow().GetHeight();
+			// 玩法捕获指针时，设备鼠标不再参与游戏 HUD 的悬停/点击（脚本与 AI 注入仍生效）。
+			const bool pointerCaptured = Application::Get().GetWindow().IsCursorLocked();
+			const Wui::WuiInputState uiInput = m_UiInputSampler.Sample(
+				glm::vec2(static_cast<float>(windowWidth), static_cast<float>(windowHeight)),
+				m_UiHost.WindowKey(), /*applyScriptedInput=*/true, pointerCaptured);
+			m_Host.SetPointerCaptured(m_UiHost.RouteInput(uiInput));
+			// GameUI(M26):命令出口 = `UiCommandRouter` → `EventBus`(`UiCommandEvent`)——
+			// 项目 Lua/C++ 系统订阅它即可响应(这才是"UI → 逻辑"的出口),引擎不发明玩法语义。
+			// M39:把宿主持有的 `UiNavigator` 交给 router ⇒ `ui.close`(有模态先关模态、否则出栈)
+			// 与 `ui.back` 真的导航(不再只发事件);没有页面时栈为空 = 纯 no-op。
+			if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
 			{
-				m_ActiveScene->OnUpdateRuntime(ts);
+				const UI::UiCommandDispatchResult dispatched =
+					UI::UiCommandRouter::Dispatch(m_UiHost.Commands(), app->Events(), &m_UiHost.Navigator());
+				// 保留一条 debug 日志(只有真有命令时打,避免每帧刷屏)。
+				if (dispatched.Dispatched > 0)
+					WLD_CORE_TRACE("[ui] {0} command(s) -> UiCommandEvent on the EventBus ({1} navigation)",
+						dispatched.Dispatched, dispatched.Navigations);
 			}
+			else if (!m_UiHost.Commands().Empty())
+			{
+				// 没有会话(理论上 GameHost::Init 之后不会出现):保留旧的可读日志,不静默吞命令。
+				for (const UI::UiInputCommand& command : m_UiHost.Commands().Commands())
+					WLD_CORE_INFO("[ui] command (no GameApp session) node={0} event={1} cmd={2}",
+						command.NodeId, command.Event,
+						command.Command.empty() ? std::string("(none)") : command.Command);
+			}
+			m_UiHost.ClearCommands();
+		}
+		m_LastFrameDeltaSeconds = ts.GetSeconds();
+		// 场景更新(OnUpdateRuntime)+ 主相机提交渲染都在 GameHost 内完成,顺序与改造前一致。
+		m_Host.Tick(ts, true);
 
+		// Runtime AI 控制通道:在主线程每帧泵送执行排队请求。
+		PumpAiControlRequests();
 
+		// 渲染基线捕获(仅开发验证):WLD_CAPTURE_FRAMES=N 后读默认帧缓冲写 PPM。
+		CaptureFrameIfRequested();
+	}
+
+	void RuntimeLayer::CaptureFrameIfRequested()
+	{
+		static int countdown = -1;
+		if (countdown == -1)
+		{
+			const char* frames = std::getenv("WLD_CAPTURE_FRAMES");
+			countdown = frames ? std::atoi(frames) : -2;
+		}
+		// 帧数不是时间:先等关卡真正加载出场景,再开始倒计时(否则 GL 无 VSync 时
+		// 会在场景就绪前就截到"只有清屏色"的画面)。
+		if (countdown > 0 && !m_Host.GetScene())
+			return;
+		if (countdown > 0)
+		{
+			--countdown;
+			return;
+		}
+		if (countdown != 0)
+			return;
+		countdown = -2;
+
+		const char* pathEnv = std::getenv("WLD_CAPTURE_PATH");
+		if (!pathEnv || !pathEnv[0])
+			return;
+		if (m_SceneRenderer)
+		{
+			// 诊断:确认抓取用的 SceneRenderer 与 GameHost 实际渲染的是同一个实例。
+			WLD_CORE_INFO("[capture] runtime renderer={0} target={1}x{2}",
+				static_cast<const void*>(m_SceneRenderer.get()),
+				m_SceneRenderer->GetWidth(), m_SceneRenderer->GetHeight());
+			m_SceneRenderer->CaptureFrame(pathEnv);
 		}
 	}
-	void RuntimeLayer::OnImGuiRender()
+	void RuntimeLayer::OnUiFrame()
 	{
+		static Wui::WuiContext wuiContext;
+		static Wui::WuiRhiBackend wuiBackend;
+		++m_UiFrame;
+		Wui::WuiInputState input;
+		if (wuiBackend.BeginFrame(input))
+		{
+			// 同上：捕获态下把设备指针移出布局，避免隐藏指针仍在 UI 上产生悬停。
+			if (Application::Get().GetWindow().IsCursorLocked())
+			{
+				input.MousePos = { -10000.0f, -10000.0f };
+				input.Wheel = 0.0f;
+				for (int button = 0; button < 3; ++button)
+				{
+					input.MouseDown[button] = false;
+					input.MouseClicked[button] = false;
+					input.MouseReleased[button] = false;
+					input.MouseDoubleClicked[button] = false;
+				}
+			}
+			// 开发钩子:脚本点击注入 → 本窗口输入状态。必须在 BeginFrame 之后、控件绘制之前,
+			// 走的是和鼠标同一条输入路径(不是测试专用分支)。
+			ApplyDevUiActions();
+			// contract.ui-runtime §5:脚本/AI 注入走**和鼠标同一条输入路径**。本帧的快照已经在
+			// 游戏 UI 的输入采样(`UiPlatformInputSampler::Sample`)里推进过一次;这里读**同一份**
+			// 快照 ⇒ 两边看到同一次点击,而注入相位每帧只推进一次(见 WuiScriptedInput::BeginFrame)。
+			Wui::WuiScriptedInput::Get().Apply(m_UiHost.WindowKey(), input);
+			wuiContext.BeginFrame(input);
+			if (Wui::WuiAccessibility::Get().Enabled())
+				Wui::WuiAccessibility::Get().BeginFrame(m_UiHost.WindowKey(), input.ViewportSize);
+			// 场景全屏显示:离屏颜色附件作为图像画进呈现目标,HUD 随后叠画。
+			if (m_SceneTextureId)
+				wuiContext.Commands().push_back({ Wui::WuiDrawKind::Image,
+					{ 0, 0, input.ViewportSize.x, input.ViewportSize.y },
+					{ 1, 1, 1, 1 }, 0, 1.0f, "", 15.0f, false,
+					m_SceneTextureId, { 0, 1, 1, -1 }, -1, -1, -1 });
+			// 脚本 UI(W3c):在场景纹理之后、游戏 HUD 之前画;HUD 作为最上层覆盖,
+			// 与编辑器侧"场景 → 面板 → 覆盖层"的层次一致。单个脚本出错只停自身。
+			if (Scene* activeScene = m_Host.GetScene().get())
+			{
+				const std::size_t commandCountBefore = wuiContext.Commands().size();
+				const std::size_t scriptUiFailures = ScriptEngine::DrawScriptUi(*activeScene, wuiContext);
+				// 只有"脚本真的提交了控件且没有出错"才算画过(用于报告/自动化断言)。
+				if (wuiContext.Commands().size() > commandCountBefore && scriptUiFailures == 0)
+					m_ScriptUiDrawn = true;
+			}
+			// GameUI(M4):真实 .wui 驱动,画在场景贴图/脚本 UI 之后、DrawGameHud 之前(与现有脚本站位一致)。
+			// 未启用时零操作:不推命令、不开无障碍,HUD 与加载遮罩的顺序不变。
+			// GameUI(M11):世界空间 UI 喂参 —— 相机取"本帧要提交渲染的那台主相机"
+			// (GameHost::GetMainCameraViewProjection 与 SubmitSceneRender 同一选相机口径),
+			// 渲染面尺寸随 `SetWorldCamera` 一起给。拿不到相机/渲染面 ⇒ 关闭世界空间:
+			// 纯屏幕空间行为与 f5b7da1 一致。解析器不在这里重设(见 OnAttach)。
+			if (m_UiHost.Enabled())
+			{
+				// GameUI(M26):绑定运行时数据源 —— 场景 = 当前运行场景,版本 = 场景 tick
+				// (同 tick 不重复求值)。绑定求值在 `UiHost::DrawFrame` 的 Layout → Paint 之间落地。
+				const Scene* bindingScene = m_Host.GetScene().get();
+				m_UiHost.SetBindingRuntime(
+					UI::UiBindingContext { bindingScene, Gameplay::GameApp::TryGet() },
+					bindingScene != nullptr ? bindingScene->CurrentWorldTick() : 0);
+				glm::mat4 worldViewProjection(1.0f);
+				glm::vec2 worldScreenSize(0.0f);
+				if (m_Host.GetMainCameraViewProjection(worldViewProjection, worldScreenSize))
+				{
+					m_UiHost.SetWorldSpace(true);
+					m_UiHost.SetWorldCamera({ worldViewProjection, worldScreenSize });
+				}
+				else
+				{
+					m_UiHost.SetWorldSpace(false);
+				}
+			}
+			// GameUI(M34):`.wui` 热重载 —— 按文件戳判脏,变更即重载(失败保留上一份可用版本)。
+			// 未启用 `.wui` 时本调用零成本(不 stat)。
+			m_UiHost.PollDocumentChanges();
+			m_UiHost.DrawFrame(wuiContext, input);
+			// 游戏原本模样:左上角示例调试 HUD 默认不绘制，仅在主动开启(F3 或 --hud/WLD_RUNTIME_HUD)时展示
+			if (m_ShowGameHud)
+			{
+				// 只读查询必须走 const 路径:Running 场景上非 const GetRegistry()
+				// 会触发结构写断言并抛异常。
+				const Scene* activeScene = m_Host.GetScene().get();
+				const size_t entityCount = activeScene ? activeScene->GetRegistry().view<UUIDComponent>().size() : 0;
+				DrawGameHud(wuiContext, entityCount);
+			}
+			// T5c 流式加载界面:资产还在后台解析时覆盖在最上层(真实进度,不是假动画)。
+			// 顺序在 HUD 之后 = 加载期间盖住 HUD,解析完自然消失 —— 不需要"关掉加载界面"的状态机。
+			if (const std::size_t pending = m_Host.PendingAssetLoads(); pending > 0)
+				DrawLoadingOverlay(wuiContext, pending, 0, m_Host.DescribeAssetLoads());
+			wuiContext.EndFrame();
+			// GameUI(M4):第一帧 EndFrame 之后落一次无障碍树(WLD_UI_A11Y_DUMP;未启用/未设置则空操作)。
+			m_UiHost.EndFrame();
+			wuiBackend.Render(wuiContext.Commands(), wuiContext.OverlayCommands());
+			// 整窗抓图:UI 通道已提交、→Present 尚未执行 —— 与 EditorLayer 同一调用点
+			// (见 Renderer::FlushPresentCaptures 的说明;提前抓会拍到空白并破坏布局)。
+			Renderer::FlushPresentCaptures();
+			FinishDevUiFrame();
+		}
+		wuiBackend.EndFrame(wuiContext.Cursor());
+	}
 
+	namespace
+	{
+		// W3c 宿主接线:纯开发开关(命名沿用 Editor 侧习惯),发布路径默认全部关闭。
+		//   WLD_UI_CLICK="x,y"            注入一次脚本点击(press + release 两帧,与编辑器一致)
+		//   WLD_UI_CLICK_FRAME=<n>        点击发生在第 n 个 UI 帧(1 基;第 1 个 UI 帧 = 1)
+		//   WLD_UI_CLICK_QUIT=<n>         点击后第 n 个 UI 帧自动退出
+		//   WLD_CAPTURE_PRESENT=<path>    整窗抓图写 PPM(绝对路径,或相对当前工作目录)
+		//   WLD_CAPTURE_PRESENT_FRAME=<n> 抓图发生在第 n 个 UI 帧
+		//   WLD_CAPTURE_PRESENT_QUIT=<n>  抓图落盘后第 n 个 UI 帧自动退出(0 = 落盘即退)
+		struct DevUiConfig
+		{
+			glm::vec2 ClickPosition { 0, 0 };
+			bool HasClick = false;
+			int ClickFrame = 30;
+			int ClickQuit = 0;
+			std::string CapturePath;
+			int CaptureFrame = 40;
+			int CaptureQuit = 0;
+		};
+
+		struct DevUiState
+		{
+			DevUiConfig Config;
+			bool ClickInjected = false;
+			bool CaptureRequested = false;
+		};
+
+		// 进程内单例:Runtime 只有一个 RuntimeLayer,环境变量在进程生命周期内不变。
+		DevUiState& DevUi()
+		{
+			static DevUiState state = []()
+			{
+				DevUiState fresh;
+				DevUiConfig& config = fresh.Config;
+				if (const char* click = std::getenv("WLD_UI_CLICK"))
+				{
+					float x = 0.0f;
+					float y = 0.0f;
+					if (std::sscanf(click, "%f,%f", &x, &y) == 2)
+					{
+						config.ClickPosition = { x, y };
+						config.HasClick = true;
+					}
+					else
+					{
+						WLD_CORE_WARN("[dev-ui] WLD_UI_CLICK='{0}' is not \"x,y\"; click injection disabled", click);
+					}
+				}
+				if (const char* frame = std::getenv("WLD_UI_CLICK_FRAME"))
+					config.ClickFrame = std::atoi(frame);
+				if (const char* quit = std::getenv("WLD_UI_CLICK_QUIT"))
+					config.ClickQuit = std::atoi(quit);
+				if (const char* capture = std::getenv("WLD_CAPTURE_PRESENT"))
+					config.CapturePath = capture;
+				if (const char* frame = std::getenv("WLD_CAPTURE_PRESENT_FRAME"))
+					config.CaptureFrame = std::atoi(frame);
+				if (const char* quit = std::getenv("WLD_CAPTURE_PRESENT_QUIT"))
+					config.CaptureQuit = std::atoi(quit);
+
+				if (config.HasClick)
+					WLD_CORE_INFO("[dev-ui] click ({0},{1}) queued at UI frame {2} (quit +{3})",
+						config.ClickPosition.x, config.ClickPosition.y, config.ClickFrame, config.ClickQuit);
+				if (!config.CapturePath.empty())
+					WLD_CORE_INFO("[dev-ui] present capture '{0}' requested at UI frame {1} (quit +{2})",
+						config.CapturePath, config.CaptureFrame, config.CaptureQuit);
+				return fresh;
+			}();
+			return state;
+		}
+	}
+
+	void RuntimeLayer::ApplyDevUiActions()
+	{
+		DevUiState& devUi = DevUi();
+
+		if (devUi.Config.HasClick && !devUi.ClickInjected &&
+			static_cast<int>(m_UiFrame) >= devUi.Config.ClickFrame)
+		{
+			Wui::WuiScriptedInput::Get().QueueClick("main", devUi.Config.ClickPosition);
+			devUi.ClickInjected = true;
+			// 自动退出安排在点击被消费之后足够帧数(默认 0 → 下一个 UI 帧),让脚本状态先落盘。
+			m_DevUiArmedFrame = m_UiFrame + 1 + static_cast<uint32_t>(std::max(devUi.Config.ClickQuit, 0));
+			WLD_CORE_INFO("[dev-ui] injected scripted UI click at ({0},{1}) on UI frame {2}",
+				devUi.Config.ClickPosition.x, devUi.Config.ClickPosition.y, m_UiFrame);
+		}
+
+		// 抓图请求:与编辑器同样的"登记 + 帧末 flush"两步,不在这里读像素。
+		if (!devUi.Config.CapturePath.empty() && !devUi.CaptureRequested &&
+			static_cast<int>(m_UiFrame) >= devUi.Config.CaptureFrame)
+		{
+			devUi.CaptureRequested = true;
+			m_DevUiCapturePending = true;
+			m_DevUiArmedFrame = m_UiFrame + 1 + static_cast<uint32_t>(std::max(devUi.Config.CaptureQuit, 0));
+			Renderer::RequestPresentCapture(nullptr, devUi.Config.CapturePath,
+				Application::Get().GetWindow().GetWidth(), Application::Get().GetWindow().GetHeight());
+			WLD_CORE_INFO("[dev-ui] present capture queued on UI frame {0}: {1}", m_UiFrame, devUi.Config.CapturePath);
+		}
+	}
+
+	void RuntimeLayer::FinishDevUiFrame()
+	{
+		if (!m_DevUiCapturePending || m_UiFrame < m_DevUiArmedFrame)
+			return;
+
+		const std::string& capturePath = DevUi().Config.CapturePath;
+		std::error_code fileError;
+		const uintmax_t size = std::filesystem::file_size(capturePath, fileError);
+		if (fileError || size == 0)
+		{
+			// 抓图没落盘(例如 Vulkan 呈现目标尚未就绪)时不要静默退出:留下证据、
+			// 保持挂起等下一帧重试,由验证脚本判定"没有 PPM = 失败"。
+			WLD_CORE_ERROR("[dev-ui] present capture '{0}' was not written (ui frame {1})", capturePath, m_UiFrame);
+			m_DevUiArmedFrame = m_UiFrame + 1;
+			return;
+		}
+		WLD_CORE_INFO("[dev-ui] present capture written (ui frame {0}, {1} bytes): {2}",
+			m_UiFrame, size, capturePath);
+		m_DevUiCapturePending = false;
+		if (m_UiHost.Enabled())
+			m_UiHost.WriteAccessibilityDump();
+		Application::Get().Close();
 	}
 	void RuntimeLayer::OnEvent(Event& event)
 	{
 		EventDispatcher dispatcher(event);
 		// 拦截窗口 Resize 事件以动态更新相机投影矩阵
 		dispatcher.Dispatch<WindowResizeEvent>(WLD_BIND_EVENT_FN(RuntimeLayer::OnWindowResize));
+		dispatcher.Dispatch<KeyPressedEvent>(WLD_BIND_EVENT_FN(RuntimeLayer::OnKeyPressed));
 	}
 	bool RuntimeLayer::OnWindowResize(WindowResizeEvent& e)
 	{
@@ -134,30 +578,630 @@ namespace World
 		if (e.GetWidth() == 0 || e.GetHeight() == 0)
 			return false; // 最小化时跳过
 
-		m_ActiveScene->OnViewportResize(e.GetWidth(), e.GetHeight());
+		if (const Ref<Scene> scene = m_Host.GetScene())
+			scene->OnViewportResize(e.GetWidth(), e.GetHeight());
+		return false;
+	}
+	bool RuntimeLayer::OnKeyPressed(KeyPressedEvent& e)
+	{
+		// F3 快捷键切换调试 HUD 显示/隐藏: 仅在非正式发布包下生效，正式发布包不展示内部调试 HUD
+		if (e.GetRepeatCount() == 0 && e.GetKeyCode() == KeyCodes::F3)
+		{
+			if (EngineEnvironment::IsPackaged())
+				return false;
+
+			m_ShowGameHud = !m_ShowGameHud;
+			WLD_CORE_INFO("[runtime] Debug HUD {0}", m_ShowGameHud ? "enabled" : "disabled");
+			return true;
+		}
 		return false;
 	}
 
-	void RuntimeLayer::LoadScene()
+	namespace
 	{
-		Ref<Scene> tempScene = CreateRef<Scene>();
-		SceneSerializer serializer(tempScene);
-		// During the cook process, scenes could be packed or placed in content folder.
-		// Assuming "Resource/Scenes/TestScene.wdscene" relative path is maintained or packed in pak.
-		std::string scenePath = "scenes/PhysicalTest.wd";
-		if (serializer.Deserialize(scenePath))
+		int& RuntimeAiPortStorage()
 		{
-			WLD_CORE_INFO("Scene loaded successfully from VFS or Disk!");
-			m_ActiveScene = tempScene;
-
-			uint32_t width = Application::Get().GetWindow().GetWidth();
-			uint32_t height = Application::Get().GetWindow().GetHeight();
-			m_ActiveScene->OnViewportResize(width, height);
-			m_ActiveScene->OnRuntimeStart();
+			static int s_Port = 0;
+			return s_Port;
 		}
-		else
+
+		std::string EscapeJsonString(const std::string& text)
 		{
-			WLD_CORE_ERROR("Failed to load scene from VFS or Disk: {0}", scenePath);
+			std::string escaped;
+			escaped.reserve(text.size() + 8);
+			for (char c : text)
+			{
+				switch (c)
+				{
+				case '"': escaped += "\\\""; break;
+				case '\\': escaped += "\\\\"; break;
+				case '\n': escaped += "\\n"; break;
+				case '\r': escaped += "\\r"; break;
+				case '\t': escaped += "\\t"; break;
+				default: escaped += c; break;
+				}
+			}
+			return escaped;
+		}
+
+#if defined(_WIN32)
+		void EnsureRuntimeWinsock()
+		{
+			static bool s_Initialized = false;
+			if (!s_Initialized)
+			{
+				WSADATA data {};
+				WSAStartup(MAKEWORD(2, 2), &data);
+				s_Initialized = true;
+			}
+		}
+
+		int WaitSocketSlice(SOCKET sock, bool readable, bool writable)
+		{
+			fd_set readSet;
+			fd_set writeSet;
+			FD_ZERO(&readSet);
+			FD_ZERO(&writeSet);
+			if (readable)
+				FD_SET(sock, &readSet);
+			if (writable)
+				FD_SET(sock, &writeSet);
+			timeval timeout { 0, 100 * 1000 };
+			return select(0, readable ? &readSet : nullptr, writable ? &writeSet : nullptr, nullptr, &timeout);
+		}
+
+		bool SendAllSlice(SOCKET client, const std::atomic<bool>& running, const std::string& payload)
+		{
+			size_t sent = 0;
+			int stopSlices = 0;
+			while (sent < payload.size())
+			{
+				const bool stopping = !running.load();
+				if (stopping && stopSlices >= 2)
+					return false;
+				const int writable = WaitSocketSlice(client, false, true);
+				if (stopping)
+					++stopSlices;
+				if (writable < 0)
+					return false;
+				if (writable == 0)
+					continue;
+				const int written = send(client, payload.data() + sent, static_cast<int>(payload.size() - sent), 0);
+				if (written <= 0)
+					return false;
+				sent += static_cast<size_t>(written);
+			}
+			return true;
+		}
+#endif
+	}
+
+	void SetRuntimeAiControlPort(int port)
+	{
+		RuntimeAiPortStorage() = port;
+	}
+
+	int GetRuntimeAiControlPort()
+	{
+		if (RuntimeAiPortStorage() <= 0)
+		{
+			if (const char* envPort = std::getenv("WLD_RUNTIME_AI_PORT"))
+			{
+				const int parsed = std::atoi(envPort);
+				if (parsed > 0)
+					RuntimeAiPortStorage() = parsed;
+			}
+		}
+		return RuntimeAiPortStorage();
+	}
+
+	struct RuntimeLayer::RuntimeAiServerState
+	{
+		struct PendingRequest
+		{
+			uint64_t Id = 0;
+			std::string Command;
+			std::map<std::string, std::string> Args;
+			std::string Response;
+			bool Done = false;
+			std::mutex Mutex;
+			std::condition_variable Cv;
+		};
+
+		std::atomic<bool> Running { false };
+		uint16_t Port = 0;
+		uintptr_t ListenSocket = static_cast<uintptr_t>(~0ull);
+		std::thread ListenThread;
+		std::mutex QueueMutex;
+		std::deque<std::shared_ptr<PendingRequest>> Queue;
+	};
+
+	void RuntimeLayer::StartAiControlServer()
+	{
+#if defined(_WIN32)
+		const int port = GetRuntimeAiControlPort();
+		if (port <= 0)
+			return;
+		if (m_AiServer && m_AiServer->Running.load())
+			return;
+
+		EnsureRuntimeWinsock();
+		const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (listener == INVALID_SOCKET)
+		{
+			WLD_CORE_ERROR("[runtime-ai] socket() failed: {0}", WSAGetLastError());
+			return;
+		}
+
+		BOOL reuseAddr = TRUE;
+		setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuseAddr), sizeof(reuseAddr));
+
+		sockaddr_in address {};
+		address.sin_family = AF_INET;
+		address.sin_port = htons(static_cast<uint16_t>(port));
+		address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		if (bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
+		{
+			WLD_CORE_ERROR("[runtime-ai] bind 127.0.0.1:{0} failed: {1}", port, WSAGetLastError());
+			closesocket(listener);
+			return;
+		}
+		if (listen(listener, 4) != 0)
+		{
+			WLD_CORE_ERROR("[runtime-ai] listen failed: {0}", WSAGetLastError());
+			closesocket(listener);
+			return;
+		}
+
+		m_AiServer = std::make_unique<RuntimeAiServerState>();
+		m_AiServer->Port = static_cast<uint16_t>(port);
+		m_AiServer->ListenSocket = static_cast<uintptr_t>(listener);
+		m_AiServer->Running.store(true);
+
+		RuntimeAiServerState* server = m_AiServer.get();
+		m_AiServer->ListenThread = std::thread([server]()
+		{
+			while (server->Running.load())
+			{
+				const SOCKET listenSock = static_cast<SOCKET>(server->ListenSocket);
+				if (listenSock == INVALID_SOCKET)
+					break;
+				const int readable = WaitSocketSlice(listenSock, true, false);
+				if (readable <= 0)
+				{
+					if (readable < 0)
+						break;
+					continue;
+				}
+				if (!server->Running.load())
+					break;
+				const SOCKET client = accept(listenSock, nullptr, nullptr);
+				if (client == INVALID_SOCKET)
+					continue;
+
+				std::string buffer;
+				char chunk[4096];
+				bool alive = true;
+				while (alive && server->Running.load())
+				{
+					const int clientReady = WaitSocketSlice(client, true, false);
+					if (clientReady < 0)
+						break;
+					if (clientReady == 0)
+						continue;
+					const int received = recv(client, chunk, sizeof(chunk), 0);
+					if (received <= 0)
+						break;
+					buffer.append(chunk, static_cast<size_t>(received));
+
+					size_t newline = 0;
+					while ((newline = buffer.find('\n')) != std::string::npos)
+					{
+						std::string line = buffer.substr(0, newline);
+						buffer.erase(0, newline + 1);
+						while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+							line.pop_back();
+						if (line.empty())
+							continue;
+
+						std::string parseError;
+						auto parsedOpt = Wui::JsonValue::Parse(line, &parseError);
+						std::string response;
+						if (!parsedOpt || parsedOpt->type != Wui::JsonValue::Type::Object)
+						{
+							response = "{\"id\":0,\"seq\":0,\"ok\":false,\"error\":\"bad json: " + EscapeJsonString(parseError) + "\"}\n";
+						}
+						else
+						{
+							auto req = std::make_shared<RuntimeAiServerState::PendingRequest>();
+							for (const auto& kv : parsedOpt->Object)
+							{
+								if (kv.first == "id" || kv.first == "seq")
+								{
+									req->Id = static_cast<uint64_t>(kv.second.AsNumber(std::strtod(kv.second.AsString().c_str(), nullptr)));
+								}
+								else if (kv.first == "cmd")
+								{
+									req->Command = kv.second.AsString();
+								}
+								else if (kv.first == "args" && kv.second.type == Wui::JsonValue::Type::Object)
+								{
+									for (const auto& argKv : kv.second.Object)
+									{
+										req->Args[argKv.first] = (argKv.second.type == Wui::JsonValue::Type::String)
+											? argKv.second.AsString()
+											: argKv.second.Dump();
+									}
+								}
+								else
+								{
+									req->Args[kv.first] = (kv.second.type == Wui::JsonValue::Type::String)
+										? kv.second.AsString()
+										: kv.second.Dump();
+								}
+							}
+
+							bool stopping = false;
+							{
+								std::lock_guard<std::mutex> lock(server->QueueMutex);
+								stopping = !server->Running.load();
+								if (!stopping)
+									server->Queue.push_back(req);
+							}
+							if (stopping)
+							{
+								response = "{\"id\":" + std::to_string(req->Id) + ",\"seq\":" + std::to_string(req->Id)
+									+ ",\"ok\":false,\"error\":\"server stopping\"}\n";
+							}
+							else
+							{
+								std::unique_lock<std::mutex> lock(req->Mutex);
+								if (!req->Cv.wait_for(lock, std::chrono::seconds(10), [&] { return req->Done; }))
+								{
+									response = "{\"id\":" + std::to_string(req->Id) + ",\"seq\":" + std::to_string(req->Id)
+										+ ",\"ok\":false,\"error\":\"timeout waiting for runtime main thread\"}\n";
+								}
+								else
+								{
+									response = req->Response + "\n";
+								}
+							}
+						}
+
+						if (!SendAllSlice(client, server->Running, response))
+						{
+							alive = false;
+							break;
+						}
+					}
+				}
+				closesocket(client);
+			}
+		});
+
+		WLD_CORE_INFO("[runtime-ai] control channel listening on 127.0.0.1:{0}", port);
+#endif
+	}
+
+	void RuntimeLayer::StopAiControlServer()
+	{
+#if defined(_WIN32)
+		if (!m_AiServer)
+			return;
+		if (m_AiServer->Running.exchange(false))
+		{
+			std::deque<std::shared_ptr<RuntimeAiServerState::PendingRequest>> pending;
+			{
+				std::lock_guard<std::mutex> lock(m_AiServer->QueueMutex);
+				pending.swap(m_AiServer->Queue);
+			}
+			for (const auto& req : pending)
+			{
+				{
+					std::lock_guard<std::mutex> lock(req->Mutex);
+					if (!req->Done)
+					{
+						req->Done = true;
+						req->Response = "{\"id\":" + std::to_string(req->Id) + ",\"seq\":" + std::to_string(req->Id)
+							+ ",\"ok\":false,\"error\":\"server stopping\"}";
+					}
+				}
+				req->Cv.notify_all();
+			}
+			if (m_AiServer->ListenThread.joinable())
+				m_AiServer->ListenThread.join();
+			if (m_AiServer->ListenSocket != static_cast<uintptr_t>(~0ull))
+			{
+				closesocket(static_cast<SOCKET>(m_AiServer->ListenSocket));
+				m_AiServer->ListenSocket = static_cast<uintptr_t>(~0ull);
+			}
+		}
+		m_AiServer.reset();
+#endif
+	}
+
+	void RuntimeLayer::PumpAiControlRequests()
+	{
+		if (!m_AiServer || !m_AiServer->Running.load())
+			return;
+
+		for (;;)
+		{
+			std::shared_ptr<RuntimeAiServerState::PendingRequest> req;
+			{
+				std::lock_guard<std::mutex> lock(m_AiServer->QueueMutex);
+				if (m_AiServer->Queue.empty())
+					break;
+				req = m_AiServer->Queue.front();
+				m_AiServer->Queue.pop_front();
+			}
+
+			std::string result;
+			std::string error;
+			bool ok = false;
+			try
+			{
+				ok = ExecuteRuntimeAiCommand(req->Command, req->Args, result, error);
+			}
+			catch (const std::exception& ex)
+			{
+				ok = false;
+				error = std::string("runtime command threw: ") + ex.what();
+			}
+			catch (...)
+			{
+				ok = false;
+				error = "runtime command threw an unknown exception";
+			}
+
+			std::ostringstream out;
+			out << "{\"id\":" << req->Id << ",\"seq\":" << req->Id << ",\"ok\":" << (ok ? "true" : "false");
+			if (ok)
+				out << ",\"result\":\"" << EscapeJsonString(result) << "\"";
+			else
+				out << ",\"error\":\"" << EscapeJsonString(error) << "\"";
+			out << "}";
+
+			{
+				std::lock_guard<std::mutex> lock(req->Mutex);
+				req->Response = out.str();
+				req->Done = true;
+			}
+			req->Cv.notify_all();
 		}
 	}
+
+	bool RuntimeLayer::ExecuteRuntimeAiCommand(const std::string& cmd,
+		const std::map<std::string, std::string>& args,
+		std::string& result,
+		std::string& error)
+	{
+		auto arg = [&](const char* key, const std::string& fallback = std::string()) -> std::string
+		{
+			const auto it = args.find(key);
+			return it != args.end() ? it->second : fallback;
+		};
+
+		if (cmd == "scene.list")
+		{
+			std::ostringstream out;
+			out << "[";
+			bool first = true;
+			if (const Ref<Scene> scenePtr = m_Host.GetScene())
+			{
+				const Scene& scene = *scenePtr;
+				const entt::registry& registry = scene.GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+				{
+					if (!first)
+						out << ",";
+					first = false;
+					const std::string& tag = StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag);
+					out << "{\"handle\":" << static_cast<uint32_t>(handle)
+						<< ",\"name\":\"" << EscapeJsonString(tag) << "\"";
+					if (const auto* tr = registry.try_get<TransformComponent>(handle))
+					{
+						out << ",\"location\":[" << tr->Location.x << "," << tr->Location.y << "," << tr->Location.z << "]";
+					}
+					out << "}";
+				}
+			}
+			out << "]";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "scene.get")
+		{
+			const Ref<Scene> scenePtr = m_Host.GetScene();
+			if (!scenePtr)
+			{
+				error = "no active runtime scene";
+				return false;
+			}
+			const Scene& scene = *scenePtr;
+			const entt::registry& registry = scene.GetRegistry();
+			entt::entity target = entt::null;
+
+			if (!arg("handle").empty())
+			{
+				const auto candidate = static_cast<entt::entity>(std::strtoul(arg("handle").c_str(), nullptr, 10));
+				if (registry.valid(candidate))
+					target = candidate;
+			}
+			else if (!arg("name").empty())
+			{
+				const std::string wanted = arg("name");
+				for (auto handle : registry.view<TagComponent>())
+				{
+					if (StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag) == wanted)
+					{
+						target = handle;
+						break;
+					}
+				}
+			}
+
+			if (target == entt::null || !registry.valid(target))
+			{
+				error = "entity not found (specify handle or name)";
+				return false;
+			}
+
+			std::ostringstream out;
+			out << "{\"handle\":" << static_cast<uint32_t>(target);
+			if (const auto* tag = registry.try_get<TagComponent>(target))
+				out << ",\"name\":\"" << EscapeJsonString(StringPool::Get().NameOf(tag->Tag)) << "\"";
+			if (const auto* tr = registry.try_get<TransformComponent>(target))
+			{
+				const glm::vec3 loc = tr->Location;
+				const glm::vec3 rot = tr->GetEulerAngles();
+				const glm::vec3 scl = tr->Scale;
+				out << ",\"location\":[" << loc.x << "," << loc.y << "," << loc.z << "]"
+					<< ",\"rotation\":[" << rot.x << "," << rot.y << "," << rot.z << "]"
+					<< ",\"scale\":[" << scl.x << "," << scl.y << "," << scl.z << "]";
+			}
+			out << "}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "scene.query")
+		{
+			const std::string filterName = arg("name");
+			const std::string filterComp = arg("component");
+			std::ostringstream out;
+			out << "[";
+			bool first = true;
+			if (const Ref<Scene> scenePtr = m_Host.GetScene())
+			{
+				const Scene& scene = *scenePtr;
+				const entt::registry& registry = scene.GetRegistry();
+				for (auto handle : registry.view<TagComponent>())
+				{
+					const std::string& tag = StringPool::Get().NameOf(registry.get<TagComponent>(handle).Tag);
+					if (!filterName.empty() && tag.find(filterName) == std::string::npos)
+						continue;
+					if (!filterComp.empty())
+					{
+						bool hasComp = false;
+						if (filterComp == "TagComponent" || filterComp == "Tag")
+							hasComp = registry.all_of<TagComponent>(handle);
+						else if (filterComp == "TransformComponent" || filterComp == "Transform")
+							hasComp = registry.all_of<TransformComponent>(handle);
+						else if (filterComp == "MeshRendererComponent" || filterComp == "MeshRenderer")
+							hasComp = registry.all_of<MeshRendererComponent>(handle);
+						else if (filterComp == "CameraComponent" || filterComp == "Camera")
+							hasComp = registry.all_of<CameraComponent>(handle);
+						else
+							hasComp = true;
+						if (!hasComp)
+							continue;
+					}
+					if (!first)
+						out << ",";
+					first = false;
+					out << "{\"handle\":" << static_cast<uint32_t>(handle)
+						<< ",\"name\":\"" << EscapeJsonString(tag) << "\"";
+					if (const auto* tr = registry.try_get<TransformComponent>(handle))
+					{
+						out << ",\"location\":[" << tr->Location.x << "," << tr->Location.y << "," << tr->Location.z << "]";
+					}
+					out << "}";
+				}
+			}
+			out << "]";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "prof.stats")
+		{
+			const float dt = std::max(0.0001f, m_LastFrameDeltaSeconds);
+			const float fps = 1.0f / dt;
+			const float frameMs = dt * 1000.0f;
+			size_t entityCount = 0;
+			if (const Ref<Scene> scenePtr = m_Host.GetScene())
+			{
+				const Scene& scene = *scenePtr;
+				entityCount = scene.GetRegistry().view<TagComponent>().size();
+			}
+			const auto telemetry = Profiling::Telemetry::GetStats();
+			std::ostringstream out;
+			out << "{\"fps\":" << fps
+				<< ",\"frameMs\":" << frameMs
+				<< ",\"entityCount\":" << entityCount
+				<< ",\"frameIndex\":" << telemetry.FrameIndex
+				<< ",\"p50Ms\":" << telemetry.Frame.P50Ms
+				<< ",\"p95Ms\":" << telemetry.Frame.P95Ms
+				<< ",\"jankCount\":" << telemetry.Frame.JankCount
+				<< "}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "capture.frame" || cmd == "capture.screen" || cmd == "capture.scene")
+		{
+			const std::string rawPath = arg("path", "runtime_capture.ppm");
+			if (rawPath.empty())
+			{
+				error = "missing path parameter";
+				return false;
+			}
+			const std::filesystem::path capturePath = std::filesystem::u8path(rawPath);
+			if (capturePath.has_parent_path())
+			{
+				std::error_code ec;
+				std::filesystem::create_directories(capturePath.parent_path(), ec);
+			}
+			Renderer::RequestPresentCapture(nullptr, capturePath,
+				Application::Get().GetWindow().GetWidth(), Application::Get().GetWindow().GetHeight());
+			result = "{\"status\":\"queued\",\"path\":\"" + EscapeJsonString(capturePath.string()) + "\"}";
+			return true;
+		}
+
+		if (cmd == "playtest.run")
+		{
+			const World::Ai::PlaytestConfig cfg = World::Ai::PlaytestRunner::ParseConfig(args);
+			const World::Ai::PlaytestResult playRes = World::Ai::PlaytestRunner::Run(cfg, m_Host.GetScene().get());
+			result = playRes.ToJson();
+			if (!playRes.pass && !playRes.failures.empty())
+				error = playRes.failures.front();
+			return playRes.pass;
+		}
+
+		if (cmd == "state.dump")
+		{
+			size_t entityCount = 0;
+			if (const Ref<Scene> scenePtr = m_Host.GetScene())
+			{
+				const Scene& scene = *scenePtr;
+				entityCount = scene.GetRegistry().view<TagComponent>().size();
+			}
+			const float dt = std::max(0.0001f, m_LastFrameDeltaSeconds);
+			std::ostringstream out;
+			out << "{\"host\":\"runtime\",\"entityCount\":" << entityCount
+				<< ",\"fps\":" << (1.0f / dt)
+				<< ",\"window\":[" << Application::Get().GetWindow().GetWidth() << ","
+				<< Application::Get().GetWindow().GetHeight() << "]}";
+			result = out.str();
+			return true;
+		}
+
+		if (cmd == "quit")
+		{
+			Application::Get().Close();
+			result = "closing";
+			return true;
+		}
+
+		if (World::Ai::CommandRegistry::Get().HasCommand(cmd))
+		{
+			return World::Ai::CommandRegistry::Get().Dispatch(cmd, args, result, error);
+		}
+
+		error = "unknown runtime command '" + cmd + "'";
+		return false;
+	}
+
 }

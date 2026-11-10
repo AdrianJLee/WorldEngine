@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000019
+  World::TagComponent:
+    Tag: "Area: Deep Mud Swamp (3.0x Cost)"
+  World::TransformComponent:
+    Location: [30.5, 0.2, 48.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::NavMeshAreaModifierComponent:
+    Extents: [3.2, 0.6, 3.2]
+    CostMultiplier: 3.0
+    AreaType: 2
+  World::LevelEntityComponent:
+    DataLayerMask: 1

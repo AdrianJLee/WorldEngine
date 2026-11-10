@@ -1,0 +1,205 @@
+#pragma once
+
+#include "World/RHI/RhiBuffer.h"
+#include "World/RHI/RhiDescriptorSet.h"
+#include "World/RHI/RhiPipeline.h"
+#include "World/RHI/RhiRenderPass.h"
+#include "World/RHI/RhiSampler.h"
+#include "World/RHI/RhiShader.h"
+#include "World/RHI/RhiSync.h"
+#include "World/RHI/RhiTexture.h"
+
+#include <volk.h>
+
+#include <functional>
+
+namespace World::Rhi::Vulkan
+{
+	class VulkanDevice;
+
+	class VulkanBuffer final : public Buffer
+	{
+	public:
+		VulkanBuffer(VulkanDevice& device, const BufferDesc& desc);
+		~VulkanBuffer() override;
+		const BufferDesc& GetDesc() const override { return m_Desc; }
+		void* Map(uint64_t offset = 0, uint64_t size = 0) override;
+		void Unmap() override;
+		void SetData(const void* data, uint64_t size, uint64_t offset = 0) override;
+		VkBuffer GetBuffer() const { return m_Buffer; }
+	private:
+		VulkanDevice& m_Device;
+		BufferDesc m_Desc;
+		VkBuffer m_Buffer = VK_NULL_HANDLE;
+		VkDeviceMemory m_Memory = VK_NULL_HANDLE;
+		void* m_Mapped = nullptr;
+		// 分配信息:SetData 的刷新范围必须满足 VkMappedMemoryRange 对齐规则;
+		// HOST_COHERENT 内存按规范无需刷新(此前统一刷 VK_WHOLE_SIZE 会触发
+		// VUID-VkMappedMemoryRange-size-01389/01390,例如 80 字节的对象 UBO)。
+		uint64_t m_AllocationSize = 0;
+		bool m_Coherent = true;
+	};
+
+	class VulkanTexture final : public Texture
+	{
+	public:
+		VulkanTexture(VulkanDevice& device, const TextureDesc& desc);
+		// 包装外部图像(如交换链图像):不拥有 VkImage/内存,析构只释放视图。
+		VulkanTexture(VulkanDevice& device, const TextureDesc& desc, VkImage image);
+		~VulkanTexture() override;
+		const TextureDesc& GetDesc() const override { return m_Desc; }
+		void SetData(const void* data, uint64_t size, uint32_t layer = 0, uint32_t mip = 0) override;
+		// HOTR-P2C-ROOT:一批 mip 一次提交(环一次 Submit / 同步回退一条 one-shot)。
+		void SetDataMips(const TextureMipUpload* mips, std::size_t count) override;
+		VkImage GetImage() const { return m_Image; }
+		VkImageView GetView() const { return m_View; }
+		VkImageLayout GetLayout() const { return m_Layout; }
+		// 延迟布局转换(转换命令已入队但不必等完成)时同步登记逻辑布局。
+		void SetLayout(VkImageLayout layout) { m_Layout = layout; }
+		void Transition(VkImageLayout oldLayout, VkImageLayout newLayout);
+		void TransitionTo(VkImageLayout newLayout) { Transition(m_Layout, newLayout); }
+	private:
+		VulkanDevice& m_Device;
+		TextureDesc m_Desc;
+		VkImage m_Image = VK_NULL_HANDLE;
+		VkDeviceMemory m_Memory = VK_NULL_HANDLE;
+		VkImageView m_View = VK_NULL_HANDLE;
+		VkImageLayout m_Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		bool m_OwnsImage = true;
+		// 驱动给的**实际**设备内存分配尺寸(GPU 驻留记账与释放必须用同一个值)。
+		uint64_t m_AllocationSize = 0;
+		// 本纹理是否允许走异步上传环(材质贴图/多 mip 默认走同步,见 .cpp 的说明)。
+		bool UsesAsyncUploadRing() const;
+	};
+
+	class VulkanSampler final : public Sampler
+	{
+	public:
+		VulkanSampler(VulkanDevice& device, const SamplerDesc& desc);
+		~VulkanSampler() override;
+		const SamplerDesc& GetDesc() const override { return m_Desc; }
+		VkSampler GetSampler() const { return m_Sampler; }
+	private:
+		VulkanDevice& m_Device;
+		SamplerDesc m_Desc;
+		VkSampler m_Sampler = VK_NULL_HANDLE;
+	};
+
+	class VulkanShader final : public Shader
+	{
+	public:
+		VulkanShader(VulkanDevice& device, const ShaderDesc& desc);
+		~VulkanShader() override;
+		const ShaderDesc& GetDesc() const override { return m_Desc; }
+		const std::vector<VkShaderModule>& GetModules() const { return m_Modules; }
+	private:
+		VulkanDevice& m_Device;
+		ShaderDesc m_Desc;
+		std::vector<VkShaderModule> m_Modules;
+	};
+
+	class VulkanRenderPass final : public RenderPass
+	{
+	public:
+		VulkanRenderPass(VulkanDevice& device, const RenderPassDesc& desc);
+		~VulkanRenderPass() override;
+		const RenderPassDesc& GetDesc() const override { return m_Desc; }
+		VkRenderPass GetRenderPass() const { return m_RenderPass; }
+	private:
+		VulkanDevice& m_Device;
+		RenderPassDesc m_Desc;
+		VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+	};
+
+	class VulkanFramebuffer final : public Framebuffer
+	{
+	public:
+		VulkanFramebuffer(VulkanDevice& device, const FramebufferDesc& desc);
+		~VulkanFramebuffer() override;
+		const FramebufferDesc& GetDesc() const override { return m_Desc; }
+		VkFramebuffer GetFramebuffer() const { return m_Framebuffer; }
+	private:
+		VulkanDevice& m_Device;
+		FramebufferDesc m_Desc;
+		VkFramebuffer m_Framebuffer = VK_NULL_HANDLE;
+	};
+
+	class VulkanDescriptorSetLayout final : public DescriptorSetLayout
+	{
+	public:
+		VulkanDescriptorSetLayout(VulkanDevice& device, const DescriptorSetLayoutDesc& desc);
+		~VulkanDescriptorSetLayout() override;
+		const DescriptorSetLayoutDesc& GetDesc() const override { return m_Desc; }
+		VkDescriptorSetLayout GetLayout() const { return m_Layout; }
+	private:
+		VulkanDevice& m_Device;
+		DescriptorSetLayoutDesc m_Desc;
+		VkDescriptorSetLayout m_Layout = VK_NULL_HANDLE;
+	};
+
+	class VulkanDescriptorSet final : public DescriptorSet
+	{
+	public:
+		VulkanDescriptorSet(VulkanDevice& device, const Handle<VulkanDescriptorSetLayout>& layout);
+		~VulkanDescriptorSet() override;
+		void Update(const std::vector<DescriptorWrite>& writes) override;
+		VkDescriptorSet GetSet() const { return m_Set; }
+	private:
+		VulkanDevice& m_Device;
+		Handle<VulkanDescriptorSetLayout> m_Layout;
+		VkDescriptorSet m_Set = VK_NULL_HANDLE;
+		VkDescriptorPool m_Pool = VK_NULL_HANDLE;
+	};
+
+	class VulkanFence final : public Fence
+	{
+	public:
+		VulkanFence(VulkanDevice& device, bool signaled);
+		~VulkanFence() override;
+		void Wait(uint64_t timeoutNs = UINT64_MAX) override;
+		bool IsSignaled() const override;
+		void Reset() override;
+		VkFence GetFence() const { return m_Fence; }
+	private:
+		VulkanDevice& m_Device;
+		VkFence m_Fence = VK_NULL_HANDLE;
+	};
+
+	class VulkanSemaphore final : public Semaphore
+	{
+	public:
+		VulkanSemaphore(VulkanDevice& device, const SemaphoreCreateDesc& desc);
+		~VulkanSemaphore() override;
+		void Signal(uint64_t value = 0) override;
+		void Wait(uint64_t value = 0) override;
+		bool IsTimeline() const override { return m_Desc.Timeline; }
+		VkSemaphore GetSemaphore() const { return m_Semaphore; }
+		// 调试用:验证层报错只给原始句柄,追踪信号量身份时需要对上号。
+		uint64_t DebugHandle() const { return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(m_Semaphore)); }
+	private:
+		VulkanDevice& m_Device;
+		SemaphoreCreateDesc m_Desc;
+		VkSemaphore m_Semaphore = VK_NULL_HANDLE;
+	};
+
+	class VulkanQueryPool final : public QueryPool
+	{
+	public:
+		VulkanQueryPool(VulkanDevice& device, QueryType type, uint32_t count);
+		~VulkanQueryPool() override;
+		QueryType GetType() const override { return m_Type; }
+		uint32_t GetCount() const override { return m_Count; }
+		VkQueryPool GetPool() const { return m_Pool; }
+	private:
+		VulkanDevice& m_Device;
+		QueryType m_Type;
+		uint32_t m_Count = 0;
+		VkQueryPool m_Pool = VK_NULL_HANDLE;
+	};
+
+	// 一次性上传/转换:创建临时命令缓冲,提交到图形队列并等待。
+	void ExecuteOneShot(VulkanDevice& device, const std::function<void(VkCommandBuffer)>& record);
+	VkFormat ToVkFormat(Format format);
+	VkImageUsageFlags ToVkImageUsage(uint32_t usage);
+	VkBufferUsageFlags ToVkBufferUsage(uint32_t usage);
+}

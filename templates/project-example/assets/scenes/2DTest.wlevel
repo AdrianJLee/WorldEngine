@@ -1,0 +1,7 @@
+Id: 2DTest
+Name: 2DTest
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true

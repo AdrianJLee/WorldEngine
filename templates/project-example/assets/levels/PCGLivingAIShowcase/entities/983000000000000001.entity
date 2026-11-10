@@ -1,0 +1,30 @@
+﻿ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 983000000000000001
+  World::TagComponent:
+    Tag: "Sun & Sky Atmosphere"
+  World::TransformComponent:
+    Location: [30.0, 50.0, 30.0]
+    Rotation: [-50.0, 35.0, 0.0]
+    Scale: [1, 1, 1]
+  World::DirectionalLightComponent:
+    Color: [1.0, 0.95, 0.88]
+    Intensity: 3.0
+    Direction: [0.4, -0.8, -0.45]
+    CastShadow: true
+  World::WeatherSystemComponent:
+    CurrentWeather: 0
+    TimeOfDay: 14.0
+    CloudCoverage: 0.25
+    CloudDensity: 1.0
+    PrecipitationIntensity: 0.0
+    WindSpeed: 4.5
+    FogDensity: 0.001
+  World::SkyAtmosphereComponent:
+    RayleighScattering: [0.15, 0.35, 0.85]
+    MieScattering: 0.004
+    SunIntensity: 1.0
+  World::LevelEntityComponent:
+    DataLayerMask: 1

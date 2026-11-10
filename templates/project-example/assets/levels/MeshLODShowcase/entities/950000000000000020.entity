@@ -1,0 +1,32 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 950000000000000020
+  World::TagComponent:
+    Tag: "Octree Tower (PX, PZ)"
+  World::TransformComponent:
+    Location: [22, 4.0, 15]
+    Rotation: [0, 0, 0]
+    Scale: [3.5, 8.0, 3.5]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.32, 0.55, 0.90, 1]
+    Mesh: "engine/models/debris_shard.wmodel"
+  World::MeshLODComponent:
+    LOD1Distance: 25.0
+    LOD2Distance: 55.0
+    LOD3Distance: 62.0
+    LOD4Distance: 69.0
+    LOD5Distance: 76.0
+    LOD6Distance: 83.0
+    LOD7Distance: 88.2
+    CullDistance: 90.0
+    Hysteresis: 2.0
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
+    CurrentLOD: 0
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 4

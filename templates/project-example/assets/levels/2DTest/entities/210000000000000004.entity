@@ -1,0 +1,23 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000004
+  World::TagComponent:
+    Tag: Parallax Sky
+  World::TransformComponent:
+    Location: [0, 0, -10]
+    Rotation: [0, 0, 0, 1]
+    Scale: [20, 12, 1]
+  World::SpriteComponent:
+    Color: [0.15, 0.45, 0.85, 1]
+    Texture: "assets/textures/Icon.wtex"
+    TilingFactor: 1
+    SortingLayer: -20
+    OrderInLayer: 0
+  World::ParallaxLayerComponent:
+    ScrollFactor: [0.0, 0.0]
+    RepeatSize: [20, 12]
+    Offset: [0, 0]
+    RepeatX: true
+    RepeatY: false

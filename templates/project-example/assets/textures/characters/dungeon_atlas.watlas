@@ -1,0 +1,68 @@
+TexturePath: assets/textures/Icon.wtex
+Width: 256
+Height: 256
+Sprites:
+  - Name: slice_0
+    Rect: [0, 0, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_1
+    Rect: [64, 0, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_2
+    Rect: [128, 0, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_3
+    Rect: [192, 0, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_4
+    Rect: [0, 64, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_5
+    Rect: [64, 64, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_6
+    Rect: [128, 64, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_7
+    Rect: [192, 64, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_8
+    Rect: [0, 128, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_9
+    Rect: [64, 128, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_10
+    Rect: [128, 128, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_11
+    Rect: [192, 128, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_12
+    Rect: [0, 192, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_13
+    Rect: [64, 192, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_14
+    Rect: [128, 192, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]
+  - Name: slice_15
+    Rect: [192, 192, 64, 64]
+    Pivot: [0.5, 0.5]
+    Border: [0, 0, 0, 0]

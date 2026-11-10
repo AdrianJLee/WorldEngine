@@ -1,0 +1,7 @@
+Id: NavMeshShowcase
+Name: 3D NavMesh & AI Navigation Showcase
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true

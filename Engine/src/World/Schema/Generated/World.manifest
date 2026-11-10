@@ -1,0 +1,107 @@
+struct World::UUIDComponent
+struct World::TagComponent
+struct World::TransformComponent
+struct World::VelocityComponent
+struct World::SpriteComponent
+struct World::SpriteAnimatorComponent
+struct World::TilemapComponent
+struct World::CircleRendererComponent
+struct World::MeshRendererComponent
+struct World::SkinnedMeshRendererComponent
+struct World::AnimationPlayerComponent
+struct World::HierarchyComponent
+struct World::CameraComponent
+struct World::PixelPerfectCameraComponent
+struct World::ParallaxLayerComponent
+struct World::DirectionalLightComponent
+struct World::PointLightComponent
+struct World::AmbientLightComponent
+struct World::PointLight2DComponent
+struct World::GlobalLight2DComponent
+struct World::ShadowCaster2DComponent
+struct World::FreeformLight2DComponent
+struct World::RigidBody2DComponent
+struct World::BoxCollider2DComponent
+struct World::CircleCollider2DComponent
+struct World::CapsuleCollider2DComponent
+struct World::PolygonCollider2DComponent
+struct World::ChainCollider2DComponent
+struct World::CompositeCollider2DComponent
+struct World::PlatformEffector2DComponent
+struct World::DistanceJoint2DComponent
+struct World::RevoluteJoint2DComponent
+struct World::PrismaticJoint2DComponent
+struct World::WheelJoint2DComponent
+struct World::AreaEffector2DComponent
+struct World::BuoyancyEffector2DComponent
+struct World::SurfaceEffector2DComponent
+struct World::RigidBody3DComponent
+struct World::BoxCollider3DComponent
+struct World::SphereCollider3DComponent
+struct World::CapsuleCollider3DComponent
+struct World::JointComponent
+struct World::MeshCollider3DComponent
+struct World::PartitionVolumeComponent
+struct World::LevelEntityComponent
+struct World::AudioSourceComponent
+struct World::AudioListenerComponent
+struct World::PhysicsMaterialComponent
+struct World::CharacterControllerComponent
+struct World::VirtualCameraComponent
+struct World::PostProcessComponent
+struct World::HealthComponent
+struct World::SmartObjectComponent
+struct World::VfxComponent
+struct World::TerrainComponent
+struct World::FoliageComponent
+struct World::SpotLight3DComponent
+struct World::AnimGraphComponent
+struct World::TwoBoneIkComponent
+struct World::FootIkComponent
+struct World::NavMeshAgentComponent
+struct World::NavMeshObstacleComponent
+struct World::NavMeshOffMeshLinkComponent
+struct World::NavMeshAreaModifierComponent
+struct World::MeshLODComponent
+struct World::MeshletComponent
+struct World::DecalComponent
+struct World::ConvexCollider3DComponent
+struct World::SplineComponent
+struct World::WhiteboxComponent
+struct World::HLODComponent
+struct World::RVTComponent
+struct World::WaterBodyComponent
+struct World::WeatherSystemComponent
+struct World::WeatherVolumeComponent
+struct World::BiomePCGComponent
+struct World::BehaviorTreeComponent
+struct World::FoliageInteractionComponent
+struct World::LocalWindComponent
+struct World::EditorOnlyComponent
+struct World::UUID
+struct World::CameraSettings
+enum World::MeshRendererComponent::PrimitiveShape
+enum World::RigidBody2DComponent::BodyType
+enum World::JointComponent::JointKind
+enum World::CameraSettings::ProjectionType
+enum World::RigidBody3DComponent::MotionType
+enum World::MeshCollider3DComponent::ColliderMode
+enum World::PhysMatCombineMode
+enum World::SmartObjectSlotState
+enum World::BehaviorStatus
+enum World::ParticleEmitterType
+enum World::ParticleRenderMode
+enum World::ParticleBlendMode
+enum World::LocalWindType
+enum World::VfxPlaybackState
+enum World::RootMotionMode
+
+
+
+
+
+
+
+
+
+

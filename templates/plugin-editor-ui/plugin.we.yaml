@@ -1,0 +1,16 @@
+# Editor Extension Plugin — 插件清单模板(位置即 scope:本目录在 <plugins>/ 下 ⇒ scope = {{PluginScope}})。
+# 字段口径:Engine/src/World/Plugins/PluginManifest.h 与 docs/dev/plugin-framework.md。
+id: {{PluginId}}
+name: {{PluginName}}
+version: 1.0.0
+abi: 1
+entry: WePluginQuery
+engine: ">=2.0"
+# 编辑器扩展(面板 / 命令)—— 注册面待 T3b;现在声明能力,生成物可编译:
+provides:
+  - editor.panel
+  - editor.command
+# 打包期引用索引(T5):编辑器命令/面板不是"内容引用面"(不参与 cook 引用硬门),
+# 所以这里显式声明空贡献 —— 两面一致(= 没有可索引的内容引用)。
+contributes: {}
+ship: auto

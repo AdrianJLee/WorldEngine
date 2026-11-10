@@ -1,0 +1,15 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 940000000000000007
+  World::TagComponent:
+    Tag: Lamp (point)
+  World::TransformComponent:
+    Location: [3.5999999, -1.20000005, 2.20000005]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::PointLightComponent:
+    Color: [1, 0.720000029, 0.419999987]
+    Intensity: 5
+    Range: 6

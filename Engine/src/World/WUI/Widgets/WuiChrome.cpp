@@ -1,0 +1,1223 @@
+#include "wldpch.h"
+#include "World/WUI/Widgets/WuiChrome.h"
+
+#include "World/WUI/WuiAccessibility.h"
+#include "World/WUI/WuiWidgets_Internal.h"
+#include "World/Core/KeyCodes.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace World::Wui
+{
+	namespace
+	{
+		void PushText(WuiContext& ctx, const glm::vec2& pos, const std::string& text,
+			const WuiColor& color, float size, bool bold = false)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Text, { pos.x, pos.y, 0, 0 }, color, 0.0f, 1.0f, text, size, bold });
+		}
+
+		// 细线段 = 一个旋转后的四边形(2D 管线逐顶点颜色,不需要新的绘制类型)。
+		void PushAxisLine(WuiContext& ctx, const glm::vec2& from, const glm::vec2& to,
+			const WuiColor& color, float thickness)
+		{
+			const glm::vec2 d = to - from;
+			const float length = glm::length(d);
+			if (length < 1e-3f)
+				return;
+			const glm::vec2 n { -d.y / length * thickness * 0.5f, d.x / length * thickness * 0.5f };
+			WuiDrawCommand command;
+			command.Kind = WuiDrawKind::Quad;
+			command.Color = color;
+			command.Vertices = { from + n, to + n, to - n, from - n };
+			ctx.Commands().push_back(std::move(command));
+		}
+
+		// 深度着色:depth=+1 = 轴指向观察者(更亮更实),-1 = 背离(更暗更透)。
+		WuiColor ShadeAxisColor(const WuiColor& base, float depth)
+		{
+			const float toward = std::max(0.0f, std::min(1.0f, depth));
+			const float bright = 0.72f + 0.28f * toward;
+			const float alpha = 0.55f + 0.41f * toward;
+			return WuiColor { base.R * bright, base.G * bright, base.B * bright, alpha };
+		}
+	}
+
+	// ---- 基础表面与高亮 ----
+
+	void PanelBackground(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, color, radius });
+	}
+
+	void BarSurface(WuiContext& ctx, const WuiRect& rect, const WuiColor& fill, const WuiColor& border)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 0.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, border, 0.0f });
+	}
+
+	bool HoverRow(WuiContext& ctx, const WuiRect& rect, bool hovered, bool selected, const WuiTheme& theme,
+		float radius)
+	{
+		if (selected)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonBg, radius });
+		else if (hovered)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, radius });
+		return hovered;
+	}
+
+	void HighlightOutline(WuiContext& ctx, const WuiRect& rect, const WuiColor& color, float radius, float thickness)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, color, radius, thickness });
+	}
+
+	void DropZoneOverlay(WuiContext& ctx, const WuiRect& rect, float alpha, float radius)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, { 0.30f, 0.50f, 0.90f, alpha }, radius });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, { 0.45f, 0.65f, 1.0f, 1.0f }, radius, 2.0f });
+	}
+
+	void SectionHeader(WuiContext& ctx, const WuiRect& rect, const std::string& title, const WuiColor& color,
+		const WuiTheme& theme, float fontSize)
+	{
+		PushText(ctx, { rect.X, rect.Y + 2.0f }, title, color, fontSize);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { rect.X, rect.Y + rect.H - 1.0f, rect.W, 1.0f }, theme.Border, 0.0f });
+	}
+
+	// ---- P1c-LIB2:即时可折叠分区标题 ----
+
+	bool CollapsibleHeader(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& title, bool& open,
+		const WuiTheme& theme, const std::string& term, const std::string& trailing,
+		const std::string& tooltip, float fontSize)
+	{
+		const bool focused = id != 0 && ctx.Focus() == id;
+		const bool hovered = ctx.IsHovered(rect);
+		// 底色:展开用 ActiveBg / 折叠用 PanelHeader,悬停统一 HoverBg(不另外叠一层)。
+		const WuiColor fill = hovered ? theme.HoverBg : (open ? theme.ActiveBg : theme.PanelHeader);
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, 2.0f });
+
+		const float textSize = fontSize > 0.0f ? fontSize : theme.FontSizeBody;
+		const float trailingSize = std::max(theme.FontSizeCaption, textSize - 2.0f);
+		const float trailingWidth = trailing.empty() ? 0.0f : ctx.MeasureTextWidth(trailing, trailingSize) + 12.0f;
+		// 标题预算 = 整行宽 − 左内边距 − 右侧后缀占位;LabelWithTerm 自己按预算逐级降级。
+		const float titleBudget = std::max(40.0f, rect.W - 12.0f - trailingWidth);
+		Wui::LabelWithTerm(ctx, { rect.X + 6.0f, rect.Y + (rect.H - textSize) * 0.5f - 2.0f },
+			(open ? "- " : "+ ") + title, term, theme.Text, textSize, theme, titleBudget);
+		if (!trailing.empty())
+			PushText(ctx, { rect.X + rect.W - trailingWidth + 4.0f, rect.Y + (rect.H - trailingSize) * 0.5f },
+				trailing, theme.TextMuted, trailingSize);
+
+		// 交互走整行:点击(或焦点上 Enter/Space)切换;hover 给 Hand 光标与可选提示。
+		bool toggled = false;
+		if ((ctx.IsClicked(rect)) || (focused
+				&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))))
+			toggled = true;
+		if (hovered)
+		{
+			ctx.SetCursor(WuiCursor::Hand);
+			if (!tooltip.empty())
+				Tooltip(ctx, rect, tooltip);
+		}
+		if (toggled)
+			open = !open;
+
+		if (id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = title;
+			node.Value = open ? "open" : "closed";
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+		ctx.RegisterFocusable(id, rect);
+		DrawFocusRing(ctx, rect, id, theme);
+		return toggled;
+	}
+
+	bool TreeChevron(WuiContext& ctx, WuiId id, const WuiRect& rect, bool expanded,
+		const WuiTheme& theme, const std::string& tooltip)
+	{
+		const bool focused = id != 0 && ctx.Focus() == id;
+		const bool hovered = ctx.IsHovered(rect);
+		const bool pressed = hovered && ctx.Input().MouseDown[0];
+
+		if (hovered)
+		{
+			ctx.SetCursor(WuiCursor::Hand);
+			if (!tooltip.empty())
+				Tooltip(ctx, rect, tooltip);
+		}
+
+		// 悬停/按下微底色(平时无灰框,悬停时呈极轻圆角高亮)
+		if (pressed)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ActiveBg, 3.0f });
+		}
+		else if (hovered)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.HoverBg, 3.0f });
+		}
+
+		// 几何三角形绝对居中绘制 (对齐 UE Niagara / Details 细节面板展开箭头)
+		// 避免字体渲染中 ▶/▼ 因 fallback 字形、bearing 和 measure 不准导致的严重偏右及边缘溢出问题
+		const float cx = std::round(rect.X + rect.W * 0.5f);
+		const float cy = std::round(rect.Y + rect.H * 0.5f);
+		const WuiColor iconColor = pressed ? theme.Accent : (hovered ? theme.Text : (expanded ? theme.Text : theme.TextMuted));
+
+		WuiDrawCommand cmd;
+		cmd.Kind = WuiDrawKind::Quad;
+		cmd.Color = iconColor;
+
+		if (expanded)
+		{
+			// 展开态：尖头朝下 ▼ (底宽 8px, 高 5px, 顶点对称居中)
+			const float halfBase = 4.0f;
+			cmd.Vertices[0] = { cx - halfBase, cy - 2.5f };
+			cmd.Vertices[1] = { cx + halfBase, cy - 2.5f };
+			cmd.Vertices[2] = { cx, cy + 2.5f };
+			cmd.Vertices[3] = cmd.Vertices[2];
+		}
+		else
+		{
+			// 折叠态：尖头朝右 ▶ (底高 8px, 宽 5px, 顶点对称居中)
+			const float halfBase = 4.0f;
+			cmd.Vertices[0] = { cx - 2.5f, cy - halfBase };
+			cmd.Vertices[1] = { cx + 2.5f, cy };
+			cmd.Vertices[2] = { cx - 2.5f, cy + halfBase };
+			cmd.Vertices[3] = cmd.Vertices[2];
+		}
+		ctx.Commands().push_back(std::move(cmd));
+
+		if (id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = expanded ? "collapse" : "expand";
+			node.Value = expanded ? "open" : "closed";
+			node.Tooltip = tooltip;
+			node.Rect = rect;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+
+			ctx.RegisterFocusable(id, rect);
+			DrawFocusRing(ctx, rect, id, theme);
+		}
+
+		const bool keyActivated = focused && (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		return (hovered && ctx.Input().MouseClicked[0]) || keyActivated;
+	}
+
+	// ---- P1c-LIB1:徽标 / 染色图标(ClipScope 是纯 RAII,定义在头文件里) ----
+
+	void Badge(WuiContext& ctx, const WuiRect& rect, const std::string& text, const WuiColor& fill,
+		const WuiColor& textColor, const WuiTheme& theme, float fontSize, bool bold, float radius)
+	{
+		const float size = fontSize > 0.0f ? fontSize : theme.FontSizeCaption;
+		const float corner = radius >= 0.0f ? radius : std::min(rect.W, rect.H) * 0.5f;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, fill, corner });
+		const float textWidth = ctx.MeasureTextWidth(text, size);
+		PushText(ctx, { rect.X + (rect.W - textWidth) * 0.5f, rect.Y + (rect.H - size) * 0.5f },
+			text, textColor, size, bold);
+	}
+
+	void Icon(WuiContext& ctx, const WuiRect& rect, uint64_t textureId, const WuiRect& uv,
+		const WuiColor& tint, const WuiTheme& theme, float radius)
+	{
+		if (textureId != 0)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Image, rect, tint, 0.0f, 1.0f, "", 15.0f, false, textureId, uv });
+			return;
+		}
+		// 空图兜底:底 + 2×2 棋盘 + 描边(不依赖纹理与字体,任何后端都画得出来)。
+		ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ContentBg, radius });
+		const WuiRect cells[2] = {
+			{ rect.X + rect.W * 0.5f, rect.Y, rect.W * 0.5f, rect.H * 0.5f },
+			{ rect.X, rect.Y + rect.H * 0.5f, rect.W * 0.5f, rect.H * 0.5f } };
+		for (const WuiRect& cell : cells)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, cell, theme.ButtonHover, 0.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, radius, 1.0f });
+	}
+
+	// ---- 挂靠标签 ----
+
+	AttachTagResult AttachTag(WuiContext& ctx, const WuiRect& rect, const std::string& title, bool active,
+		bool closable, const WuiTheme& theme, float fontSize)
+	{
+		AttachTagResult result;
+		result.Rect = rect;
+		const float closeSize = 13.0f;
+		result.CloseRect = { rect.X + rect.W - closeSize - 5.0f, rect.Y + (rect.H - closeSize) * 0.5f, closeSize, closeSize };
+		result.Hovered = ctx.IsHovered(rect);
+		result.CloseHovered = closable && ctx.IsHovered(result.CloseRect);
+
+		if (active)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ActiveBg, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.BorderStrong, 3.0f, 1.0f });
+		}
+		else if (result.Hovered)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.HoverBg, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect, theme.Border, 3.0f, 1.0f });
+		}
+		else
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect,
+				WuiColor { theme.PanelHeader.R * 0.75f, theme.PanelHeader.G * 0.75f, theme.PanelHeader.B * 0.75f, 0.45f }, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, rect,
+				WuiColor { theme.Border.R, theme.Border.G, theme.Border.B, 0.65f }, 3.0f, 1.0f });
+		}
+		if (result.Hovered)
+			ctx.SetCursor(WuiCursor::Hand);
+
+		const float maxTextWidth = std::max(0.0f, rect.W - (closable ? (closeSize + 14.0f) : 12.0f));
+		const float tagFontSize = (fontSize == 13.0f) ? 12.5f : fontSize;
+		const std::string shownTitle = EllipsizeToWidth(ctx, title, maxTextWidth, tagFontSize);
+		if (shownTitle != title && result.Hovered)
+			Wui::Tooltip(ctx, rect, title);
+
+		PushText(ctx, { rect.X + 7.0f, rect.Y + 4.0f }, shownTitle,
+			active ? theme.Text : theme.TextMuted, tagFontSize);
+
+		if (!closable)
+		{
+			result.Clicked = ctx.IsClicked(rect);
+			return result;
+		}
+
+		const WuiColor closeBg = result.CloseHovered ? theme.Danger : theme.Transparent;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, result.CloseRect, closeBg, 2.5f });
+		if (result.CloseHovered)
+			ctx.SetCursor(WuiCursor::Hand);
+
+		const WuiColor closeTextColor = result.CloseHovered ? theme.TextBright : theme.Text;
+		PushText(ctx, { result.CloseRect.X + 2.5f, result.CloseRect.Y - 1.0f }, "x", closeTextColor, 11.5f);
+		result.CloseClicked = ctx.IsClicked(result.CloseRect);
+		result.Clicked = !result.CloseClicked && ctx.IsClicked(rect);
+		return result;
+	}
+
+	// ---- 停靠标签栏 ----
+
+	DockTabBarResult DockTabBar(WuiContext& ctx, const WuiRect& area, const std::vector<DockTab>& tabs,
+		const WuiTheme& theme, float tabHeight, float maxTabWidth)
+	{
+		DockTabBarResult result;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { area.X, area.Y, area.W, tabHeight }, theme.PanelHeader, 0.0f });
+		result.BarHovered = ctx.IsHovered(area);
+		if (tabs.empty())
+			return result;
+
+		const float slot = std::max(1.0f, (area.W - 8.0f) / static_cast<float>(tabs.size()));
+		const float width = std::min(maxTabWidth, slot);
+		float x = area.X + 4.0f;
+		for (size_t i = 0; i < tabs.size(); ++i)
+		{
+			const DockTab& tab = tabs[i];
+			const WuiRect tabRect { x, area.Y + 2.0f, width, tabHeight - 2.0f };
+			const WuiRect closeRect { tabRect.X + tabRect.W - 18.0f, tabRect.Y + 4.0f, 14.0f, 14.0f };
+			const bool hovered = ctx.IsHovered(tabRect);
+			if (hovered)
+				result.Hovered = static_cast<int>(i);
+
+			if (tab.Active)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, tabRect, theme.PanelBg, 2.0f });
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, tabRect, theme.ButtonHover, 2.0f });
+			if (hovered)
+				ctx.SetCursor(WuiCursor::Hand);
+
+			const float maxTabTitleWidth = std::max(0.0f, width - 26.0f);
+			const std::string shownTabTitle = EllipsizeToWidth(ctx, tab.Title, maxTabTitleWidth, 14.0f);
+			if (shownTabTitle != tab.Title && hovered)
+				Wui::Tooltip(ctx, tabRect, tab.Title);
+
+			PushText(ctx, { tabRect.X + 6.0f, tabRect.Y + 3.0f }, shownTabTitle, theme.Text, 14.0f, tab.Active);
+
+			if (ctx.IsHovered(closeRect))
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, closeRect, theme.ButtonHover, 2.0f });
+				ctx.SetCursor(WuiCursor::Hand);
+			}
+			PushText(ctx, { closeRect.X + 3.0f, closeRect.Y - 1.0f }, "x", theme.TextMuted, 13.0f);
+
+			if (ctx.IsClicked(closeRect))
+				result.Closed = static_cast<int>(i);
+			else if (ctx.IsClicked(tabRect))
+				result.Clicked = static_cast<int>(i);
+			// 拖动起手:按住标签(非关闭键)即标记按下,由调用方决定阈值与 payload。
+			if (ctx.Input().MouseDown[0] && hovered && !ctx.IsHovered(closeRect))
+				result.DragStart = static_cast<int>(i);
+			x += width;
+		}
+		return result;
+	}
+
+	// ---- 分隔条 ----
+
+	SplitterResult Splitter(WuiContext& ctx, const WuiRect& area, bool row, const WuiTheme& theme,
+		bool dragging, float thickness)
+	{
+		SplitterResult result;
+		const WuiRect handle = row
+			? WuiRect { area.X, area.Y, thickness, area.H }
+			: WuiRect { area.X, area.Y, area.W, thickness };
+		result.Hovered = ctx.IsHovered(handle);
+		result.Active = dragging;
+		if (result.Hovered || dragging)
+			ctx.Commands().push_back({ WuiDrawKind::Rect, handle, theme.Border, 0.0f });
+		if (result.Hovered)
+			ctx.SetCursor(row ? WuiCursor::ResizeEW : WuiCursor::ResizeNS);
+		result.Position = row ? ctx.Input().MousePos.x : ctx.Input().MousePos.y;
+		return result;
+	}
+
+	// ---- 工具栏 ----
+
+	WuiRect Toolbar(WuiContext& ctx, const WuiRect& area, const WuiTheme& theme, float rounding, float alpha)
+	{
+		WuiColor bg = theme.PanelHeader;
+		bg.A = alpha;
+		ctx.Commands().push_back({ WuiDrawKind::Rect, area, bg, rounding });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, area, theme.Border, rounding, 1.0f });
+		return { area.X + 4.0f, area.Y + 4.0f, std::max(0.0f, area.W - 8.0f), std::max(0.0f, area.H - 8.0f) };
+	}
+
+	bool ToolbarIconButton(WuiContext& ctx, WuiId id, const WuiRect& rect, uint64_t textureId,
+		const WuiRect& uv, const std::string& fallbackLabel, const WuiTheme& theme, bool enabled)
+	{
+		const bool hovered = ctx.IsHovered(rect);
+		// P1c-E4:图标按钮也是键盘入口(Tab 可达 + Enter/Space 激活)。disabled 时既不进焦点表
+		// 也不吃键,与 ResetDefaultButton 同一条口径(节点仍然登记,让 AI 读得到"它被禁用了")。
+		const bool focused = enabled && ctx.Focus() == id;
+		if (enabled)
+			ctx.RegisterFocusable(id, rect);
+		if (hovered && enabled)
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, rect, theme.ButtonHover, 3.0f });
+			ctx.SetCursor(WuiCursor::Hand);
+		}
+		if (textureId != 0)
+			ctx.Commands().push_back({ WuiDrawKind::Image, rect,
+				enabled ? theme.TextBright : theme.TextDisabled,
+				0.0f, 1.0f, "", 15.0f, false, textureId, uv });
+		else
+			PushText(ctx, { rect.X + 4.0f, rect.Y + rect.H * 0.5f - 8.0f }, fallbackLabel,
+				enabled ? theme.Text : theme.TextDisabled, 13.0f);
+		// P1c-a:图标按钮与保留模式 WuiImageButton 同一条 a11y 契约(那条路径一直在登记节点)——
+		// 整块矩形就是按钮,kind=button、label=语义文案、enabled 跟随交互态,AI/脚本按 id 点得到。
+		if (id != 0)
+		{
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "button";
+			node.Label = fallbackLabel;
+			node.Rect = rect;
+			node.Enabled = enabled;
+			node.Interactive = enabled;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+		DrawFocusRing(ctx, rect, id, theme);
+		const bool keyActivated = focused
+			&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space));
+		return enabled && (ctx.IsClicked(rect) || keyActivated);
+	}
+
+	void ToolbarSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect,
+			{ rect.X + rect.W * 0.5f, rect.Y + 4.0f, 1.0f, std::max(0.0f, rect.H - 8.0f) }, theme.Border, 0.0f });
+	}
+
+	// ---- 右键菜单 ----
+
+	bool BeginContextMenu(WuiContext& ctx, WuiId id, const glm::vec2& pinnedPos, float width,
+		size_t itemCount, WuiRect* panel, const WuiTheme& theme)
+	{
+		if (!ctx.IsPopupOpen(id))
+			return false;
+		const float height = static_cast<float>(itemCount) * 22.0f + 8.0f;
+		const WuiRect rect { pinnedPos.x, pinnedPos.y, width, height };
+		if (panel)
+			*panel = rect;
+		ctx.PushOverlay();
+		DrawPanelSurface(ctx, rect, theme);
+		// P4-U7:右键菜单矩形登记为覆盖层 → 下一帧只挡下层控件(先画的行不再吃掉菜单上的点击)。
+		ctx.RegisterOverlayRect(rect);
+		return true;
+	}
+
+	void EndContextMenu(WuiContext& ctx, WuiId id, const WuiRect& panel, const WuiTheme& theme)
+	{
+		(void)theme;
+		// 外部点击 / Esc 关闭;位置在打开时已钉住,不会跟随鼠标。
+		ctx.ClosePopupsOnOutsideClick({ id }, panel);
+		ctx.PopOverlay();
+	}
+
+	bool ContextMenuItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		const WuiTheme& theme, bool enabled)
+	{
+		return MenuItem(ctx, id, rect, label, enabled, theme);
+	}
+
+	bool ContextMenuToggleItem(WuiContext& ctx, WuiId id, const WuiRect& rect, const std::string& label,
+		bool checked, const WuiTheme& theme, bool enabled)
+	{
+		return MenuItem(ctx, id, rect, label, checked, enabled, theme);
+	}
+
+	void ContextMenuSeparator(WuiContext& ctx, const WuiRect& rect, const WuiTheme& theme)
+	{
+		ctx.Commands().push_back({ WuiDrawKind::Rect,
+			{ rect.X + 6.0f, rect.Y + rect.H * 0.5f, std::max(0.0f, rect.W - 12.0f), 1.0f }, theme.Border, 0.0f });
+	}
+
+	// ---- 面包屑 ----
+
+	int Breadcrumb(WuiContext& ctx, const WuiRect& area, const std::string& path, const WuiTheme& theme,
+		WuiId id)
+	{
+		int clicked = -1;
+		// P1c-E4:键盘入口(id != 0)。绘制仍在下面的原循环里逐段进行(布局逐字节不变),
+		// 这里只多算一份段表给"光标段"用。
+		const bool focused = id != 0 && ctx.Focus() == id;
+		int cursor = -1;
+		int keyboardActivated = -1;
+		std::vector<std::string> segments;
+		if (id != 0)
+		{
+			size_t scan = 0;
+			while (scan <= path.size())
+			{
+				const size_t slash = path.find('/', scan);
+				const std::string segment = path.substr(scan,
+					slash == std::string::npos ? std::string::npos : slash - scan);
+				if (!segment.empty())
+					segments.push_back(segment);
+				if (slash == std::string::npos)
+					break;
+				scan = slash + 1;
+			}
+			ctx.RegisterFocusable(id, area);
+			int& stored = ctx.Persist<int>(DerivedChildId(id, ".cursor.", 0), 0);
+			if (segments.empty())
+				stored = 0;
+			else
+			{
+				stored = std::max(0, std::min(stored, static_cast<int>(segments.size()) - 1));
+				if (focused)
+				{
+					// ←/→ 移动段光标;Enter/Space = 激活光标段(返回值与鼠标点击同一语义)。
+					if (ctx.WasKeyPressed(KeyCodes::Left))
+						stored = std::max(0, stored - 1);
+					else if (ctx.WasKeyPressed(KeyCodes::Right))
+						stored = std::min(static_cast<int>(segments.size()) - 1, stored + 1);
+					if (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space))
+						keyboardActivated = stored;
+				}
+				cursor = stored;
+			}
+			// 节点语义:label = 整条路径(用户看到的文本)、value = 段数与光标段(键盘位读得到);
+			// 点它 = 命中组中心所在的那一段(与鼠标同一条命中路径)。
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "breadcrumb";
+			node.Label = path;
+			node.Value = cursor >= 0
+				? ("segments=" + std::to_string(segments.size()) + " cursor=" + segments[static_cast<size_t>(cursor)])
+				: std::string("segments=0");
+			node.Rect = area;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Focused = focused;
+			WuiAccessibility::Get().Register(node);
+		}
+		float x = area.X + 2.0f;
+		size_t start = 0;
+		int index = 0;
+		const float textW = 7.0f; // 粗略字宽(与后端一致即可,仅用于命中)
+		while (start <= path.size())
+		{
+			const size_t slash = path.find('/', start);
+			const std::string segment = path.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+			if (!segment.empty())
+			{
+				const float w = textW * static_cast<float>(segment.size()) + 8.0f;
+				const WuiRect item { x, area.Y, w, area.H };
+				const bool hovered = ctx.IsHovered(item);
+				// 键盘光标段与悬停同一档视觉(焦点在整条上时才画),让"Tab 进来之后按 ←/→"看得见。
+				const bool cursorHere = focused && index == cursor;
+				if (hovered || cursorHere)
+				{
+					ctx.Commands().push_back({ WuiDrawKind::Rect, item, theme.ButtonHover, 2.0f });
+					if (hovered)
+						ctx.SetCursor(WuiCursor::Hand);
+				}
+				PushText(ctx, { item.X + 4.0f, item.Y + (item.H - 13.0f) * 0.5f }, segment,
+					(hovered || cursorHere) ? theme.Text : theme.TextMuted, 13.0f);
+				if (ctx.IsClicked(item))
+					clicked = index;
+				x += w;
+				if (slash != std::string::npos)
+				{
+					PushText(ctx, { x + 2.0f, area.Y + (area.H - 13.0f) * 0.5f }, "/", theme.TextMuted, 13.0f);
+					x += 10.0f;
+				}
+				++index;
+			}
+			if (slash == std::string::npos)
+				break;
+			start = slash + 1;
+		}
+		DrawFocusRing(ctx, area, id, theme);
+		return keyboardActivated >= 0 ? keyboardActivated : clicked;
+	}
+
+	// ---- 搜索框 ----
+
+	bool SearchField(WuiContext& ctx, WuiId id, const WuiRect& rect, std::string& buffer,
+		const std::string& placeholder, const WuiTheme& theme)
+	{
+		// 放大镜简化绘制:圆点 + 手柄。
+		const WuiRect glass { rect.X + 6.0f, rect.Y + rect.H * 0.5f - 5.0f, 8.0f, 8.0f };
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, glass, theme.TextMuted, 4.0f, 1.0f });
+		ctx.Commands().push_back({ WuiDrawKind::Rect, { glass.X + 7.0f, glass.Y + 7.0f, 4.0f, 1.0f }, theme.TextMuted, 0.0f });
+
+		const WuiRect field { rect.X + 18.0f, rect.Y, std::max(20.0f, rect.W - 38.0f), rect.H };
+		const WuiRect clearRect { rect.X + rect.W - 18.0f, rect.Y + rect.H * 0.5f - 7.0f, 14.0f, 14.0f };
+		// P1c-E4:焦点入口 / a11y 节点必须**无条件**登记 —— 旧实现只在 ctx.Focus()==id 的分支里
+		// 转发 TextField,而 TextFieldCore 才登记焦点表与节点 → Tab 与 ui.invoke 永远到不了这里。
+		// 节点语义与 TextField 保持一致(label=占位文案、value=内容、空时回落到占位文案),
+		// 聚焦那一帧由 TextFieldCore 用同一份 a11y 描述重登记(同 id、同 kind,后写覆盖)。
+		TextFieldA11y a11y;
+		a11y.Label = placeholder;
+		a11y.Placeholder = placeholder;
+		if (id != 0)
+		{
+			ctx.RegisterFocusable(id, field);
+			WuiAccessNode node;
+			node.Id = id;
+			node.Window = WuiAccessibility::Get().CurrentWindow();
+			node.Panel = WuiAccessibility::Get().CurrentPanel();
+			node.Kind = "text-field";
+			node.Label = placeholder;
+			node.Value = buffer.empty() ? placeholder : buffer;
+			node.Rect = field;
+			node.Enabled = true;
+			node.Interactive = true;
+			node.Focused = ctx.Focus() == id;
+			WuiAccessibility::Get().Register(node);
+		}
+		bool submitted = false;
+		if (buffer.empty())
+		{
+			ctx.Commands().push_back({ WuiDrawKind::Rect, field, theme.ButtonBg, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, field, theme.Border, 3.0f, 1.0f });
+			PushText(ctx, { field.X + 6.0f, field.Y + (field.H - 13.0f) * 0.5f }, placeholder, theme.TextMuted, 13.0f);
+			if (ctx.IsClicked(field))
+				ctx.SetFocus(id);
+			// 聚焦后进入编辑(空字符串也要能输入):直接转发 TextField。
+			if (ctx.Focus() == id)
+				submitted = TextField(ctx, id, field, buffer, theme, nullptr, &a11y);
+		}
+		else
+		{
+			submitted = TextField(ctx, id, field, buffer, theme, nullptr, &a11y);
+			if (ctx.IsHovered(clearRect))
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, clearRect, theme.ButtonHover, 2.0f });
+				ctx.SetCursor(WuiCursor::Hand);
+			}
+			PushText(ctx, { clearRect.X + 3.0f, clearRect.Y - 1.0f }, "x", theme.TextMuted, 12.0f);
+			if (ctx.IsClicked(clearRect))
+			{
+				buffer.clear();
+				ctx.SetFocus(0);
+			}
+		}
+		return submitted;
+	}
+
+	// ---- 列表视图 ----
+
+	ListViewResult ListView(WuiContext& ctx, const WuiRect& area, const std::vector<ListViewItem>& items,
+		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id)
+	{
+		ListViewResult result;
+		const float contentHeight = rowHeight * static_cast<float>(items.size()) + 8.0f;
+		result.ItemRects.reserve(items.size());
+		// P1c-E4:列表整体是键盘入口(id != 0 时)。行节点归行自己,容器节点归这里 ——
+		// 空列表没有可导航的行,就不进焦点表、也不登记节点(不造"点不动的空壳")。
+		const bool focused = id != 0 && ctx.Focus() == id;
+		if (id != 0 && !items.empty())
+			ctx.RegisterFocusable(id, area);
+		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
+		if (id != 0 && !items.empty())
+		{
+			// 容器节点矩形取"可见行带"(行堆叠范围与列表矩形的**交集**)而不是整个视口:
+			// 行是连续排布的,这个矩形的中心必定落在某一行上 —— interactive=true 因此不撒谎
+			// (点它 = 命中中心那一行,与用户点击走同一条命中路径)。
+			int selected = -1;
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				if (items[i].Selected && !items[i].Disabled)
+				{
+					selected = static_cast<int>(i);
+					break;
+				}
+			}
+			const float bandTop = std::max(area.Y, area.Y + 4.0f - scrollY);
+			const float bandBottom = std::min(area.Y + area.H,
+				area.Y + 4.0f + rowHeight * static_cast<float>(items.size()) - scrollY);
+			if (bandBottom > bandTop)
+			{
+				WuiAccessNode node;
+				node.Id = id;
+				node.Window = WuiAccessibility::Get().CurrentWindow();
+				node.Panel = WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "list";
+				node.Value = "items=" + std::to_string(items.size())
+					+ (selected >= 0 ? " selected=" + items[static_cast<size_t>(selected)].Label : std::string());
+				node.Rect = { area.X, bandTop, area.W, bandBottom - bandTop };
+				node.Enabled = true;
+				node.Interactive = true;
+				node.Focused = focused;
+				WuiAccessibility::Get().Register(node);
+			}
+		}
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			const ListViewItem& item = items[i];
+			const WuiRect row { area.X + 4.0f, area.Y + 4.0f + rowHeight * static_cast<float>(i) - scrollY,
+				std::max(0.0f, area.W - 8.0f), rowHeight };
+			result.ItemRects.push_back(row); // 索引对齐:即使不可见也占位
+			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
+				continue; // 视野外:不绘制也不命中
+			// P1c-a:行登记 a11y 节点(与 TreeView 同一条契约)—— id 由调用方给(items[i].Id),
+			// label/subLabel 直接进节点,disabled 行 enabled/interactive=false。只登记行中心
+			// 确实落在可视区内的行:半滚出视口的行中心可能压在下面的控件上,注入点击会打错目标。
+			const float rowCenterY = row.Y + row.H * 0.5f;
+			if (item.Id != 0 && rowCenterY >= area.Y && rowCenterY <= area.Y + area.H)
+			{
+				WuiAccessNode node;
+				node.Id = item.Id;
+				node.Window = WuiAccessibility::Get().CurrentWindow();
+				node.Panel = WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "list-row";
+				node.Label = item.Label;
+				node.Value = item.SubLabel;
+				if (!item.SubLabel.empty())
+					node.Tooltip = item.Label + "\n" + item.SubLabel;
+				node.Rect = row;
+				node.Enabled = !item.Disabled;
+				node.Interactive = !item.Disabled;
+				// 焦点在列表上时,当前行(调用方给的 Selected)就是键盘光标位置 —— AI 据此读到
+				// "焦点在第几行",不必猜。
+				node.Focused = focused && item.Selected;
+				WuiAccessibility::Get().Register(node);
+			}
+			const bool hovered = !item.Disabled && ctx.IsHovered(row);
+			if (hovered)
+				result.Hovered = static_cast<int>(i);
+
+			if (item.Selected)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.PanelBg, 2.0f });
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.ButtonHover, 2.0f });
+
+			float textX = row.X + 6.0f;
+			if (item.Icon != 0)
+			{
+				const float icon = 16.0f;
+				ctx.Commands().push_back({ WuiDrawKind::Image,
+					{ row.X + 4.0f, row.Y + (row.H - icon) * 0.5f, icon, icon },
+					item.Disabled ? theme.TextDisabled : theme.TextBright, 0.0f, 1.0f, "", 15.0f, false, item.Icon, item.Uv });
+				textX = row.X + 24.0f;
+			}
+			PushText(ctx, { textX, row.Y + (row.H - 14.0f) * 0.5f }, item.Label,
+				item.Disabled ? theme.TextMuted : theme.Text, 14.0f, item.Selected);
+			if (!item.SubLabel.empty())
+			{
+				const float labelW = ctx.MeasureTextWidth(item.Label, 14.0f);
+				const float subW = ctx.MeasureTextWidth(item.SubLabel, 13.0f);
+				const float idealSubX = row.X + row.W - 8.0f - subW;
+				const float minSubX = textX + labelW + 8.0f;
+				if (idealSubX >= minSubX)
+				{
+					PushText(ctx, { idealSubX, row.Y + (row.H - 13.0f) * 0.5f },
+						item.SubLabel, theme.TextMuted, 13.0f);
+				}
+				else
+				{
+					const float availableSubW = (row.X + row.W - 8.0f) - minSubX;
+					if (availableSubW >= 36.0f)
+					{
+						const std::string ellipsizedSub = Wui::EllipsizeMiddleToWidth(ctx, item.SubLabel, availableSubW, 13.0f);
+						PushText(ctx, { minSubX, row.Y + (row.H - 13.0f) * 0.5f },
+							ellipsizedSub, theme.TextMuted, 13.0f);
+					}
+				}
+			}
+
+			if (hovered && !item.SubLabel.empty())
+				Tooltip(ctx, row, item.Label + "\n" + item.SubLabel);
+
+			if (item.Disabled)
+				continue;
+			if (ctx.Input().MouseClicked[1] && hovered)
+				result.ContextClicked = static_cast<int>(i);
+			if (ctx.IsDoubleClicked(row))
+				result.DoubleClicked = static_cast<int>(i);
+			else if (ctx.IsClicked(row))
+				result.Clicked = static_cast<int>(i);
+		}
+		// 键盘(仅焦点在列表上时,与 TreeView 的 U2e 契约一致:控件只**报告**目标下标,
+		// 选中推进/激活语义仍由调用方改模型):↑/↓/Home/End 移动光标(跳过 Disabled),
+		// Enter/Space 激活当前项。没有当前项时 ↓/Home 落到第一项、↑/End 落到最后一项。
+		if (focused && !items.empty())
+		{
+			int current = -1;
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				if (items[i].Selected)
+				{
+					current = static_cast<int>(i);
+					break;
+				}
+			}
+			const auto enabledAt = [&items](int index)
+			{
+				return index >= 0 && index < static_cast<int>(items.size()) && !items[static_cast<size_t>(index)].Disabled;
+			};
+			int target = -1;
+			if (ctx.WasKeyPressed(KeyCodes::Down))
+			{
+				for (int i = (current < 0 ? 0 : current + 1); i < static_cast<int>(items.size()); ++i)
+					if (enabledAt(i)) { target = i; break; }
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Up))
+			{
+				for (int i = (current < 0 ? static_cast<int>(items.size()) - 1 : current - 1); i >= 0; --i)
+					if (enabledAt(i)) { target = i; break; }
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Home))
+			{
+				for (int i = 0; i < static_cast<int>(items.size()); ++i)
+					if (enabledAt(i)) { target = i; break; }
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::End))
+			{
+				for (int i = static_cast<int>(items.size()) - 1; i >= 0; --i)
+					if (enabledAt(i)) { target = i; break; }
+			}
+			if (target >= 0 && target != current)
+				result.KeyMoveTo = target;
+			if (result.KeyMoveTo < 0 && enabledAt(current)
+				&& (ctx.WasKeyPressed(KeyCodes::Enter) || ctx.WasKeyPressed(KeyCodes::Space)))
+				result.KeyActivate = current;
+			DrawFocusRing(ctx, area, id, theme);
+		}
+		EndScrollArea(ctx);
+		return result;
+	}
+
+	// ---- 网格视图 ----
+
+	GridViewResult GridView(WuiContext& ctx, const WuiRect& area, const std::vector<GridViewItem>& items,
+		float cellWidth, float cellHeight, float& scrollY, const WuiTheme& theme)
+	{
+		GridViewResult result;
+		result.ItemRects.reserve(items.size());
+		const int columns = std::max(1, static_cast<int>(area.W / std::max(1.0f, cellWidth)));
+		const float slotW = area.W / static_cast<float>(columns);
+		const int rows = static_cast<int>((items.size() + static_cast<size_t>(columns) - 1) / static_cast<size_t>(columns));
+		const float contentHeight = cellHeight * static_cast<float>(rows) + 8.0f;
+		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			const GridViewItem& item = items[i];
+			const int column = static_cast<int>(i) % columns;
+			const int rowIndex = static_cast<int>(i) / columns;
+			const WuiRect cell { area.X + slotW * static_cast<float>(column) + 4.0f,
+				area.Y + 4.0f + cellHeight * static_cast<float>(rowIndex) - scrollY,
+				std::max(0.0f, slotW - 8.0f), cellHeight - 4.0f };
+			result.ItemRects.push_back(cell);
+			if (cell.Y + cell.H < area.Y || cell.Y > area.Y + area.H)
+				continue;
+			const bool hovered = !item.Disabled && ctx.IsHovered(cell);
+			if (hovered)
+				result.Hovered = static_cast<int>(i);
+
+			if (item.Selected)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, cell, theme.PanelBg, 3.0f });
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, cell, theme.ButtonHover, 3.0f });
+			ctx.Commands().push_back({ WuiDrawKind::RectOutline, cell,
+				item.Selected ? theme.Accent : theme.Border, 3.0f, 1.0f });
+
+			if (item.Icon != 0)
+			{
+				const float icon = std::min(cell.W - 16.0f, cell.H - 30.0f);
+				if (icon > 4.0f)
+					ctx.Commands().push_back({ WuiDrawKind::Image,
+						{ cell.X + (cell.W - icon) * 0.5f, cell.Y + 8.0f, icon, icon },
+						item.Disabled ? theme.TextDisabled : theme.TextBright, 0.0f, 1.0f, "", 15.0f, false, item.Icon, item.Uv });
+			}
+			const float labelW = 7.0f * static_cast<float>(item.Label.size());
+			PushText(ctx, { cell.X + std::max(4.0f, (cell.W - labelW) * 0.5f), cell.Y + cell.H - 20.0f },
+				item.Label, item.Disabled ? theme.TextMuted : theme.Text, 13.0f, item.Selected);
+
+			if (item.Disabled)
+				continue;
+			if (ctx.Input().MouseClicked[1] && hovered)
+				result.ContextClicked = static_cast<int>(i);
+			if (ctx.IsDoubleClicked(cell))
+				result.DoubleClicked = static_cast<int>(i);
+			else if (ctx.IsClicked(cell))
+				result.Clicked = static_cast<int>(i);
+		}
+		EndScrollArea(ctx);
+		return result;
+	}
+
+	// ---- 树视图 ----
+
+	TreeViewResult TreeView(WuiContext& ctx, const WuiRect& area, const std::vector<TreeViewItem>& items,
+		float rowHeight, float& scrollY, const WuiTheme& theme, WuiId id)
+	{
+		TreeViewResult result;
+		const float contentHeight = rowHeight * static_cast<float>(items.size()) + 8.0f;
+		result.ItemRects.reserve(items.size());
+		result.ArrowRects.reserve(items.size());
+		BeginScrollArea(ctx, area, contentHeight, scrollY, theme);
+		// U2e:整棵树作为一个可聚焦控件(Tab 能到、能被 ui.focus),焦点环画在滚动裁剪区内
+		// (BeginScrollArea 的裁剪还在栈上,环不会漂到树外面去)。
+		const bool focused = id != 0 && ctx.Focus() == id;
+		if (id != 0)
+		{
+			ctx.RegisterFocusable(id, area);
+			// P1c-E4:容器节点(以前只有行节点 —— "焦点在树上"AI 读不到,只能看到各行都不带 focused)。
+			// 矩形取"可见行带"(行堆叠范围 ∩ 树矩形):行连续排布,中心必定落在某一行上,
+			// interactive=true 因此不撒谎(点它 = 命中中心那一行);value 带上当前选中行,
+			// 键盘光标位置从 a11y 直接可读(行节点也会在焦点于树上时给选中行标 focused)。
+			if (!items.empty())
+			{
+				int selected = -1;
+				for (size_t i = 0; i < items.size(); ++i)
+				{
+					if (items[i].Selected && !items[i].Disabled)
+					{
+						selected = static_cast<int>(i);
+						break;
+					}
+				}
+				const float bandTop = std::max(area.Y, area.Y + 4.0f - scrollY);
+				const float bandBottom = std::min(area.Y + area.H,
+					area.Y + 4.0f + rowHeight * static_cast<float>(items.size()) - scrollY);
+				if (bandBottom > bandTop)
+				{
+					WuiAccessNode node;
+					node.Id = id;
+					node.Window = WuiAccessibility::Get().CurrentWindow();
+					node.Panel = WuiAccessibility::Get().CurrentPanel();
+					node.Kind = "tree";
+					node.Value = "items=" + std::to_string(items.size())
+						+ (selected >= 0 ? " selected=" + items[static_cast<size_t>(selected)].Label : std::string());
+					node.Rect = { area.X, bandTop, area.W, bandBottom - bandTop };
+					node.Enabled = true;
+					node.Interactive = true;
+					node.Focused = focused;
+					WuiAccessibility::Get().Register(node);
+				}
+			}
+			if (focused)
+				DrawFocusRing(ctx, area, id, theme);
+		}
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			const TreeViewItem& item = items[i];
+			const int depth = std::max(0, item.Depth);
+			// P4-UX13:层级语言 —— 每级 14px、箭头列固定 18px、同级对齐;
+			// 深度 > 0 的行给祖先级画**竖向引导线**(0.4 透明度),让"我在第几层"一眼可读。
+			constexpr float kIndentStep = 14.0f;
+			constexpr float kArrowColumn = 18.0f;
+			const float indent = 6.0f + static_cast<float>(depth) * kIndentStep;
+			const WuiRect row { area.X + 2.0f + indent, area.Y + 4.0f + rowHeight * static_cast<float>(i) - scrollY,
+				std::max(0.0f, area.W - 4.0f - indent), rowHeight };
+			// D10:箭头列**固定宽度**。过去"没有子节点的行"不给箭头列、标签起点少 16px,
+			// 同一层级的行因此对不齐 —— 用户实测"有的前面有 +-、分不清层级"。
+			// 现在所有行都保留同一列,叶子行画一个弱化占位符。
+			const WuiRect arrow { row.X, row.Y, kArrowColumn, rowHeight };
+			result.ItemRects.push_back(row);
+			result.ArrowRects.push_back(arrow);
+			if (row.Y + row.H < area.Y || row.Y > area.Y + area.H)
+				continue;
+
+			// D10-12:树行登记无障碍节点(AI 控制通道 ui.tree / ui.invoke 的数据源)。
+			// Rect 用"标签区"而不是整行:标签区不含展开箭头,脚本按它注入的点击正好
+			// 落在行主体(点箭头只会展开/折叠,不会开菜单)。只登记**行中心确实落在
+			// 树可视区内**的行 —— 半滚出视口的行中心可能压在树下面的控件上,注入的
+			// 点击会打错目标(导入目的地选择器的手工登记出于同一条理由)。
+			const float labelX = row.X + 18.0f;
+			const WuiRect labelRect { labelX, row.Y, std::max(0.0f, row.W - (labelX - row.X)), row.H };
+			const float rowCenterY = row.Y + row.H * 0.5f;
+			if (item.Id != 0 && rowCenterY >= area.Y && rowCenterY <= area.Y + area.H)
+			{
+				WuiAccessNode node;
+				node.Id = item.Id;
+				node.Window = WuiAccessibility::Get().CurrentWindow();
+				node.Panel = WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "tree-item";
+				node.Label = item.Label;
+				// depth/expanded/children 让脚本不用猜层级与展开态(与画出来的缩进一致,
+				// depth 同样取 max(0, ...))。
+				node.Value = "depth=" + std::to_string(depth)
+					+ " expanded=" + (item.Expanded ? "1" : "0")
+					+ " children=" + (item.HasChildren ? "1" : "0");
+				node.Rect = labelRect;
+				node.Enabled = !item.Disabled;
+				node.Interactive = !item.Disabled;
+				// 焦点在树上时,当前项(调用方给的 Selected)就是键盘光标位置。
+				node.Focused = focused && item.Selected;
+				WuiAccessibility::Get().Register(node);
+			}
+
+			const bool hovered = !item.Disabled && ctx.IsHovered(row);
+			// 祖先引导线:从当前行往上,每一级画一条 1px 竖线(与缩进步长对齐)。
+			for (int level = 1; level <= depth; ++level)
+			{
+				const float lineX = area.X + 2.0f + 6.0f + static_cast<float>(level - 1) * kIndentStep + 7.0f;
+				ctx.Commands().push_back({ WuiDrawKind::Rect, { lineX, row.Y, 1.0f, row.H },
+					{ theme.Border.R, theme.Border.G, theme.Border.B, 0.45f }, 0.0f });
+			}
+			// 选中 = 中性底 + **左侧 2px 强调条**(与悬停区分开:悬停只有一层很淡的底)。
+			if (item.Selected)
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.Selection, 2.0f });
+				ctx.Commands().push_back({ WuiDrawKind::Rect, { row.X, row.Y + 1.0f, 2.0f, row.H - 2.0f },
+					theme.Accent, 1.0f });
+			}
+			else if (hovered)
+				ctx.Commands().push_back({ WuiDrawKind::Rect, row, theme.HoverBg, 2.0f });
+
+			if (item.HasChildren)
+			{
+				// 展开标记用三角(▼/▶)而不是 [+]/[-]:更轻、更像编辑器,也不会和文字挤在一起。
+				PushText(ctx, { row.X + 4.0f, row.Y + (row.H - 12.0f) * 0.5f },
+					item.Expanded ? "▼" : "▶", theme.TextMuted, 10.0f);
+				if (ctx.IsClicked(arrow))
+					result.ClickedArrow = static_cast<int>(i);
+			}
+			// 叶子行不再画占位符:箭头列**留白**同样保证对齐(占位点比留白更脏)。
+			PushText(ctx, { labelX, row.Y + (row.H - 13.0f) * 0.5f }, item.Label,
+				item.Disabled ? theme.TextMuted : theme.Text, 13.0f, item.Selected);
+
+			if (item.Disabled)
+				continue;
+			if (ctx.Input().MouseClicked[1] && hovered)
+				result.ContextClicked = static_cast<int>(i);
+			if (ctx.IsDoubleClicked(labelRect))
+				result.DoubleClicked = static_cast<int>(i);
+			else if (ctx.IsClicked(labelRect))
+				result.Clicked = static_cast<int>(i);
+		}
+		// U2e 键盘导航:焦点在树上时才吃键,且只**报告**目标下标 —— 由调用方改
+		// Selection/Expanded/激活语义(控件不自己动模型)。
+		// 导航跳过 Disabled 行(与鼠标命中一致:禁用行点不动);当前项取第一个 Selected。
+		if (focused && !items.empty())
+		{
+			int current = -1;
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				if (items[i].Selected)
+				{
+					current = static_cast<int>(i);
+					break;
+				}
+			}
+			const auto enabledAt = [&items](int index)
+			{
+				return index >= 0 && index < static_cast<int>(items.size()) && !items[static_cast<size_t>(index)].Disabled;
+			};
+
+			// 没有当前项时(调用方还没选中任何行):↓/Home 落到第一项,↑/End 落到最后一项。
+			if (ctx.WasKeyPressed(KeyCodes::Down))
+			{
+				int target = -1;
+				for (int i = (current < 0 ? 0 : current + 1); i < static_cast<int>(items.size()); ++i)
+				{
+					if (enabledAt(i)) { target = i; break; }
+				}
+				if (target >= 0 && target != current)
+					result.KeyMoveTo = target;
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Up))
+			{
+				int target = -1;
+				for (int i = (current < 0 ? static_cast<int>(items.size()) - 1 : current - 1); i >= 0; --i)
+				{
+					if (enabledAt(i)) { target = i; break; }
+				}
+				if (target >= 0 && target != current)
+					result.KeyMoveTo = target;
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::Home))
+			{
+				int target = -1;
+				for (int i = 0; i < static_cast<int>(items.size()); ++i)
+				{
+					if (enabledAt(i)) { target = i; break; }
+				}
+				if (target >= 0 && target != current)
+					result.KeyMoveTo = target;
+			}
+			else if (ctx.WasKeyPressed(KeyCodes::End))
+			{
+				int target = -1;
+				for (int i = static_cast<int>(items.size()) - 1; i >= 0; --i)
+				{
+					if (enabledAt(i)) { target = i; break; }
+				}
+				if (target >= 0 && target != current)
+					result.KeyMoveTo = target;
+			}
+			// ←/→ 只对可展开行报 KeyToggleExpand(叶子行没有可切换的展开态,与鼠标
+			// 只给 HasChildren 行画箭头一致)。展开/折叠后**可见项集合变化由调用方重建**;
+			// 本控件按它当帧拿到的 items 报告,不自己滚动。
+			if (result.KeyMoveTo < 0 && current >= 0 && items[static_cast<size_t>(current)].HasChildren
+				&& (ctx.WasKeyPressed(KeyCodes::Left) || ctx.WasKeyPressed(KeyCodes::Right)))
+			{
+				result.KeyToggleExpand = current;
+			}
+			// Enter 激活当前项;Disabled 行不可激活(与鼠标点击一致)。
+			if (result.KeyMoveTo < 0 && enabledAt(current) && ctx.WasKeyPressed(KeyCodes::Enter))
+				result.KeyActivate = current;
+		}
+		EndScrollArea(ctx);
+		return result;
+	}
+
+	// P4-U24:轴指示器(主视口 + 所有预览面板共用;口径见头文件)。
+	WuiRect AxisGizmo(WuiContext& ctx, const WuiRect& viewport, const glm::vec3& viewRight,
+		const glm::vec3& viewUp, float size)
+	{
+		constexpr float kMargin = 6.0f;
+		const WuiRect box { viewport.X + viewport.W - size - kMargin,
+			viewport.Y + viewport.H - size - kMargin, size, size };
+		if (box.W < 24.0f || box.H < 24.0f)
+			return box;
+		const WuiTheme& theme = CurrentTheme();
+		// 半透明底 + 描边:压在预览内容上也读得出来。
+		ctx.Commands().push_back({ WuiDrawKind::Rect, box,
+			theme.ModalBackdrop, 6.0f });
+		ctx.Commands().push_back({ WuiDrawKind::RectOutline, box,
+			theme.Border, 6.0f, 1.0f });
+		const glm::vec2 center { box.X + box.W * 0.5f, box.Y + box.H * 0.5f };
+		// 臂长基准 = 盒边长的 38%(三轴总跨度 ≈ 76% 盒宽/高,落在用户口径 70–80%);
+		// 每根轴再按深度在 0.84–1.0 之间做透视缩放。
+		const float axisLength = size * 0.38f;
+		constexpr float kLineWidth = 1.6f;   // 用户口径 1.5–2px(原来 2.5 显粗)
+		constexpr float kLabelSize = 10.0f;
+		constexpr float kLabelGap = 5.0f;    // 标号近边到臂端 ≥4px(留 1px 栅格化余量)
+		constexpr float kDegenerate = 0.22f; // 屏幕投影长度阈值(接近正对/背对)
+		const glm::vec3 axes[3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
+		const char* axisNames[3] = { "X", "Y", "Z" };
+		const WuiColor baseColors[3] = {
+			theme.AxisX,
+			theme.AxisY,
+			theme.AxisZ };
+		// 相机基的右手法向 = 指向观察者(OrbitBasis/lookAt 口径下 = eye 方向)。
+		const glm::vec3 viewNormal = glm::cross(viewRight, viewUp);
+		bool degenerate[3] = { false, false, false };
+		glm::vec2 screenDirs[3] = {};
+		float depths[3] = {};
+		for (int i = 0; i < 3; ++i)
+		{
+			// 屏幕 +x 向右、+y 向下;画面正立 → 屏幕向上 = -dot(axis, viewUp)。
+			const glm::vec2 dir { glm::dot(axes[i], viewRight), -glm::dot(axes[i], viewUp) };
+			const float projected = glm::length(dir);
+			screenDirs[i] = dir;
+			depths[i] = glm::dot(axes[i], viewNormal);
+			degenerate[i] = projected < kDegenerate;
+			if (degenerate[i])
+				continue;
+			// 透视:朝观察者的臂更长(基准 0.92→1.0),背离的更短(0.84)。
+			const WuiColor color = ShadeAxisColor(baseColors[i], depths[i]);
+			const float reach = axisLength * (0.92f + 0.08f * std::max(-1.0f, std::min(1.0f, depths[i])));
+			const glm::vec2 unit = dir / projected;
+			const glm::vec2 tip = center + unit * reach;
+			PushAxisLine(ctx, center, tip, color, kLineWidth);
+			// 标号在臂端外侧:近边沿投影方向与臂端留 kLabelGap。
+			const float textW = ctx.MeasureTextWidth(axisNames[i], kLabelSize);
+			const float halfExtent = 0.5f * (std::fabs(unit.x) * textW + std::fabs(unit.y) * kLabelSize);
+			const glm::vec2 labelCenter = tip + unit * (kLabelGap + halfExtent);
+			PushText(ctx, { labelCenter.x - textW * 0.5f, labelCenter.y - kLabelSize * 0.5f },
+				axisNames[i], color, kLabelSize);
+		}
+		// 第二遍:正对/背对相机的轴画在其它轴线**之上**,避免中心点被别的轴压掉。
+		for (int i = 0; i < 3; ++i)
+		{
+			if (!degenerate[i])
+				continue;
+			const float projected = glm::length(screenDirs[i]);
+			const float depth = depths[i];
+			const WuiColor color = ShadeAxisColor(baseColors[i], depth);
+			// 朝观察者 = 实心圆点;背离 = 空心圆环(两者在像素上可区分)。
+			constexpr float kMarkerRadius = 4.0f;
+			const WuiRect marker { center.x - kMarkerRadius, center.y - kMarkerRadius,
+				kMarkerRadius * 2.0f, kMarkerRadius * 2.0f };
+			if (depth >= 0.0f)
+			{
+				ctx.Commands().push_back({ WuiDrawKind::Rect, marker, color, kMarkerRadius });
+				ctx.Commands().push_back({ WuiDrawKind::RectOutline, marker,
+					ShadeAxisColor(baseColors[i], 1.0f), kMarkerRadius, kLineWidth });
+			}
+			else
+			{
+				// 空心圆环:先铺一块与盒底同色的圆盘,盖掉从中心穿过的其它轴线 ——
+				// 否则"环里露出别的轴色"会让人误读成实心点(用户口径:不得与其它轴混淆)。
+				ctx.Commands().push_back({ WuiDrawKind::Rect, marker,
+					theme.ModalBackdrop, kMarkerRadius });
+				ctx.Commands().push_back({ WuiDrawKind::RectOutline, marker, color,
+					kMarkerRadius, kLineWidth });
+			}
+			// 标号:投影方向退化时用确定性备用方位(X 右 / Y 上 / Z 左),避免叠在中心。
+			glm::vec2 labelDir = projected > 1e-3f ? screenDirs[i] / projected : glm::vec2 { 0.0f, 0.0f };
+			if (projected <= 1e-3f)
+			{
+				if (i == 0)
+					labelDir = { 1.0f, 0.0f };
+				else if (i == 1)
+					labelDir = { 0.0f, -1.0f };
+				else
+					labelDir = { -1.0f, 0.0f };
+			}
+			const float textW = ctx.MeasureTextWidth(axisNames[i], kLabelSize);
+			const float halfExtent = 0.5f * (std::fabs(labelDir.x) * textW + std::fabs(labelDir.y) * kLabelSize);
+			const glm::vec2 labelCenter = center + labelDir * (kMarkerRadius + kLabelGap + halfExtent);
+			PushText(ctx, { labelCenter.x - textW * 0.5f, labelCenter.y - kLabelSize * 0.5f },
+				axisNames[i], color, kLabelSize);
+		}
+		return box;
+	}
+}

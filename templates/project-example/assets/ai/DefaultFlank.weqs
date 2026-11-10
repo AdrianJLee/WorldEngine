@@ -1,0 +1,58 @@
+FormatVersion: 1
+AssetType: EQSQuery
+Name: DefaultFlank
+Generator:
+  Type: Circle
+  Radius: 25
+  Spacing: 2
+  InnerRadius: 6
+  OuterRadius: 25
+  StepDistance: 1.5
+  WallOffset: 0.75
+  IncludeGrid: true
+  ProjectToTerrain: true
+Tests:
+  - Name: Overlap Filter
+    Type: Overlap
+    Context: Querier
+    Purpose: FilterOnly
+    Curve: Linear
+    Weight: 0
+    FilterMin: 0
+    FilterMax: 100
+    IdealValue: 8
+    GaussianSigma: 1.25
+    Enabled: true
+  - Name: Trace LOS Open
+    Type: Trace
+    Context: Threat
+    Purpose: FilterAndScore
+    Curve: Inverse
+    Weight: 1.5
+    FilterMin: 0
+    FilterMax: 1
+    IdealValue: 0
+    GaussianSigma: 1.25
+    Enabled: true
+  - Name: Dot Flank Angle
+    Type: Dot
+    Context: Threat
+    Purpose: ScoreOnly
+    Curve: ClampedGaussian
+    Weight: 2
+    FilterMin: 0
+    FilterMax: 180
+    IdealValue: 90
+    GaussianSigma: 25
+    Enabled: true
+  - Name: Ideal Combat Distance
+    Type: Distance
+    Context: Threat
+    Purpose: ScoreOnly
+    Curve: ClampedGaussian
+    Weight: 1.2
+    FilterMin: 0
+    FilterMax: 30
+    IdealValue: 12
+    GaussianSigma: 3
+    Enabled: true

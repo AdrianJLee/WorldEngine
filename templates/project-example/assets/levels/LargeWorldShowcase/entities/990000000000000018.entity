@@ -1,0 +1,18 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000018
+  World::TagComponent:
+    Tag: "Level Streaming Viewer Target (Simulated Observer)"
+  World::TransformComponent:
+    Location: [0.0, 1.0, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::CharacterControllerComponent:
+    Radius: 0.4
+    Height: 1.8
+    StepHeight: 0.3
+    SlopeLimit: 45.0
+  World::LevelEntityComponent:
+    DataLayerMask: 1

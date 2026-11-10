@@ -1,0 +1,52 @@
+FormatVersion: 1
+AssetType: BehaviorTree
+Name: SmartObjectDemo
+Blackboard:
+  - KeyName: BlackboardTargetPos
+    TypeName: Vector3
+    DefaultValue: "[0, 0, 0]"
+  - KeyName: TargetEntity
+    TypeName: Entity
+    DefaultValue: "0"
+  - KeyName: ExecutionTimer
+    TypeName: Float
+    DefaultValue: "0.0"
+  - KeyName: BlackboardValue
+    TypeName: Float
+    DefaultValue: "0.0"
+Nodes:
+  - Id: 1
+    ParentId: 0
+    Kind: Selector
+    Title: "Root Selector"
+    Description: "根选择器: 优先急救，次选常规巡逻"
+  - Id: 2
+    ParentId: 1
+    Kind: Sequence
+    Title: "Emergency Heal Sequence"
+    Description: "低生命值紧急寻找医疗站顺序推进"
+  - Id: 3
+    ParentId: 2
+    Kind: Condition
+    Title: "Health Below 60"
+    Description: "判定自身当前生命值是否低于 60"
+    ConditionType: "HealthBelow"
+    FloatParam: 60
+  - Id: 4
+    ParentId: 2
+    Kind: Action
+    Title: "Claim SmartObject"
+    Description: "检索最近的可用医疗站并预约锁定插槽"
+    ActionType: "SeekSmartObject"
+  - Id: 5
+    ParentId: 2
+    Kind: Action
+    Title: "Move & Use SmartObject"
+    Description: "移动对齐至插槽位置并持续充能治疗"
+    ActionType: "UseSmartObject"
+  - Id: 6
+    ParentId: 1
+    Kind: Action
+    Title: "Default Patrol"
+    Description: "在默认区间往复游荡巡逻"
+    ActionType: "Patrol"

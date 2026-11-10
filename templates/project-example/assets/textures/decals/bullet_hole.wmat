@@ -1,0 +1,12 @@
+# WorldEngine 3D Decal Material - Bullet Hole
+FormatVersion: 3
+AssetId: 0x0DECA10000000001
+Name: "Decal Bullet Hole"
+BaseColor: [1, 1, 1, 1]
+Metallic: 0.2
+Roughness: 0.7
+Emissive: [0, 0, 0]
+AlbedoTexture: "textures/decals/bullet_hole.png"
+NormalTexture: ""
+BlendMode: Transparent
+DoubleSided: true

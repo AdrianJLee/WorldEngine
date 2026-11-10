@@ -1,0 +1,53 @@
+FormatVersion: 1
+Name: SparksFountain
+Guid: 1004
+Seed: 888
+Duration: 0
+Looping: true
+WarmupTime: 0
+LOD:
+  CullDistance: 60
+  PauseWhenOffscreen: true
+Emitters:
+  - Name: MainJet
+    Enabled: true
+    MaxParticles: 500
+    Lifetime: 2.2
+    EmissionRate: 110
+    Emitter:
+      Type: Cone
+      LockToXY: false
+    Material:
+      TexturePath: ""
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 3.8
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 7.5
+      SpeedVariance: 1.8
+      Gravity: [0, -9.8, 0]
+      LinearDrag: 0.05
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0.4
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.14
+      SizeEnd: 0.03
+      ColorStart: [1, 0.88, 0.35, 1]
+      ColorEnd: [1, 0.3, 0.05, 0]
+    Collision:
+      Mode: Plane
+      Restitution: 0.6
+      Friction: 0.15
+      KillOnHit: false
+      EnableEvents: true
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]

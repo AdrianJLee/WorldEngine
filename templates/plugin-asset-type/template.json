@@ -1,0 +1,8 @@
+{
+  "id": "asset-type",
+  "name": "Asset Type Plugin",
+  "description": "Plugin that registers a new asset type (with a New-asset template) plus an importer for its source files.",
+  "order": 3,
+  "scopes": ["engine", "project"],
+  "requires": "none"
+}

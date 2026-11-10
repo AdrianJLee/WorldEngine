@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 900000000000000010
+  World::TagComponent:
+    Tag: "Landscape (3D 地貌)"
+  World::TransformComponent:
+    Location: [-128, -2, -128]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::TerrainComponent:
+    TerrainAsset: "terrains/default.wterrain"
+    CellSize: 1.0
+    HeightScale: 1.0
+    MinHeight: -10.0
+    MaxHeight: 60.0
+    ChunkResolution: 64
+    LodDistanceRatio: 1.5
+    LayerCount: 4
+    CastShadow: 1
+    ReceiveShadow: 1
+    HoleCutoutEnabled: 1
+    EnableCollision: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 1

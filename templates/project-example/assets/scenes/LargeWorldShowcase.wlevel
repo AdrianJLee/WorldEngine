@@ -1,0 +1,16 @@
+Id: LargeWorldShowcase
+Name: 64-bit Large World Coordinates, Partition & HLOD Showcase
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true
+  - Mask: 2
+    Name: LWC_Coordinates
+    DefaultActive: true
+  - Mask: 4
+    Name: Partition_Streaming
+    DefaultActive: true
+  - Mask: 8
+    Name: HLOD_Proxies
+    DefaultActive: true

@@ -1,0 +1,195 @@
+#include "wldpch.h"
+#include "World/Core/Log.h"
+
+#include "spdlog/sinks/base_sink.h"
+#include "spdlog/sinks/rotating_file_sink.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
+
+#include <clocale>
+#include <deque>
+#include <exception>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
+
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
+#endif
+
+namespace World
+{
+	namespace
+	{
+		// 最近日志环形缓冲(AI 控制通道 log.tail 的数据源):
+		// 只有 stdout 时,"运行时刚刚发生了什么"在自动化里完全拿不到。
+		struct RecentLogBuffer
+		{
+			std::mutex Mutex;
+			std::deque<std::string> Lines;
+			size_t Capacity = 400;
+		};
+
+		RecentLogBuffer& Buffer()
+		{
+			static RecentLogBuffer buffer;
+			return buffer;
+		}
+
+		// sink 只负责格式化,数据放在上面的进程级缓冲里(避免 sink 拷贝语义问题)。
+		class RecentLinesSink : public spdlog::sinks::base_sink<std::mutex>
+		{
+		public:
+		protected:
+			void sink_it_(const spdlog::details::log_msg& msg) override
+			{
+				spdlog::memory_buf_t formatted;
+				formatter_->format(msg, formatted);
+				std::string line(formatted.data(), formatted.size());
+				while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+					line.pop_back();
+				RecentLogBuffer& buffer = Buffer();
+				std::lock_guard<std::mutex> guard(buffer.Mutex);
+				buffer.Lines.push_back(std::move(line));
+				while (buffer.Lines.size() > buffer.Capacity)
+					buffer.Lines.pop_front();
+			}
+
+			void flush_() override {}
+		};
+	}
+
+	std::shared_ptr<spdlog::logger> Log::s_CoreLogger;
+	std::shared_ptr<spdlog::logger> Log::s_ClientLogger;
+
+	std::vector<std::string> Log::RecentLines(size_t maxLines)
+	{
+		RecentLogBuffer& buffer = Buffer();
+		std::lock_guard<std::mutex> guard(buffer.Mutex);
+		std::vector<std::string> lines;
+		const size_t count = std::min(maxLines, buffer.Lines.size());
+		lines.assign(buffer.Lines.end() - static_cast<std::ptrdiff_t>(count), buffer.Lines.end());
+		return lines;
+	}
+
+	void Log::Init()
+	{
+#if defined(_WIN32)
+		// 切换 Windows 控制台代码页为 UTF-8 (65001)，根治控制台中文乱码
+		::SetConsoleOutputCP(CP_UTF8);
+		::SetConsoleCP(CP_UTF8);
+#endif
+		std::setlocale(LC_ALL, ".UTF-8");
+
+		spdlog::set_pattern("%^[%T] %n: %v%$");
+		// 最近日志缓冲:与 stdout sink 并存(不改既有输出行为)。
+		std::shared_ptr<RecentLinesSink> recent = std::make_shared<RecentLinesSink>();
+		recent->set_pattern("%^[%T] %n: %v%$");
+		// 未捕获异常/terminate 也要留下可读日志(否则只剩一个 abort() 对话框)。
+		std::set_terminate([]()
+		{
+			try
+			{
+				throw;
+			}
+			catch (const std::exception& exception)
+			{
+				WLD_CORE_CRITICAL("std::terminate: unhandled exception: {0}", exception.what());
+			}
+			catch (...)
+			{
+				WLD_CORE_CRITICAL("std::terminate: unhandled non-standard exception");
+			}
+			std::abort();
+		});
+		spdlog::level::level_enum defaultLevel = spdlog::level::info;
+		if (const char* envLevel = std::getenv("WLD_LOG_LEVEL"))
+		{
+			std::string val = envLevel;
+			if (val == "trace") defaultLevel = spdlog::level::trace;
+			else if (val == "debug") defaultLevel = spdlog::level::debug;
+			else if (val == "info") defaultLevel = spdlog::level::info;
+			else if (val == "warn") defaultLevel = spdlog::level::warn;
+			else if (val == "err" || val == "error") defaultLevel = spdlog::level::err;
+		}
+
+		s_CoreLogger = spdlog::stdout_color_mt("WE");
+		s_CoreLogger->set_level(defaultLevel);
+		s_CoreLogger->sinks().push_back(recent);
+		// 断言/错误立即落盘:崩溃与断言对话框场景下 FIFO 缓冲会吞掉最后的日志。
+		// P4-UX3a:警告也立即落盘 —— 字体缺失/回退这类关键线索常以 warn 出现,
+		// 而随后的崩溃会带走缓冲里还没写的行(独立验证者实测过)。
+		s_CoreLogger->flush_on(spdlog::level::warn);
+
+		s_ClientLogger = spdlog::stdout_color_mt("APP");
+		s_ClientLogger->set_level(defaultLevel);
+		s_ClientLogger->flush_on(spdlog::level::err);
+
+		// P4-UX2f:**默认写日志文件** —— 偶发 device lost / 崩溃时用户往往只看到控制台最后一行,
+		// 而我们拿不到他们的控制台(AttachConsole 会被拒绝)。文件日志让下次复现自带现场:
+		//   * 路径:WLD_LOG_FILE 指定,或默认 <WLD_OUTPUT_DIR><exe名>.log(5MB x 3 轮转);
+		//   * WLD_LOG_FILE=0 关闭。
+		const char* request = std::getenv("WLD_LOG_FILE");
+		if (request && request[0] == '0' && request[1] == '\0')
+			return;
+		std::filesystem::path logPath;
+		if (request && request[0])
+			logPath = request;
+		if (logPath.empty())
+		{
+			wchar_t modulePath[MAX_PATH] = {};
+			const DWORD length = GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+			std::filesystem::path exePath = length ? std::filesystem::path(modulePath) : std::filesystem::path("Editor");
+			logPath = std::filesystem::path(WLD_OUTPUT_DIR) / (exePath.stem().string() + ".log");
+		}
+		try
+		{
+			// 自动保证日志文件首部包含 UTF-8 BOM (\xEF\xBB\xBF)，
+			// 确保 Windows 记事本、PowerShell 及各文本查看器自动识别为 UTF-8 编码，彻底根治文件中文乱码
+			std::error_code ec;
+			if (!std::filesystem::exists(logPath, ec) || std::filesystem::file_size(logPath, ec) == 0)
+			{
+				std::filesystem::create_directories(logPath.parent_path(), ec);
+				std::ofstream bomFile(logPath, std::ios::binary);
+				if (bomFile.is_open())
+				{
+					const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+					bomFile.write(reinterpret_cast<const char*>(bom), sizeof(bom));
+					bomFile.close();
+				}
+			}
+			else
+			{
+				std::ifstream checkFile(logPath, std::ios::binary);
+				unsigned char header[3] = {};
+				checkFile.read(reinterpret_cast<char*>(header), 3);
+				checkFile.close();
+				if (!(header[0] == 0xEF && header[1] == 0xBB && header[2] == 0xBF))
+				{
+					std::ifstream inFile(logPath, std::ios::binary);
+					std::string content((std::istreambuf_iterator<char>(inFile)), std::istreambuf_iterator<char>());
+					inFile.close();
+					std::ofstream outFile(logPath, std::ios::binary | std::ios::trunc);
+					const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+					outFile.write(reinterpret_cast<const char*>(bom), sizeof(bom));
+					outFile.write(content.data(), content.size());
+					outFile.close();
+				}
+			}
+
+			auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+				logPath.string(), 5 * 1024 * 1024, 3);
+			fileSink->set_pattern("%^[%Y-%m-%d %T] %n: %v%$");
+			fileSink->set_level(spdlog::level::trace);
+			s_CoreLogger->sinks().push_back(fileSink);
+			s_ClientLogger->sinks().push_back(fileSink);
+			WLD_CORE_INFO("日志文件: {0}", logPath.string());
+		}
+		catch (const std::exception& exception)
+		{
+			WLD_CORE_WARN("日志文件不可用({0}): {1}", logPath.string(), exception.what());
+		}
+	}
+}

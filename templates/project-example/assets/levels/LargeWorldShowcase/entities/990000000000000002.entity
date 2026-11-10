@@ -1,0 +1,20 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000002
+  World::TagComponent:
+    Tag: "Directional Light (Sun & CSM)"
+  World::TransformComponent:
+    Location: [0.0, 60.0, 0.0]
+    Rotation: [-45.0, 35.0, 0.0]
+    Scale: [1, 1, 1]
+  World::DirectionalLightComponent:
+    Color: [1, 0.98, 0.92]
+    Intensity: 1.5
+    CastShadows: true
+  World::AmbientLightComponent:
+    Color: [0.22, 0.26, 0.32]
+    Intensity: 0.7
+  World::LevelEntityComponent:
+    DataLayerMask: 1

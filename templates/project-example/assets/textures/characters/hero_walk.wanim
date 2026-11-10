@@ -1,0 +1,15 @@
+Name: "hero_walk"
+AtlasPath: "assets/textures/characters/hero_atlas.watlas"
+FrameRate: 8.0
+LoopMode: 0
+Frames:
+  - SubTexture: "hero_idle"
+    Duration: 0.125
+  - SubTexture: "hero_walk"
+    Duration: 0.125
+    EventTag: "step_left"
+  - SubTexture: "hero_idle"
+    Duration: 0.125
+  - SubTexture: "hero_jump"
+    Duration: 0.125
+    EventTag: "step_right"

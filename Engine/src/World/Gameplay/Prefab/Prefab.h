@@ -1,0 +1,103 @@
+#pragma once
+
+#include "World/Core/Export.h"
+#include "World/Gameplay/Prefab/PrefabTypes.h"
+#include "World/Scene/Entity.h"
+#include "World/Scene/Scene.h"
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace World::Gameplay
+{
+	struct PrefabInstanceResult
+	{
+		Entity Root;                  // 实例化出来的子树根(挂在 parent 下)
+		uint32_t EntityCount = 0;     // 复制的实体数(含子树全部后代)
+		bool IsValid() const { return Root.IsValid() && EntityCount > 0; }
+	};
+
+	// Prefab 核心(P2a W4):把一棵实体子树深拷贝到目标场景(可跨场景),并挂到指定父节点下。
+	//
+	// 契约:
+	//  - 复制引擎内置组件值(Tag/Transform/Sprite/Circle/MeshRenderer/Camera/2D 物理);
+	//  - UUID 重新生成:实例必须有独立身份,否则存档与引用会撞;
+	//  - 层级按源结构重建(顺序保留),实例根挂到 parent 下;
+	//  - 非法输入(源实体不在给定场景)返回无效结果,不抛异常。
+	// 文件资产(.wprefab)读写、实例覆盖与嵌套/断链在 W4 后续增量接入。
+	WLD_API PrefabInstanceResult Instantiate(const Scene& source, Entity sourceRoot,
+		Scene& destination, entt::entity parent = entt::null);
+
+	// W4-2:.wprefab 资产读写。
+	// 实现方式:用临时场景承载子树,复用①已验证的实例化内核②场景序列化器
+	// (因此 prefab 文件与 .wd 同格式、同 schema 版本,读档路径也只有一条)。
+	//  - SaveFromScene:把 source 中 root 的子树导出为 prefab 文件;
+	//  - InstantiateFromFile:读入 prefab 并作为实例挂到 destination 的 parent 下。
+	WLD_API bool SaveFromScene(Scene& source, Entity root,
+		const std::filesystem::path& path, std::string* error = nullptr);
+	WLD_API PrefabInstanceResult InstantiateFromFile(const std::filesystem::path& path,
+		Scene& destination, entt::entity parent = entt::null);
+
+	// Level 2.0 §16.10:与 InstantiateFromFile 同一条路径,但把实例子树的 UUID **按给定
+	// 先序列表逐个写入**(而不是各生成一个新 UUID)。
+	//
+	// 为什么需要:稀疏放置的实例在磁盘上只带"模板先序 → 实体 UUID"这张映射表;加载时必须
+	// 让重建出来的实体拿到**盘上记着的那些 UUID**,否则覆盖条目(按 UUID 键控)与关卡里
+	// 其它实体的引用都会对不上。列表长度不足时多出来的实体保持新生成的 UUID(并告警)。
+	WLD_API PrefabInstanceResult InstantiateFromFileWithIds(const std::filesystem::path& path,
+		Scene& destination, entt::entity parent, const std::vector<uint64_t>& entityUuids);
+	// Prefab 2.0 (M0):基于 PrefabLocalId 的工业级映射实例化。
+	// 契约:
+	//  - inOutMapping 为输入输出映射(LocalId -> InstanceUuid):
+	//    * 既有 LocalId 沿用记录的 UUID,模板新增节点自动生成新 UUID 并追加登记;
+	//    * tombstones 内的 LocalId 在实例化时直接跳过(墓碑删除);
+	//  - 彻底摆脱树序数组依赖,模板内部增删重排对已有实例覆盖完全免疫。
+	WLD_API PrefabInstanceResult InstantiateFromFileWithMapping(const std::filesystem::path& path,
+		Scene& destination, entt::entity parent,
+		std::unordered_map<PrefabLocalId, uint64_t>& inOutMapping,
+		const std::vector<PrefabLocalId>& tombstones = {});
+
+	// 收集模板子树各实体的 PrefabLocalId(即模板内部实体原有的持久化 UUID)。
+	WLD_API void CollectTemplateLocalIds(const entt::registry& registry, entt::entity root,
+		std::vector<PrefabLocalId>& outIds);
+
+	// 实例子树(含根)的**先序**实体列表 —— 稀疏放置的"模板下标 ↔ 实体"映射与逐实体
+	// 落盘都按这个顺序。与 Instantiate 内部的 CollectSubtree 同一口径(同一份实现)。
+	WLD_API void FlattenInstanceSubtree(const entt::registry& registry, entt::entity root,
+		std::vector<entt::entity>& out);
+
+	// W4-3:实例覆盖记录(类型定义见 PrefabTypes.h —— Scene 也要持有它,故与 Scene.h 解耦)。
+
+	WLD_API void MarkOverride(PrefabInstanceRecord& record, entt::entity entity, const std::string& field);
+	WLD_API bool HasOverride(const PrefabInstanceRecord& record, entt::entity entity);
+	WLD_API size_t GetOverrideCount(const PrefabInstanceRecord& record);
+	WLD_API void ClearOverrides(PrefabInstanceRecord& record);
+
+	// 回滚实例:重新实例化来源 prefab 到临时场景,按树序把组件值拷回实例实体
+	// (契约:实例与 prefab 结构同构;整体回滚,字段级回滚需要 schema 字段访问,列入后续增量)。
+	WLD_API bool RevertInstance(PrefabInstanceRecord& record, Scene& scene);
+
+	// P2-b:把 prefab 文件最新内容应用到已有实例(**跟随**,覆盖保留)。
+	// 与 RevertInstance 的区别:回滚 = 丢弃覆盖回到资产原值并清空覆盖记录;跟随 =
+	//   1) 恢复前按 record.Overrides 登记的 (实体, 字段) 逐项快照实例**当前值**
+	//      (取值走 Schema::ReadSchemaField,字段串 = "<类型名>.<字段名>");
+	//   2) 与回滚同一套机制(InstantiateFromFile 到临时场景 + 两侧 Flatten 后逐实体
+	//      RestoreBuiltinComponents),其余内建组件字段回到 prefab 文件值;
+	//   3) 把快照值写回(Schema::WriteSchemaField);实体句柄不重建,record.Overrides 不清空。
+	// 失败(来源为空 / 实例根失效 / 读取失败 / 结构不一致:实体数或层级不同)返回 false + 非空
+	// error,且**不修改任何实体**(先检查后动手)。
+	// 单个字段无法解析或无可读值(类型/字段名对不上、组件不在该实体、Transient 未设)时跳过该
+	// 字段,原因累积进 error 文本,其余字段继续(整体仍返回 true)。
+	WLD_API bool ApplyPrefabChanges(PrefabInstanceRecord& record, Scene& scene, std::string* error = nullptr);
+	// 断链(Unpack):把实例变成普通实体——解除 prefab 关联并清空覆盖记录。
+	// 之后编辑不再被登记为覆盖,Revert/Apply 也不再可用(实体本身保持不变)。
+	// 嵌套 prefab 的数据表达:实例记录本身可再引用其它 prefab(编辑器侧维护多份记录),
+	// 因此断链只需清掉本层关联,不影响其子实例。
+	WLD_API bool UnpackInstance(PrefabInstanceRecord& record);
+	// 是否还能回滚(有来源且根仍然有效)。
+	WLD_API bool CanRevert(const PrefabInstanceRecord& record, const Scene& scene);
+}
+

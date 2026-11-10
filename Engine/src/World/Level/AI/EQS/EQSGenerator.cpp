@@ -1,0 +1,258 @@
+#include "wldpch.h"
+#include "World/Level/AI/EQS/EQSGenerator.h"
+#include "World/Terrain/Terrain.h"
+
+#include <algorithm>
+#include <cmath>
+#include <glm/gtc/matrix_transform.hpp>
+
+namespace World::EQS
+{
+	void EQSGenerator_ProjectedGrid::GenerateItems(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& outItems)
+	{
+		const float r = (Radius > 0.0f) ? Radius : ctx.QueryRadius;
+		float s = (Spacing > 0.05f) ? Spacing : ctx.GridSpacing;
+		if (s <= 0.05f)
+			s = 1.0f;
+		if (r <= 0.0f)
+			return;
+
+		const int steps = static_cast<int>(r / s);
+		for (int z = -steps; z <= steps; ++z)
+		{
+			for (int x = -steps; x <= steps; ++x)
+			{
+				const glm::vec3 pt = ctx.QuerierPos + glm::vec3(x * s, 0.0f, z * s);
+				const float distToQuerier = glm::distance(glm::vec2(pt.x, pt.z), glm::vec2(ctx.QuerierPos.x, ctx.QuerierPos.z));
+				if (distToQuerier <= r)
+				{
+					EQSCandidateItem item;
+					item.Position = pt;
+					item.TotalScore = 0.0f;
+					item.FilteredOut = false;
+					outItems.push_back(item);
+				}
+			}
+		}
+
+		if (ProjectToTerrain && ctx.Terrain)
+		{
+			const glm::mat4 invTerrain = glm::inverse(ctx.TerrainWorldTransform);
+			for (auto& item : outItems)
+			{
+				glm::vec3 localPt = glm::vec3(invTerrain * glm::vec4(item.Position, 1.0f));
+				float h = ctx.Terrain->SampleHeight(localPt.x, localPt.z);
+				glm::vec3 worldGround = glm::vec3(ctx.TerrainWorldTransform * glm::vec4(localPt.x, h, localPt.z, 1.0f));
+				item.Position.y = worldGround.y;
+			}
+		}
+	}
+
+	void EQSGenerator_Circle::GenerateItems(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& outItems)
+	{
+		const float innerR = InnerRadius;
+		const float outerR = (OuterRadius > 0.0f) ? OuterRadius : ctx.QueryRadius;
+		float step = (StepDistance > 0.05f) ? StepDistance : ctx.GridSpacing;
+		if (step <= 0.05f)
+			step = 1.0f;
+		if (outerR <= 0.0f)
+			return;
+
+		if (innerR <= 0.001f)
+		{
+			EQSCandidateItem center;
+			center.Position = ctx.QuerierPos;
+			center.TotalScore = 0.0f;
+			center.FilteredOut = false;
+			outItems.push_back(center);
+		}
+
+		const int ringCount = static_cast<int>((outerR - innerR) / step);
+		for (int r = 1; r <= ringCount; ++r)
+		{
+			const float radius = innerR + r * step;
+			const float circumference = 2.0f * 3.14159265f * radius;
+			const int pointCount = std::max(MinPointsPerRing, static_cast<int>(circumference / step));
+			for (int i = 0; i < pointCount; ++i)
+			{
+				const float angle = (static_cast<float>(i) / static_cast<float>(pointCount)) * 2.0f * 3.14159265f;
+				glm::vec3 pt = ctx.QuerierPos + glm::vec3(std::cos(angle) * radius, 0.0f, std::sin(angle) * radius);
+				EQSCandidateItem item;
+				item.Position = pt;
+				item.TotalScore = 0.0f;
+				item.FilteredOut = false;
+				outItems.push_back(item);
+			}
+		}
+
+		if (ProjectToTerrain && ctx.Terrain)
+		{
+			const glm::mat4 invTerrain = glm::inverse(ctx.TerrainWorldTransform);
+			for (auto& item : outItems)
+			{
+				glm::vec3 localPt = glm::vec3(invTerrain * glm::vec4(item.Position, 1.0f));
+				float h = ctx.Terrain->SampleHeight(localPt.x, localPt.z);
+				glm::vec3 worldGround = glm::vec3(ctx.TerrainWorldTransform * glm::vec4(localPt.x, h, localPt.z, 1.0f));
+				item.Position.y = worldGround.y;
+			}
+		}
+	}
+
+	void EQSGenerator_AroundObstacles::GenerateItems(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& outItems)
+	{
+		const float r = ctx.QueryRadius;
+		float s = (ctx.GridSpacing > 0.05f) ? ctx.GridSpacing : 1.0f;
+
+		if (IncludeGrid && r > 0.0f)
+		{
+			const int steps = static_cast<int>(r / s);
+			for (int z = -steps; z <= steps; ++z)
+			{
+				for (int x = -steps; x <= steps; ++x)
+				{
+					const glm::vec3 pt = ctx.QuerierPos + glm::vec3(x * s, 0.0f, z * s);
+					const float distToQuerier = glm::distance(glm::vec2(pt.x, pt.z), glm::vec2(ctx.QuerierPos.x, ctx.QuerierPos.z));
+					if (distToQuerier <= r)
+					{
+						EQSCandidateItem item;
+						item.Position = pt;
+						item.TotalScore = 0.0f;
+						item.FilteredOut = false;
+						outItems.push_back(item);
+					}
+				}
+			}
+		}
+
+		for (const auto& box : ctx.Obstacles)
+		{
+			const float offset = WallOffset;
+			const float ex = box.HalfExtents.x + offset;
+			const float ez = box.HalfExtents.z + offset;
+
+			const std::vector<glm::vec3> localOffsets = {
+				{ +ex, 0.0f,  0.0f },
+				{ -ex, 0.0f,  0.0f },
+				{  0.0f, 0.0f, +ez },
+				{  0.0f, 0.0f, -ez },
+				{ +ex, 0.0f, +ez * 0.5f },
+				{ +ex, 0.0f, -ez * 0.5f },
+				{ -ex, 0.0f, +ez * 0.5f },
+				{ -ex, 0.0f, -ez * 0.5f },
+				{ +ex * 0.5f, 0.0f, +ez },
+				{ -ex * 0.5f, 0.0f, +ez },
+				{ +ex * 0.5f, 0.0f, -ez },
+				{ -ex * 0.5f, 0.0f, -ez }
+			};
+
+			for (const auto& lOff : localOffsets)
+			{
+				glm::vec3 worldPt = box.Center + box.Rotation * lOff;
+				worldPt.y = box.Center.y - box.HalfExtents.y;
+				if (std::abs(ctx.QuerierPos.y - worldPt.y) < box.HalfExtents.y * 2.0f)
+					worldPt.y = ctx.QuerierPos.y;
+				const float dist = glm::distance(glm::vec2(worldPt.x, worldPt.z), glm::vec2(ctx.QuerierPos.x, ctx.QuerierPos.z));
+				if (dist <= r)
+				{
+					EQSCandidateItem item;
+					item.Position = worldPt;
+					item.TotalScore = 0.0f;
+					item.FilteredOut = false;
+					outItems.push_back(item);
+				}
+			}
+		}
+
+		if (ProjectToTerrain && ctx.Terrain)
+		{
+			const glm::mat4 invTerrain = glm::inverse(ctx.TerrainWorldTransform);
+			for (auto& item : outItems)
+			{
+				glm::vec3 localPt = glm::vec3(invTerrain * glm::vec4(item.Position, 1.0f));
+				float h = ctx.Terrain->SampleHeight(localPt.x, localPt.z);
+				glm::vec3 worldGround = glm::vec3(ctx.TerrainWorldTransform * glm::vec4(localPt.x, h, localPt.z, 1.0f));
+				item.Position.y = worldGround.y;
+			}
+		}
+	}
+
+	
+	void EQSGenerator_Cone::GenerateItems(const EQSQueryContext& ctx, std::vector<EQSCandidateItem>& outItems)
+	{
+		const float radius = (ConeRadius > 0.1f) ? ConeRadius : ((ctx.QueryRadius > 0.0f) ? ctx.QueryRadius : 20.0f);
+		const float innerR = std::max(0.0f, InnerRadius);
+		const float stepDist = (StepDistance > 0.1f) ? StepDistance : ((ctx.GridSpacing > 0.0f) ? ctx.GridSpacing : 1.5f);
+		const float angleStepDeg = (AngleStepDegrees > 1.0f) ? AngleStepDegrees : 15.0f;
+		const float halfAngleRad = glm::radians(std::clamp(ConeAngleDegrees * 0.5f, 5.0f, 180.0f));
+
+		glm::vec3 forward = ctx.QuerierForward;
+		if (glm::length(glm::vec2(forward.x, forward.z)) < 0.001f)
+		{
+			forward = glm::vec3(0.0f, 0.0f, 1.0f);
+		}
+		forward = glm::normalize(glm::vec3(forward.x, 0.0f, forward.z));
+
+		const float baseAngle = std::atan2(forward.z, forward.x);
+		const glm::vec3 center = ctx.QuerierPos;
+
+		for (float r = innerR; r <= radius + 0.01f; r += stepDist)
+		{
+			if (r < 0.01f)
+			{
+				EQSCandidateItem item;
+				item.Position = center;
+				outItems.push_back(item);
+				continue;
+			}
+
+			for (float a = -halfAngleRad; a <= halfAngleRad + 0.001f; a += glm::radians(angleStepDeg))
+			{
+				const float curAngle = baseAngle + a;
+				glm::vec3 pt = center + glm::vec3(r * std::cos(curAngle), 0.0f, r * std::sin(curAngle));
+
+				EQSCandidateItem item;
+				item.Position = pt;
+				outItems.push_back(item);
+			}
+		}
+
+		if (ProjectToTerrain && ctx.Terrain)
+		{
+			const glm::mat4 invTerrain = glm::inverse(ctx.TerrainWorldTransform);
+			for (auto& item : outItems)
+			{
+				glm::vec3 localPt = glm::vec3(invTerrain * glm::vec4(item.Position, 1.0f));
+				float h = ctx.Terrain->SampleHeight(localPt.x, localPt.z);
+				glm::vec3 worldGround = glm::vec3(ctx.TerrainWorldTransform * glm::vec4(localPt.x, h, localPt.z, 1.0f));
+				item.Position.y = worldGround.y;
+			}
+		}
+	}
+
+	EQSGeneratorRegistry::EQSGeneratorRegistry()
+	{
+		Register("ProjectedGrid", std::make_shared<EQSGenerator_ProjectedGrid>());
+		Register("Circle", std::make_shared<EQSGenerator_Circle>());
+		Register("AroundObstacles", std::make_shared<EQSGenerator_AroundObstacles>());
+		Register("Cone", std::make_shared<EQSGenerator_Cone>());
+	}
+
+	EQSGeneratorRegistry& EQSGeneratorRegistry::Get()
+	{
+		static EQSGeneratorRegistry s_Instance;
+		return s_Instance;
+	}
+
+	void EQSGeneratorRegistry::Register(const std::string& name, std::shared_ptr<IEQSGenerator> generator)
+	{
+		m_Generators[name] = std::move(generator);
+	}
+
+	std::shared_ptr<IEQSGenerator> EQSGeneratorRegistry::Find(const std::string& name) const
+	{
+		auto it = m_Generators.find(name);
+		if (it != m_Generators.end())
+			return it->second;
+		return nullptr;
+	}
+}

@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 910000000000000008
+  World::TagComponent:
+    Tag: "Ramp Marker Low"
+  World::TransformComponent:
+    Location: [14, 1.82, 0]
+    Rotation: [0, 0, 0]
+    Scale: [0.22, 0.8, 0.22]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.25, 0.85, 0.95, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

@@ -1,0 +1,11 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "project",
+  "$language": "zh-CN",
+  "$owns": [
+    "world."
+  ],
+  "world.boss.name": "石像守卫",
+  "world.boss.hp": "生命",
+  "world.hint": "世界空间锚点:名牌钉在实体上(走到哪里跟到哪里)"
+}

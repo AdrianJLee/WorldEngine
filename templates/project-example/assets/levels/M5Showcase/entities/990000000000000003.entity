@@ -1,0 +1,34 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000003
+  World::TagComponent:
+    Tag: Spark Fountain Emitter
+  World::TransformComponent:
+    Location: [3, 0.5, 0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::ParticleSystemComponent:
+    Gravity: [0, -6.0, 0]
+    EmissionRate: 60.0
+    Lifetime: 1.5
+    Speed: 6.0
+    SpeedVariance: 2.0
+    SizeStart: 0.25
+    SizeEnd: 0.05
+    ColorStart: 4294967040
+    ColorEnd: 16777215
+    MaxParticles: 800
+    EmitterType: 4
+    RenderMode: 1
+    LockToXYPlane: 0
+    Looping: 1
+    PlayOnAwake: 1
+    IsPlaying: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.2, 0.7, 1.0, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

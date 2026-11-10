@@ -1,0 +1,110 @@
+#pragma once
+
+#include "WUI/Common/EditorPanel.h"
+
+#include "World/Script/Tooling/LuauCompletion.h"
+#include "World/Script/Tooling/LuauHighlighter.h"
+#include "World/WUI/WuiCodeEditor.h"
+#include "World/WUI/WuiTextBuffer.h"
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
+
+namespace World
+{
+	// P2 W9-2:内置脚本编辑器面板(每个脚本一个实例,id = "script:<逻辑路径>",
+	// 与材质编辑器同款动态面板模型)。
+	//
+	// 职责:
+	//  - 打开:ResolveScriptDiskPath 解析磁盘路径 → 二进制读取 → WuiTextBuffer::SetText;
+	//    解析失败(包内/非法/不存在)→ 面板仍显示、只读 + 状态行错误文本;
+	//  - 保存(工具栏 / Ctrl+S):写 <path>.tmp-<pid> → 同目录 rename 原子替换;失败清理临时文件、
+	//    保留编辑器内容;成功后 MarkSaved + 更新磁盘指纹 + 编辑态下热重载场景里的同路径实例;
+	//  - 外部改动:0.5s 节流的内容指纹比对(不看 mtime)—— buffer 干净自动重载;
+	//    dirty → 状态行提示"磁盘已变化" + Reload(覆盖)/Keep(忽略到指纹再次变化)两个动作;
+	//  - 只读:Play/Simulate 或非磁盘来源时禁用 Save/Revert 与编辑(工具栏按钮登记为 disabled);
+	//  - 快捷键:OnShortcut 只置位(事件派发在 UI 帧之外,不在派发期改文档),帧内 OnRender 统一消费。
+	//
+	// CPPT-7/PROJ-8:内置编辑器只服务 Lua/Luau。C++ 源码(旧的 `module:<checkout 相对路径>`
+	// 逻辑路径、`.h/.cpp`)不再由本面板编辑 —— EditorShell 在打开入口按扩展名改走外部
+	// Visual Studio(EditorLayer::OpenInVisualStudio);本面板对这类路径只剩"解析失败 →
+	// 只读 + 状态行错误"的兜底(不会出现内置 C++ 编辑态)。
+	class ScriptEditorPanel final : public EditorPanel
+	{
+	public:
+		explicit ScriptEditorPanel(std::string logicalPath);
+
+		const char* Id() const override { return m_PanelId.c_str(); }
+		const char* Title() const override { return m_PanelTitle.c_str(); }
+		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
+		// 第 2 层(焦点面板层)快捷键:Ctrl+S = 保存脚本;Ctrl+R = 从磁盘 Reload(同 Revert)。
+		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
+
+		const std::string& LogicalPath() const { return m_LogicalPath; }
+		bool IsDiskBacked() const { return m_DiskBacked; }
+		const std::string& StatusText() const { return m_Status; }
+		// 打开/重新解析并载入磁盘内容(SetText 会重置撤销历史与脏标记)。
+		void LoadFromDisk();
+
+	private:
+		// 0.5s 节流:磁盘内容指纹变化检测(自动重载 / Reload+Keep 提示)。
+		void PollExternalChange();
+		// 保存:临时文件 + 原子替换 + MarkSaved + 场景实例热重载。
+		void ApplySave(PanelHost& host);
+		// 用磁盘版本覆盖 buffer(工具栏 Revert / Ctrl+R / 冲突提示的 Reload)。
+		void ApplyReloadFromDisk(PanelHost& host);
+
+		// W9.5:懒加载入库 WorldEngineAPI.luau 补全索引;失败只报一次并关闭补全。
+		void EnsureCompletionReady();
+		// VEC-A7:从完成索引的"引擎类型档"刷新高亮用的引擎外部类名集合(不写死第二份名单)。
+		void RefreshEngineTypes();
+		// W9.7:轻量格式化(4 空格缩进 + 去行尾空白),整篇一次撤销步。
+		void ApplyFormat();
+		void SetStatus(std::string text, bool error);
+
+		std::string m_PanelId;      // "script:<逻辑路径>"
+		std::string m_PanelTitle;   // 标签标题(文件名)
+		std::string m_LogicalPath;  // 逻辑路径(分隔符统一为 '/')
+		std::filesystem::path m_DiskPath;   // 解析出的磁盘绝对路径(仅 m_DiskBacked 时有效)
+		bool m_DiskBacked = false;
+		Wui::WuiTextBuffer m_Buffer;
+		LuauHighlightCache m_Highlight;
+		// VEC-A7:vec2/vec3/vec4/mat3/mat4/Entity/WorldScript —— 代码里给它们单独的类色。
+		World::LuauEngineTypeSet m_EngineTypes;
+		uint64_t m_DiskFingerprint = 0;     // 打开/保存/重载时记录的磁盘内容指纹
+		uint64_t m_IgnoredFingerprint = 0;  // Keep 忽略的磁盘版本(0 = 无)
+		uint64_t m_ConflictFingerprint = 0; // 触发当前冲突的磁盘版本(Keep 用它登记忽略)
+		bool m_ExternalConflict = false;    // 磁盘变了且 buffer 脏:状态行给 Reload/Keep
+		double m_NextDiskCheck = 0.0;
+		std::string m_Status;
+		bool m_StatusIsError = false;
+		// W9.5 补全:入库存根索引 + buffer 源码同步 + 失败只报一次。
+		World::LuauCompletionIndex m_Completion;
+		uint64_t m_CompletionFileRevision = ~0ull;
+		bool m_CompletionStubReady = false;
+		bool m_CompletionStubFailed = false;
+		// W9:代码**基础字号**(会话内记忆;初值来自偏好 ScriptFontSize,偏好改了才重新套用)。
+		// MAT-UI6b:缩放不再改这里 —— Ctrl+滚轮 / Ctrl+0 由 `Wui::CodeEditor` 内核直接调**会话缩放**
+		// (m_SessionZoom),宿主只回读;旧实现"改基础字号"与内核缩放叠加 = 双重缩放。
+		float m_FontSize = 14.0f;
+		// P4-UX7:上一次套用过的偏好字号(偏好改了才覆盖基础字号)。
+		float m_PreferenceFontSize = -1.0f;
+		// MAT-UI6b:会话缩放(与材质代码列**各一份**,互不影响)。内核是唯一事实源:宿主把自己的
+		// 会话值作为 options.UiZoom 的**初值**播种(内核只认第一次),之后每帧从 result.UiZoom 回读。
+		// 只活在本次会话(内核 ctx.Persist 按编辑器 id 持有);**任何路径都不写偏好文件**。
+		float m_SessionZoom = 1.0f;
+		// MAT-UI6b:信息行 `Font N%` 指示的保留截止时间(每次缩放变化后 2 秒有指示;缩放 ≠ 100% 时常显)。
+		double m_ZoomIndicatorUntil = 0.0;
+		// W9.7:防抖语法检查与出错行标记(1-based;0 = 无错误)。
+		int m_ErrorLine = 0;
+		uint64_t m_SyntaxCheckedRevision = ~0ull;
+		uint64_t m_SyntaxDueFrame = 0;
+		bool m_SyntaxScheduled = false;
+		bool m_StatusIsSyntax = false;
+		bool m_PendingFormat = false;
+		// OnShortcut 只置位,帧内消费。
+		bool m_PendingSave = false;
+		bool m_PendingReload = false;
+	};
+}

@@ -1,0 +1,32 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 950000000000000005
+  World::TagComponent:
+    Tag: "Foliage Pebble (Auto LOD)"
+  World::TransformComponent:
+    Location: [-4.5, 1.8, 18]
+    Rotation: [0, 25, 0]
+    Scale: [3.8, 3.8, 3.8]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [0.92, 0.92, 0.92, 1]
+    Mesh: "engine/models/foliage/scatter_pebble.wmodel"
+  World::MeshLODComponent:
+    LOD1Distance: 15.0
+    LOD2Distance: 35.0
+    LOD3Distance: 41.0
+    LOD4Distance: 47.0
+    LOD5Distance: 53.0
+    LOD6Distance: 59.0
+    LOD7Distance: 63.5
+    CullDistance: 65.0
+    Hysteresis: 2.0
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
+    CurrentLOD: 0
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 2

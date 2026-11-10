@@ -1,0 +1,21 @@
+﻿FormatVersion: 1
+AssetType: Blackboard
+Keys:
+  - Name: TargetPos
+    Type: Vector3
+    Default: [0, 0, 0]
+  - Name: CoverPos
+    Type: Vector3
+    Default: [0, 0, 0]
+  - Name: TargetEntity
+    Type: Entity
+    Default: 0
+  - Name: HasThreat
+    Type: Bool
+    Default: false
+  - Name: Value
+    Type: Float
+    Default: 0
+  - Name: Tag
+    Type: Int
+    Default: 0

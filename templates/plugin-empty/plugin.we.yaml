@@ -1,0 +1,12 @@
+# Empty Plugin — 插件清单模板(位置即 scope:本目录在 <plugins>/ 下 ⇒ scope = {{PluginScope}})。
+# 字段口径:Engine/src/World/Plugins/PluginManifest.h 与 docs/dev/plugin-framework.md。
+# id 必须是反域名形态;换 id 时要同步改 src/plugin.cpp 里的 kPluginId(宿主以清单为准)。
+id: {{PluginId}}
+name: {{PluginName}}
+version: 1.0.0
+abi: 1
+entry: WePluginQuery
+engine: ">=2.0"
+# 这个模板不注册任何能力(provides 留空):
+provides: []
+ship: auto

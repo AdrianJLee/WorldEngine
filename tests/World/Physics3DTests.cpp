@@ -1,0 +1,688 @@
+// P1b D6:3D 物理(Jolt)headless 回归。
+//
+// 覆盖 plan §D6 冻结决定的 9 条验收:
+//   ① 自由落体(1s 下降符合 g)          ② 两箱堆叠不穿插           ③ 静态体不动
+//   ④ Kinematic 跟随 Transform           ⑤ 凸包由 .wmodel 顶点构建   ⑥ 2D+3D 共存互不干扰
+//   ⑦ 接触回调(箱落地触发 added)         ⑧ DebugLines 线段数        ⑨ 同实体双物理拒绝
+// 外加脚手架基线段:RigidBody2DComponent 仍在(共存用例依赖它)。
+#include "wldpch.h"
+#include "World/Asset/WModelIO.h"
+#include "World/Core/WorldContext.h"
+#include "World/Core/Thread/JobSystem.h"
+#include "World/Physics/Physics3D.h"
+#include "World/Physics/PhysicsEvents.h"
+#include "World/Physics/PhysicsSettings.h"
+#include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
+#include "World/Scene/Scene.h"
+#include "World/Gameplay/Runtime/GameApp.h"
+
+#include <box2d/box2d.h>
+
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace
+{
+	using namespace World;
+
+	void Check(bool condition, const char* expression, int line)
+	{
+		if (!condition)
+			throw std::runtime_error(std::string("line ") + std::to_string(line) + ": " + expression);
+	}
+#define CHECK(expression) Check(static_cast<bool>(expression), #expression, __LINE__)
+
+	constexpr float kFixedStep = 1.0f / 60.0f;
+
+	WorldContext& TestContext()
+	{
+		static WorldContext context;
+		return context;
+	}
+
+	Ref<Scene> CreateTestScene()
+	{
+		return CreateRef<Scene>(TestContext());
+	}
+
+	Entity AddEntityAt(Scene& scene, const char* name, const glm::vec3& location)
+	{
+		Entity entity = Entity::CreateEntity(&scene, name);
+		entity.AddComponent<TransformComponent>(location, glm::vec3(0.0f), glm::vec3(1.0f));
+		return entity;
+	}
+
+	Entity AddBox(Scene& scene, const char* name, const glm::vec3& location, RigidBody3DComponent::MotionType type,
+		const glm::vec3& halfExtents)
+	{
+		Entity entity = AddEntityAt(scene, name, location);
+		RigidBody3DComponent& rigidBody = entity.AddComponent<RigidBody3DComponent>();
+		rigidBody.Type = type;
+		rigidBody.Restitution = 0.0f;   // 测试里不要弹跳,便于稳定断言
+		entity.AddComponent<BoxCollider3DComponent>().HalfExtents = halfExtents;
+		return entity;
+	}
+
+	void StepWorld(Physics3DWorld& world, int frames)
+	{
+		for (int frame = 0; frame < frames; ++frame)
+			world.Step(kFixedStep);
+	}
+
+	// 8 顶点 / 12 三角形的最小闭合立方体 .wmodel(凸包与三角网格两种模式共用)。
+	Asset::WModelData MakeCubeModel(float halfExtent)
+	{
+		Asset::WModelData model;
+		const glm::vec3 corners[8] = {
+			{ -halfExtent, -halfExtent, -halfExtent }, { halfExtent, -halfExtent, -halfExtent },
+			{ halfExtent, halfExtent, -halfExtent }, { -halfExtent, halfExtent, -halfExtent },
+			{ -halfExtent, -halfExtent, halfExtent }, { halfExtent, -halfExtent, halfExtent },
+			{ halfExtent, halfExtent, halfExtent }, { -halfExtent, halfExtent, halfExtent },
+		};
+		for (const glm::vec3& corner : corners)
+			model.Vertices.push_back({ corner, glm::vec3(0.0f, 1.0f, 0.0f), glm::vec2(0.0f) });
+
+		const uint32_t indices[36] = {
+			4, 5, 6, 4, 6, 7,   // +Z
+			1, 0, 3, 1, 3, 2,   // -Z
+			0, 4, 7, 0, 7, 3,   // -X
+			5, 1, 2, 5, 2, 6,   // +X
+			0, 1, 5, 0, 5, 4,   // -Y
+			3, 7, 6, 3, 6, 2,   // +Y
+		};
+		for (const uint32_t index : indices)
+			model.Indices.push_back(index);
+
+		// D5b:`.wmodel` v2 要求 meta 有效(sourceFingerprint/importerVersion/settingsHash);
+		// 这里是测试自造的模型,不是导入产物 —— 填一组自洽值即可(与运行时加载契约一致)。
+		model.Meta.SourceFingerprint = 0xD6C0BEull;
+		model.Meta.Valid = true;
+		model.Meta.ImporterVersion = 1;
+		model.Meta.SettingsHash = 0;
+		model.Meta.UpAxis = 0;
+		model.Meta.Scale = 1.0f;
+
+		model.Bounds.Min = glm::vec3(-halfExtent);
+		model.Bounds.Max = glm::vec3(halfExtent);
+		Asset::WModelSubmesh submesh;
+		submesh.IndexOffset = 0;
+		submesh.IndexCount = 36;
+		submesh.MaterialSlot = -1;
+		submesh.Bounds = model.Bounds;
+		model.Submeshes.push_back(submesh);
+		model.Meshes.push_back({ 0, 1 });
+		return model;
+	}
+
+	// 0.D6 前置:2D 物理组件仍在(2D/3D 共存这条验收依赖它)。
+	void RigidBody2DComponentStillExists()
+	{
+		CHECK(sizeof(RigidBody2DComponent) > 0);
+	}
+
+	// 1.自由落体:1s 后 y 下降符合 g(kGravity = -9.81;固定步 60 Hz 半隐式欧拉,允许离散误差)。
+	void FreeFallMatchesGravity()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity faller = AddBox(*scene, "Faller", { 0.0f, 10.0f, 0.0f },
+			RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
+
+		Physics3DWorld world;
+		world.Start(*scene);
+		StepWorld(world, 60);
+		world.SyncTransforms();
+
+		glm::vec3 location { 0.0f };
+		glm::quat rotation { 1.0f, 0.0f, 0.0f, 0.0f };
+		CHECK(world.TryGetBodyTransform(faller, &location, &rotation));
+		const float drop = 10.0f - location.y;
+		std::printf("[info] free fall 1s: y=%.4f drop=%.4f (analytic 4.905)\n", location.y, drop);
+		CHECK(drop > 4.5f && drop < 5.3f);
+		CHECK(location.y < 10.0f);
+		CHECK(std::fabs(location.x) < 1e-4f && std::fabs(location.z) < 1e-4f);
+
+		// Step 后的写回:TransformComponent 与 Jolt 权威位姿一致;位姿没变时不再写(避免每帧标脏)。
+		const TransformComponent& transform = faller.GetComponent<TransformComponent>();
+		CHECK(std::fabs(transform.Location.y - location.y) < 1e-4f);
+		CHECK(!scene->SyncPhysics3DTransform(faller, location, rotation));
+
+		world.Stop();
+		CHECK(!world.IsStarted());
+	}
+
+	// 2.两箱堆叠不穿插:静态地面 + 两个动态箱,5s 后第二箱停稳在第一箱顶面(中心间距 ≈ 1.0)。
+	void StackedBoxesDoNotInterpenetrate()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		AddBox(*scene, "Ground", { 0.0f, -0.5f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 5.0f, 0.5f, 5.0f });
+		Entity lower = AddBox(*scene, "Lower", { 0.0f, 0.6f, 0.0f },
+			RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
+		Entity upper = AddBox(*scene, "Upper", { 0.0f, 2.0f, 0.0f },
+			RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
+
+		Physics3DWorld world;
+		world.Start(*scene);
+		StepWorld(world, 300);
+		world.SyncTransforms();
+
+		glm::vec3 lowerLocation { 0.0f };
+		glm::vec3 upperLocation { 0.0f };
+		CHECK(world.TryGetBodyTransform(lower, &lowerLocation, nullptr));
+		CHECK(world.TryGetBodyTransform(upper, &upperLocation, nullptr));
+		const float gap = upperLocation.y - lowerLocation.y;
+		std::printf("[info] stack: lower.y=%.4f upper.y=%.4f gap=%.4f\n", lowerLocation.y, upperLocation.y, gap);
+		CHECK(lowerLocation.y > 0.4f && lowerLocation.y < 0.6f);   // 地面顶面 y=0,箱半高 0.5
+		CHECK(gap > 0.9f && gap < 1.1f);                          // 不穿插、也没有悬空台阶
+		world.Stop();
+	}
+
+	// 3.静态体不动:120 帧后 Jolt 位姿与 TransformComponent 都保持原值(Static 不参与写回)。
+	void StaticBodyDoesNotMove()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity box = AddBox(*scene, "Static", { 1.0f, 2.0f, 3.0f },
+			RigidBody3DComponent::MotionType::Static, { 1.0f, 0.5f, 2.0f });
+
+		Physics3DWorld world;
+		world.Start(*scene);
+		StepWorld(world, 120);
+		world.SyncTransforms();
+
+		glm::vec3 location { 0.0f };
+		CHECK(world.TryGetBodyTransform(box, &location, nullptr));
+		CHECK(std::fabs(location.x - 1.0f) < 1e-6f);
+		CHECK(std::fabs(location.y - 2.0f) < 1e-6f);
+		CHECK(std::fabs(location.z - 3.0f) < 1e-6f);
+		const TransformComponent& transform = box.GetComponent<TransformComponent>();
+		CHECK(std::fabs(transform.Location.x - 1.0f) < 1e-6f);
+		CHECK(std::fabs(transform.Location.y - 2.0f) < 1e-6f);
+		CHECK(std::fabs(transform.Location.z - 3.0f) < 1e-6f);
+		std::printf("[info] static body stays at (%.4f, %.4f, %.4f)\n", location.x, location.y, location.z);
+		world.Stop();
+	}
+
+	// 4.Kinematic 跟随 Transform:每帧把 Transform 往 +X 挪 0.05,40 帧后刚体 x ≈ 2.0。
+	void KinematicFollowsTransform()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity mover = AddBox(*scene, "Mover", { 0.0f, 1.0f, 0.0f },
+			RigidBody3DComponent::MotionType::Kinematic, { 0.5f, 0.5f, 0.5f });
+
+		Physics3DWorld world;
+		world.Start(*scene);
+		for (int frame = 0; frame < 40; ++frame)
+		{
+			TransformComponent& transform = mover.GetComponent<TransformComponent>();
+			transform.SetLocation(transform.Location + glm::vec3(0.05f, 0.0f, 0.0f));
+			world.Step(kFixedStep);
+			world.SyncTransforms();
+		}
+
+		glm::vec3 location { 0.0f };
+		CHECK(world.TryGetBodyTransform(mover, &location, nullptr));
+		std::printf("[info] kinematic after 40 frames: x=%.4f y=%.4f\n", location.x, location.y);
+		CHECK(std::fabs(location.x - 2.0f) < 0.05f);
+		CHECK(std::fabs(location.y - 1.0f) < 0.05f);
+		const TransformComponent& transform = mover.GetComponent<TransformComponent>();
+		CHECK(std::fabs(transform.Location.x - 2.0f) < 0.05f);
+		world.Stop();
+	}
+
+	// 5.凸包由 .wmodel 顶点构建:动态凸包落到地面顶面(y ≈ 0.5);StaticTriangles 挂动态刚体被拒绝。
+	void ConvexHullFromWModel()
+	{
+		const std::filesystem::path directory = std::filesystem::temp_directory_path() / "we-physics3d-tests";
+		std::filesystem::create_directories(directory);
+		const std::filesystem::path modelPath = directory / "D6Cube.wmodel";
+		std::string error;
+		CHECK(Asset::WModelIO::WriteFile(modelPath.string(), MakeCubeModel(0.5f), &error));
+
+		Ref<Scene> scene = CreateTestScene();
+		AddBox(*scene, "Ground", { 0.0f, -0.5f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 5.0f, 0.5f, 5.0f });
+		Entity hull = AddEntityAt(*scene, "Hull", { 0.0f, 3.0f, 0.0f });
+		RigidBody3DComponent& body = hull.AddComponent<RigidBody3DComponent>();
+		body.Type = RigidBody3DComponent::MotionType::Dynamic;
+		body.Restitution = 0.0f;
+		MeshCollider3DComponent& collider = hull.AddComponent<MeshCollider3DComponent>();
+		collider.Mode = MeshCollider3DComponent::ColliderMode::ConvexHull;
+		collider.Mesh = AssetRef { StringPool::Get().InternPath(modelPath.string()), AssetId() };
+
+		Physics3DWorld world;
+		world.Start(*scene);
+		StepWorld(world, 180);
+		glm::vec3 location { 0.0f };
+		CHECK(world.TryGetBodyTransform(hull, &location, nullptr));
+		std::printf("[info] convex hull landed at y=%.4f (model %s)\n", location.y,
+			modelPath.filename().string().c_str());
+		CHECK(location.y > 0.4f && location.y < 0.7f);
+		world.Stop();
+
+		// StaticTriangles 只允许静态刚体 → 校验/启动都拒绝(可读错误)。
+		Ref<Scene> invalid = CreateTestScene();
+		Entity bad = AddEntityAt(*invalid, "BadTriangles", { 0.0f, 0.0f, 0.0f });
+		RigidBody3DComponent& badBody = bad.AddComponent<RigidBody3DComponent>();
+		badBody.Type = RigidBody3DComponent::MotionType::Dynamic;
+		MeshCollider3DComponent& triangles = bad.AddComponent<MeshCollider3DComponent>();
+		triangles.Mode = MeshCollider3DComponent::ColliderMode::StaticTriangles;
+		triangles.Mesh = AssetRef { StringPool::Get().InternPath(modelPath.string()), AssetId() };
+		CHECK(!Physics3DWorld::ValidateScene(*invalid, &error));
+		CHECK(error.find("StaticTriangles") != std::string::npos);
+		CHECK(error.find("Static") != std::string::npos);
+		Physics3DWorld rejecting;
+		bool threw = false;
+		try { rejecting.Start(*invalid); }
+		catch (const std::logic_error& exception) { threw = std::string(exception.what()).find("StaticTriangles") != std::string::npos; }
+		CHECK(threw);
+		CHECK(!rejecting.IsStarted());
+	}
+
+	// 6.2D+3D 共存互不干扰:同场景两套世界各自步进(下落量一致、各自轴不动)。
+	void Physics2DAnd3DCoexist()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity faller2D = AddEntityAt(*scene, "Faller2D", { 0.0f, 10.0f, 0.0f });
+		RigidBody2DComponent& body2D = faller2D.AddComponent<RigidBody2DComponent>();
+		body2D.Type = RigidBody2DComponent::BodyType::Dynamic;
+		faller2D.AddComponent<BoxCollider2DComponent>().Size = { 0.5f, 0.5f };
+
+		Entity faller3D = AddBox(*scene, "Faller3D", { 10.0f, 10.0f, 0.0f },
+			RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
+
+		scene->OnRuntimeStart();
+		CHECK(scene->IsPhysics2DRunning());
+		CHECK(scene->IsPhysics3DRunning());
+		for (int frame = 0; frame < 60; ++frame)
+			// PURE-ECS(工业口径):物理跑**固定步长**(Fixed 阶段)⇒ 由固定回调驱动;
+			// 可变阶段(表现层)每帧仍跑一次,与宿主(GameHost)同序。
+			scene->OnFixedUpdate(Timestep(kFixedStep));
+
+		const b2Vec2 position2D = b2Body_GetPosition(scene->GetPhysicsBody2D(faller2D));
+		glm::vec3 position3D { 0.0f };
+		CHECK(scene->GetPhysics3DWorld() != nullptr);
+		CHECK(scene->GetPhysics3DWorld()->TryGetBodyTransform(faller3D, &position3D, nullptr));
+
+		const float drop2D = 10.0f - position2D.y;
+		const float drop3D = 10.0f - position3D.y;
+		std::printf("[info] coexist 1s: 2D=%.4f 3D=%.4f (drop 2D=%.4f 3D=%.4f)\n",
+			position2D.y, position3D.y, drop2D, drop3D);
+		CHECK(drop2D > 4.5f && drop2D < 5.3f);
+		CHECK(drop3D > 4.5f && drop3D < 5.3f);
+		CHECK(std::fabs(drop2D - drop3D) < 0.2f);       // 两套世界互不干扰
+		CHECK(std::fabs(position2D.x) < 1e-3f);         // 2D 世界看不到 3D 物体
+		CHECK(std::fabs(position3D.x - 10.0f) < 1e-3f); // 3D 世界看不到 2D 物体
+		CHECK(std::fabs(faller3D.GetComponent<TransformComponent>().Location.y - position3D.y) < 1e-4f);
+
+		scene->OnRuntimeStop();
+		CHECK(!scene->IsPhysics2DRunning());
+		CHECK(!scene->IsPhysics3DRunning());
+		CHECK(scene->GetPhysics3DWorld() == nullptr);
+	}
+
+	// 7.接触回调:箱落到地面触发 added(实体对匹配);Scene 钩子表转发同一条事件。
+	void ContactCallbackFiresOnLanding()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity ground = AddBox(*scene, "Ground", { 0.0f, -0.5f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 5.0f, 0.5f, 5.0f });
+		Entity faller = AddBox(*scene, "Faller", { 0.0f, 2.0f, 0.0f }, RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
+		const entt::entity groundHandle = ground;
+		const entt::entity fallerHandle = faller;
+
+		Physics3DWorld world;
+		int began = 0;
+		int persisted = 0;
+		int ended = 0;
+		bool pairMatched = false;
+		world.SetContactCallback([&](const Physics::ContactEvent& event)
+		{
+			switch (event.Phase)
+			{
+				case Physics::ContactPhase::Begin: ++began; break;
+				case Physics::ContactPhase::Persist: ++persisted; break;
+				case Physics::ContactPhase::End: ++ended; break;
+			}
+			if (event.Phase == Physics::ContactPhase::Begin &&
+				((event.EntityA == groundHandle && event.EntityB == fallerHandle) ||
+				 (event.EntityA == fallerHandle && event.EntityB == groundHandle)))
+				pairMatched = true;
+		});
+		world.Start(*scene);
+		StepWorld(world, 150);
+		std::printf("[info] contact: begin=%d persist=%d end=%d pairMatched=%d\n", began, persisted, ended, pairMatched ? 1 : 0);
+		CHECK(began >= 1);
+		CHECK(persisted >= 1);
+		CHECK(pairMatched);
+		world.Stop();
+
+		// P5:场景侧 —— 物理事实直接进场景事件队列,可变阶段可读(不再有裸回调表)。
+		Ref<Scene> hooked = CreateTestScene();
+		Entity groundHook = AddBox(*hooked, "Ground", { 0.0f, -0.5f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 5.0f, 0.5f, 5.0f });
+		Entity fallerHook = AddBox(*hooked, "Faller", { 0.0f, 2.0f, 0.0f }, RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
+		const entt::entity groundHookHandle = groundHook;
+		const entt::entity fallerHookHandle = fallerHook;
+		hooked->OnRuntimeStart();
+		int sceneBegan = 0;
+		int scenePersisted = 0;
+		bool scenePairMatched = false;
+		for (int frame = 0; frame < 150; ++frame)
+		{
+			hooked->OnFixedUpdate(Timestep(kFixedStep));   // 物理走固定步长回调
+			for (const Physics::ContactEvent& event : hooked->GetContactEvents())
+			{
+				if (event.Phase == Physics::ContactPhase::Begin) ++sceneBegan;
+				if (event.Phase == Physics::ContactPhase::Persist) ++scenePersisted;
+				if (event.Phase == Physics::ContactPhase::Begin &&
+					((event.EntityA == groundHookHandle && event.EntityB == fallerHookHandle) ||
+					 (event.EntityA == fallerHookHandle && event.EntityB == groundHookHandle)))
+					scenePairMatched = true;
+			}
+		}
+		hooked->OnRuntimeStop();
+		std::printf("[info] scene events: begin=%d persist=%d pairMatched=%d\n", sceneBegan, scenePersisted, scenePairMatched ? 1 : 0);
+		CHECK(sceneBegan >= 1);
+		CHECK(scenePersisted >= 1);
+		CHECK(scenePairMatched);
+		CHECK(!hooked->IsPhysics3DRunning());
+	}
+
+	// 8.DebugLines:box 12 棱 / sphere 3 圆(24 段) / capsule 2 圆 + 4 侧线;世界空间坐标正确。
+	void DebugLinesCoverAllColliders()
+	{
+		// 单一 box:12 条棱;包围盒 = 中心 ± HalfExtents(世界空间,body 没动)。
+		{
+			Ref<Scene> boxScene = CreateTestScene();
+			AddBox(*boxScene, "Box", { 0.0f, 0.0f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 1.0f, 2.0f, 3.0f });
+			Physics3DWorld boxWorld;
+			boxWorld.Start(*boxScene);
+			std::vector<DebugLine> boxLines;
+			boxWorld.CollectDebugLines(boxLines);
+			CHECK(boxLines.size() == 12u);
+			glm::vec3 minimum(std::numeric_limits<float>::max());
+			glm::vec3 maximum(std::numeric_limits<float>::lowest());
+			for (const DebugLine& line : boxLines)
+			{
+				minimum = glm::min(minimum, glm::min(line.Begin, line.End));
+				maximum = glm::max(maximum, glm::max(line.Begin, line.End));
+			}
+			CHECK(glm::distance(minimum, glm::vec3(-1.0f, -2.0f, -3.0f)) < 1e-4f);
+			CHECK(glm::distance(maximum, glm::vec3(1.0f, 2.0f, 3.0f)) < 1e-4f);
+			boxWorld.Stop();
+		}
+
+		// box + sphere + capsule:总线段数 = 12 + 3×24 + (2×24 + 4)。
+		Ref<Scene> scene = CreateTestScene();
+		AddBox(*scene, "Box", { 0.0f, 0.0f, 0.0f }, RigidBody3DComponent::MotionType::Static, { 1.0f, 2.0f, 3.0f });
+
+		Entity sphere = AddEntityAt(*scene, "Sphere", { 10.0f, 0.0f, 0.0f });
+		sphere.AddComponent<RigidBody3DComponent>();
+		sphere.AddComponent<SphereCollider3DComponent>().Radius = 1.0f;
+
+		Entity capsule = AddEntityAt(*scene, "Capsule", { 20.0f, 0.0f, 0.0f });
+		capsule.AddComponent<RigidBody3DComponent>();
+		RigidBody3DComponent& kinematic = capsule.GetComponent<RigidBody3DComponent>();
+		kinematic.Type = RigidBody3DComponent::MotionType::Kinematic;
+		CapsuleCollider3DComponent& capsuleCollider = capsule.AddComponent<CapsuleCollider3DComponent>();
+		capsuleCollider.Radius = 0.5f;
+		capsuleCollider.HalfHeight = 1.0f;
+
+		Physics3DWorld world;
+		world.Start(*scene);
+		std::vector<DebugLine> lines;
+		world.CollectDebugLines(lines);
+		std::printf("[info] debug lines: total=%zu (box 12 + sphere 72 + capsule 52)\n", lines.size());
+		CHECK(lines.size() == 12u + 72u + 52u);
+		for (const DebugLine& line : lines)
+		{
+			CHECK(std::isfinite(line.Begin.x) && std::isfinite(line.End.x));
+			CHECK(glm::distance(line.Begin, line.End) > 1e-4f);
+		}
+		world.Stop();
+
+		// 未启动 → 可读错误(不静默)。
+		std::vector<DebugLine> unused;
+		bool threw = false;
+		try { world.CollectDebugLines(unused); }
+		catch (const std::logic_error& exception) { threw = std::string(exception.what()).find("Start(Scene&)") != std::string::npos; }
+		CHECK(threw);
+	}
+
+	// 9.同实体双物理拒绝:2D+3D 组件混挂 → Start 与 Scene::OnRuntimeStart 都拒绝,场景保持 Stopped。
+	void DualPhysicsOnSameEntityIsRejected()
+	{
+		Ref<Scene> scene = CreateTestScene();
+		Entity conflicted = AddEntityAt(*scene, "Conflicted", { 0.0f, 0.0f, 0.0f });
+		conflicted.AddComponent<RigidBody2DComponent>();
+		RigidBody3DComponent& body3D = conflicted.AddComponent<RigidBody3DComponent>();
+		body3D.Type = RigidBody3DComponent::MotionType::Dynamic;
+		conflicted.AddComponent<BoxCollider3DComponent>();
+		const std::string entityLabel = std::to_string(static_cast<uint32_t>(static_cast<entt::entity>(conflicted)));
+
+		std::string error;
+		CHECK(!Physics3DWorld::ValidateScene(*scene, &error));
+		CHECK(error.find("2D") != std::string::npos);
+		CHECK(error.find("3D") != std::string::npos);
+		CHECK(error.find(entityLabel) != std::string::npos);
+		std::printf("[info] dual physics rejection: %s\n", error.c_str());
+
+		Physics3DWorld world;
+		bool threw = false;
+		try { world.Start(*scene); }
+		catch (const std::logic_error& exception) { threw = std::string(exception.what()).find("2D and 3D") != std::string::npos; }
+		CHECK(threw);
+		CHECK(!world.IsStarted());
+
+		threw = false;
+		try { scene->OnRuntimeStart(); }
+		catch (const std::logic_error& exception) { threw = std::string(exception.what()).find("2D and 3D") != std::string::npos; }
+		CHECK(threw);
+		CHECK(!scene->IsActive());
+		CHECK(!scene->IsPhysics2DRunning());   // 校验在创建任何物理世界之前 → 没有半启动的 2D 世界
+		CHECK(!scene->IsPhysics3DRunning());
+	}
+
+	// JOBSYS(工业化):physics.multithreaded = true 的 Jolt 多线程适配器冒烟 —— 反假通过。
+	//
+	// 意义:证明 MT 分支不是死代码,而不是"跑过了就算":
+	//   * 选路写反 / 适配器引用计数写错 ⇒ 这里会崩、触发 Jolt 断言或产生 NaN;
+	//   * 引擎 JobSystem 的执行计数不增长 ⇒ 说明 Jolt 作业根本没落到引擎线程池里(选路是假的)。
+	// 注意:Jolt 多线程会改变约束求解的作业完成顺序 ⇒ **不做**与单线程的逐位比较,
+	// 只要求结果有限、合理(落地不穿透),并且同一进程内连跑两遍不崩不错乱。
+	void MultithreadedJobSystemIsExercised()
+	{
+		// 引擎线程池不在跑时 IsUsable() 为假、MT 分支不会走 —— 这里显式起一个(用完还原)。
+		const bool jobSystemWasRunning = JobSystem::IsRunning();
+		if (!jobSystemWasRunning)
+			JobSystem::Init(3);
+
+		const Asset::PhysicsSettingsData savedSettings = PhysicsSettings::Get();
+		Asset::PhysicsSettingsData settings = savedSettings;
+		settings.Multithreaded = true;
+		PhysicsSettings::Set(settings);
+
+		// 8 个动态箱 + 静态地面:给 Jolt 足够的 broadphase / narrowphase / solver 作业。
+		const auto dropAndProbe = []
+		{
+			WorldContext localContext;
+			Ref<Scene> scene = CreateRef<Scene>(localContext);
+			AddBox(*scene, "MTGround", { 0.0f, -0.5f, 0.0f },
+				RigidBody3DComponent::MotionType::Static, { 6.0f, 0.5f, 6.0f });
+			std::vector<Entity> fallers;
+			for (int i = 0; i < 8; ++i)
+				fallers.push_back(AddBox(*scene, "MTFaller", { -2.8f + 0.8f * i, 6.0f + 0.2f * i, 0.5f * (i % 3) },
+					RigidBody3DComponent::MotionType::Dynamic, { 0.3f, 0.3f, 0.3f }));
+
+			Physics3DWorld world;
+			world.Start(*scene);
+			for (int step = 0; step < 120; ++step)
+			{
+				world.Step(kFixedStep);
+				world.SyncTransforms();
+			}
+			// 选路断言放在 Step 之后:适配器是首次进入 MT 分支时懒建的。
+			CHECK(world.IsUsingMultithreadedJobSystem());
+			for (Entity faller : fallers)
+			{
+				glm::vec3 position { 0.0f };
+				CHECK(world.TryGetBodyTransform(faller, &position, nullptr));
+				CHECK(std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z));
+				// 地面顶面 y=0,箱半高 0.3 ⇒ 停稳中心 ≈ 0.3(不穿透、也没有 NaN/弹飞)。
+				CHECK(position.y > 0.2f && position.y < 0.5f);
+			}
+			return fallers.size();
+		};
+
+		const JobSystem::Stats before = JobSystem::GetStats();
+		const size_t landedFirst = dropAndProbe();
+		const JobSystem::Stats afterFirst = JobSystem::GetStats();
+		CHECK(landedFirst == 8u);
+
+		// 反假通过:MT 分支真的被选到 ⇒ Jolt 作业经过引擎 JobSystem(worker 执行 + 等待期执行)。
+		// 若选路被写反(恒走单线程),同样这段里这两个计数**完全不动** ⇒ 立即红灯。
+		const uint64_t engineJobsFirst = (afterFirst.Executed - before.Executed) +
+			(afterFirst.ExecutedWhileWaiting - before.ExecutedWhileWaiting);
+		std::printf("[info] MT job system run 1: engine-executed=%llu (worker=%llu waiting=%llu stolen=%llu)\n",
+			static_cast<unsigned long long>(engineJobsFirst),
+			static_cast<unsigned long long>(afterFirst.Executed - before.Executed),
+			static_cast<unsigned long long>(afterFirst.ExecutedWhileWaiting - before.ExecutedWhileWaiting),
+			static_cast<unsigned long long>(afterFirst.Stolen - before.Stolen));
+		CHECK(engineJobsFirst > 0);
+
+		// 同一进程内第二遍 MT:不崩、不错乱(冒烟稳定性)。
+		const size_t landedSecond = dropAndProbe();
+		CHECK(landedSecond == 8u);
+
+		PhysicsSettings::Set(savedSettings);
+		if (!jobSystemWasRunning)
+			JobSystem::Shutdown();
+	}
+}
+
+int main()
+{
+	try
+	{
+		std::setvbuf(stdout, nullptr, _IONBF, 0);
+
+		// ============================================================
+		// PECS-P4:固定步长确定性(工业口径)—— 同一段**真实时间**、两种**帧率**,物理结果必须一致。
+		//
+		// 关键:不能手工喂不同的 dt(那当然会不同) —— 要测的是**宿主累加器**:
+		// 帧率变了,累加器仍然只喂 1/FixedStepHz 的固定步。所以这里按宿主的接线驱动
+		// (GameApp 的阶段回调 → Scene::OnFixedUpdate / OnUpdateRuntime),用 1/60 与 1/30
+		// 两种帧时间各推进 1.0 秒真实时间,比较刚体位置。
+		// ============================================================
+		{
+			const float kRealSeconds = 1.0f;
+			const float kFrameSeconds[2] = { 1.0f / 60.0f, 1.0f / 30.0f };
+			float height[2] = { 0.0f, 0.0f };
+			for (int run = 0; run < 2; ++run)
+			{
+				WorldContext localContext;
+				Ref<Scene> scene = CreateRef<Scene>(localContext);
+				Entity faller = AddBox(*scene, "DeterminismFaller", { 0.0f, 10.0f, 0.0f },
+					RigidBody3DComponent::MotionType::Dynamic, { 0.5f, 0.5f, 0.5f });
+				scene->OnRuntimeStart();
+
+				Gameplay::GameAppDesc desc;
+				desc.ProjectId = "physics-determinism";
+				desc.FixedStepHz = 60;
+				Gameplay::GameApp::Create(desc);
+				Gameplay::GameApp& app = Gameplay::GameApp::Get();
+				// 与 GameHost 同一接线:固定回调 → OnFixedUpdate,可变回调 → OnUpdateRuntime。
+				app.SetPhaseCallbacks(
+					[&](Timestep ts) { scene->OnFixedUpdate(ts); },
+					[&](Timestep ts) { scene->OnUpdateRuntime(ts); },
+					Gameplay::GameApp::PhaseCallback());
+
+				const float frameSeconds = kFrameSeconds[run];
+				for (float elapsed = 0.0f; elapsed < kRealSeconds - 1e-6f; elapsed += frameSeconds)
+					app.Tick(Timestep(frameSeconds));
+				Gameplay::GameApp::Shutdown();
+
+				glm::vec3 position { 0.0f };
+				if (!scene->GetPhysics3DWorld()->TryGetBodyTransform(faller, &position, nullptr))
+					throw std::runtime_error("determinism probe: no body transform");
+				height[run] = position.y;
+				scene->OnRuntimeStop();
+			}
+			std::printf("[info] determinism: 60fps=%.9f 30fps=%.9f\n", height[0], height[1]);
+			CHECK(height[0] == height[1]);
+		}
+		// ============================================================
+		// 同一保证的 **2D/Box2D** 版:同一段真实时间、两种帧率 ⇒ 结果逐位相同。
+		// (两个后端都走 Fixed 阶段,都由宿主累加器喂固定 dt。)
+		// ============================================================
+		{
+			const float kRealSeconds = 1.0f;
+			const float kFrameSeconds[2] = { 1.0f / 60.0f, 1.0f / 30.0f };
+			float height[2] = { 0.0f, 0.0f };
+			for (int run = 0; run < 2; ++run)
+			{
+				WorldContext localContext;
+				Ref<Scene> scene = CreateRef<Scene>(localContext);
+				Entity faller = AddEntityAt(*scene, "DeterminismFaller2D", { 0.0f, 10.0f, 0.0f });
+				RigidBody2DComponent& body = faller.AddComponent<RigidBody2DComponent>();
+				body.Type = RigidBody2DComponent::BodyType::Dynamic;
+				faller.AddComponent<BoxCollider2DComponent>().Size = { 0.5f, 0.5f };
+				scene->OnRuntimeStart();
+
+				Gameplay::GameAppDesc desc;
+				desc.ProjectId = "physics-determinism-2d";
+				desc.FixedStepHz = 60;
+				Gameplay::GameApp::Create(desc);
+				Gameplay::GameApp& app = Gameplay::GameApp::Get();
+				app.SetPhaseCallbacks(
+					[&](Timestep ts) { scene->OnFixedUpdate(ts); },
+					[&](Timestep ts) { scene->OnUpdateRuntime(ts); },
+					Gameplay::GameApp::PhaseCallback());
+
+				const float frameSeconds = kFrameSeconds[run];
+				for (float elapsed = 0.0f; elapsed < kRealSeconds - 1e-6f; elapsed += frameSeconds)
+					app.Tick(Timestep(frameSeconds));
+				Gameplay::GameApp::Shutdown();
+
+				const b2Vec2 position = b2Body_GetPosition(scene->GetPhysicsBody2D(faller));
+				height[run] = position.y;
+				scene->OnRuntimeStop();
+			}
+			std::printf("[info] determinism 2D: 60fps=%.9f 30fps=%.9f\n", height[0], height[1]);
+			CHECK(height[0] == height[1]);
+		}
+		const std::pair<const char*, void(*)()> tests[] = {
+			{ "RigidBody2DComponent still exists (2D/3D coexistence baseline)", RigidBody2DComponentStillExists },
+			{ "free fall matches gravity (1s drop ~ g)", FreeFallMatchesGravity },
+			{ "stacked boxes do not interpenetrate", StackedBoxesDoNotInterpenetrate },
+			{ "static body does not move", StaticBodyDoesNotMove },
+			{ "kinematic body follows TransformComponent", KinematicFollowsTransform },
+			{ "convex hull from .wmodel + StaticTriangles requires static", ConvexHullFromWModel },
+			{ "2D and 3D physics coexist without interference", Physics2DAnd3DCoexist },
+			{ "contact events fire on landing (world callback + Scene queue)", ContactCallbackFiresOnLanding },
+			{ "CollectDebugLines covers box/sphere/capsule", DebugLinesCoverAllColliders },
+			{ "2D+3D on one entity is rejected at runtime", DualPhysicsOnSameEntityIsRejected },
+			{ "multithreaded job system is exercised and gated", MultithreadedJobSystemIsExercised },
+		};
+		int failures = 0;
+		for (const auto& [name, test] : tests)
+		{
+			try { test(); std::printf("[PASS] %s\n", name); }
+			catch (const std::exception& error) { ++failures; std::fprintf(stderr, "[FAIL] %s: %s\n", name, error.what()); }
+			catch (...) { ++failures; std::fprintf(stderr, "[FAIL] %s: unknown exception\n", name); }
+		}
+		if (failures == 0)
+			std::printf("World.Physics3D: all checks passed\n");
+		else
+			std::fprintf(stderr, "World.Physics3D: %d group(s) failed\n", failures);
+		return failures == 0 ? 0 : 1;
+	}
+	catch (const std::exception& error)
+	{
+		std::fprintf(stderr, "World.Physics3D: fatal: %s\n", error.what());
+		return 1;
+	}
+}

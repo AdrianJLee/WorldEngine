@@ -1,0 +1,27 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000014
+  World::TagComponent:
+    Tag: "Generic Navigation Camera"
+  World::TransformComponent:
+    Location: [20.0, 16.0, -4.0]
+    Rotation: [-0.52359877, 0, 0]
+    Scale: [1, 1, 1]
+  World::CameraComponent:
+    Camera:
+      m_ProjectionType: 0
+      m_OrthographicZoom: 1
+      m_OrthographicNearClip: -1
+      m_OrthographicFarClip: 1
+      m_PerspectiveFOV: 55
+      m_PerspectiveNearClip: 0.1
+      m_PerspectiveFarClip: 300
+    Primary: true
+    FixedAspectRatio: false
+  World::AudioListenerComponent:
+    Active: true
+    VolumeScale: 1.0
+  World::LevelEntityComponent:
+    DataLayerMask: 1

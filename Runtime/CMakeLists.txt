@@ -27,9 +27,19 @@ file(GLOB_RECURSE Runtime_SOURCES
     "src/*.cpp"
 
 )
-target_sources(Runtime PRIVATE ${Runtime_SOURCES})
+target_sources(Runtime PRIVATE 
+    ${Runtime_SOURCES}
+    "${CMAKE_SOURCE_DIR}/Engine/src/World/Profiling/GlobalAllocHooks.cpp"
+)
 
 target_link_libraries(Runtime PRIVATE 
     World
 )
 
+add_custom_command(TARGET Runtime POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:World>"
+        "$<TARGET_FILE_DIR:Runtime>"
+    COMMENT "Copying WorldRuntime.dll next to Runtime.exe"
+    VERBATIM
+)

@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000015
+  World::TagComponent:
+    Tag: "Valley Gate Pillar Right"
+  World::TransformComponent:
+    Location: [35.1, 1.5, 28.0]
+    Rotation: [0, 0, 0]
+    Scale: [0.7, 3.0, 0.7]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.2, 0.2, 0.24, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

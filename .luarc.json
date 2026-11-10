@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.4",
+  "workspace.library": ["tests/fixtures/content/scripts/intermediate"],
+  "workspace.ignoreDir": [".git", ".codex", ".vscode", "build", "vendor", "third_party", "tools", "tests/World/lua", "tests/fixtures/content/scripts/tests"],
+  "workspace.checkThirdParty": false,
+  "diagnostics.libraryFiles": "Disable",
+  "hint.enable": true,
+  "hint.paramType": true,
+  "hint.setType": true
+}

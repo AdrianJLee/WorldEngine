@@ -1,0 +1,191 @@
+FormatVersion: 1
+Name: Explosion
+Guid: 1002
+Seed: 2026
+Duration: 2
+Looping: false
+WarmupTime: 0
+LOD:
+  CullDistance: 80
+  PauseWhenOffscreen: true
+Emitters:
+  - Name: Flash
+    Enabled: true
+    MaxParticles: 30
+    Lifetime: 0.25
+    EmissionRate: 0
+    Emitter:
+      Type: Point
+      LockToXY: false
+    Material:
+      TexturePath: ""
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 4
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 0.5
+      SpeedVariance: 0.2
+      Gravity: [0, 0, 0]
+      LinearDrag: 0
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.2
+      SizeEnd: 2.8
+      ColorStart: [1, 1, 0.8, 1]
+      ColorEnd: [1, 0.4, 0.1, 0]
+    Bursts:
+      - Time: 0
+        Count: 20
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+  - Name: ShockwaveRing
+    Enabled: true
+    MaxParticles: 30
+    Lifetime: 0.55
+    EmissionRate: 0
+    Emitter:
+      Type: Point
+      LockToXY: false
+    Material:
+      TexturePath: ""
+      BlendMode: Additive
+      FacingMode: HorizontalQuad
+      EmissiveBoost: 2.5
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 0.2
+      SpeedVariance: 0
+      Gravity: [0, 0, 0]
+      LinearDrag: 0
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.4
+      SizeEnd: 4.5
+      ColorStart: [1, 0.8, 0.3, 0.9]
+      ColorEnd: [0.8, 0.2, 0, 0]
+    Bursts:
+      - Time: 0
+        Count: 15
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+  - Name: Fireball
+    Enabled: true
+    MaxParticles: 120
+    Lifetime: 0.8
+    EmissionRate: 0
+    Emitter:
+      Type: Sphere
+      LockToXY: false
+    Material:
+      TexturePath: ""
+      BlendMode: Additive
+      FacingMode: Billboard
+      EmissiveBoost: 3
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 6.5
+      SpeedVariance: 2
+      Gravity: [0, 1.5, 0]
+      LinearDrag: 2.8
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 2.2
+      TurbulenceFrequency: 1.8
+    Evolution:
+      SizeStart: 0.8
+      SizeEnd: 0.1
+      ColorStart: [1, 0.6, 0.1, 1]
+      ColorEnd: [0.7, 0.1, 0, 0]
+    Bursts:
+      - Time: 0
+        Count: 65
+    Collision:
+      Mode: None
+      Restitution: 0.5
+      Friction: 0.1
+      KillOnHit: false
+      EnableEvents: false
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]
+  - Name: ShrapnelSparks
+    Enabled: true
+    MaxParticles: 150
+    Lifetime: 1.6
+    EmissionRate: 0
+    Emitter:
+      Type: Sphere
+      LockToXY: false
+    Material:
+      TexturePath: ""
+      BlendMode: Additive
+      FacingMode: StretchedVelocity
+      EmissiveBoost: 4
+      SoftParticle: false
+      FadeDistance: 0.5
+      SubUV:
+        TilesX: 1
+        TilesY: 1
+        FPS: 0
+        RandomStart: false
+    Motion:
+      Speed: 9
+      SpeedVariance: 3
+      Gravity: [0, -11, 0]
+      LinearDrag: 0.2
+      VortexStrength: 0
+      VortexAxis: [0, 1, 0]
+      TurbulenceStrength: 0.5
+      TurbulenceFrequency: 1
+    Evolution:
+      SizeStart: 0.15
+      SizeEnd: 0.02
+      ColorStart: [1, 0.95, 0.5, 1]
+      ColorEnd: [0.9, 0.2, 0, 0]
+    Bursts:
+      - Time: 0.03
+        Count: 50
+    Collision:
+      Mode: Plane
+      Restitution: 0.45
+      Friction: 0.2
+      KillOnHit: false
+      EnableEvents: true
+      PlaneOrigin: [0, 0, 0]
+      PlaneNormal: [0, 1, 0]

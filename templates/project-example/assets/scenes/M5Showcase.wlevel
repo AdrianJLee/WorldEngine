@@ -1,0 +1,13 @@
+Id: M5Showcase
+Name: M5 Particle & Editor Tooling Showcase
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true
+  - Mask: 2
+    Name: Particle_FX
+    DefaultActive: true
+  - Mask: 4
+    Name: Curve_Demo
+    DefaultActive: true

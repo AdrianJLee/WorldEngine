@@ -1,0 +1,20 @@
+TexturePath: "assets/textures/Icon.wtex"
+Width: 256
+Height: 256
+Sprites:
+  - Name: "hero_idle"
+    Rect: [0, 0, 64, 64]
+    Pivot: [0.5, 0.0]
+    Border: [0, 0, 0, 0]
+  - Name: "hero_walk"
+    Rect: [64, 0, 64, 64]
+    Pivot: [0.5, 0.0]
+    Border: [0, 0, 0, 0]
+  - Name: "hero_jump"
+    Rect: [128, 0, 64, 64]
+    Pivot: [0.5, 0.0]
+    Border: [0, 0, 0, 0]
+  - Name: "dialog_box_9slice"
+    Rect: [0, 128, 128, 128]
+    Pivot: [0.5, 0.5]
+    Border: [16, 16, 16, 16]

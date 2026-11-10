@@ -1,0 +1,37 @@
+Name: dungeon_walk
+AtlasPath: assets/textures/characters/dungeon_atlas.watlas
+FrameRate: 10
+LoopMode: 0
+Frames:
+  - SubTexture: slice_0
+    Duration: 0.100000001
+  - SubTexture: slice_1
+    Duration: 0.100000001
+  - SubTexture: slice_2
+    Duration: 0.100000001
+  - SubTexture: slice_3
+    Duration: 0.100000001
+  - SubTexture: slice_4
+    Duration: 0.100000001
+  - SubTexture: slice_5
+    Duration: 0.100000001
+  - SubTexture: slice_6
+    Duration: 0.100000001
+  - SubTexture: slice_7
+    Duration: 0.100000001
+  - SubTexture: slice_8
+    Duration: 0.100000001
+  - SubTexture: slice_9
+    Duration: 0.100000001
+  - SubTexture: slice_10
+    Duration: 0.100000001
+  - SubTexture: slice_11
+    Duration: 0.100000001
+  - SubTexture: slice_12
+    Duration: 0.100000001
+  - SubTexture: slice_13
+    Duration: 0.100000001
+  - SubTexture: slice_14
+    Duration: 0.100000001
+  - SubTexture: slice_15
+    Duration: 0.100000001

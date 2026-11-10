@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000009
+  World::TagComponent:
+    Tag: "Valley Exit Pedestal"
+  World::TransformComponent:
+    Location: [32, 0.3, 52]
+    Rotation: [0, 0, 0]
+    Scale: [0.6, 0.6, 0.6]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.25, 0.28, 0.35, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

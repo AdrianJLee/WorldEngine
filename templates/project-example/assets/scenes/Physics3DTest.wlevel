@@ -1,0 +1,7 @@
+Id: Physics3DTest
+Name: Physics3DTest
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Base_World
+    DefaultActive: true

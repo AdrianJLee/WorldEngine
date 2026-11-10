@@ -1,0 +1,12 @@
+# WorldEngine 材质资产。颜色为 sRGB 空间取值。
+FormatVersion: 3
+AssetId: 0x7FE6996A3765502C
+Name: "Mannequin Visor"
+BaseColor: [0.08128817, 0.11139332, 0.13393702, 1]
+Metallic: 0.85
+Roughness: 0.12
+Emissive: [0.16894329, 0.54209924, 0.612401]
+AlbedoTexture: ""
+NormalTexture: ""
+BlendMode: Opaque
+DoubleSided: false

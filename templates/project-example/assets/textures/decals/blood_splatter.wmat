@@ -1,0 +1,12 @@
+# WorldEngine 3D Decal Material - Blood Splatter
+FormatVersion: 3
+AssetId: 0x0DECA10000000002
+Name: "Decal Blood Splatter"
+BaseColor: [1, 1, 1, 1]
+Metallic: 0.05
+Roughness: 0.2
+Emissive: [0, 0, 0]
+AlbedoTexture: "textures/decals/blood_splatter.png"
+NormalTexture: ""
+BlendMode: Transparent
+DoubleSided: true

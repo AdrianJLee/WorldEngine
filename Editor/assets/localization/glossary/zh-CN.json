@@ -1,0 +1,20 @@
+[
+  { "term": "shader", "translation": "着色器" },
+  { "term": "material", "translation": "材质" },
+  { "term": "mesh", "translation": "网格" },
+  { "term": "prefab", "translation": "预制体" },
+  { "term": "scene", "translation": "场景" },
+  { "term": "entity", "translation": "实体" },
+  { "term": "component", "translation": "组件" },
+  { "term": "viewport", "translation": "视口" },
+  { "term": "gizmo", "translation": "操作柄", "note": "视口内拖拽控件" },
+  { "term": "slot", "translation": "存档位", "note": "Save 面板语境" },
+  { "term": "bake", "translation": "烘焙" },
+  { "term": "import", "translation": "导入" },
+  { "term": "assets", "translation": "资产" },
+  { "term": "content root", "translation": "内容根" },
+  { "term": "OpenGL", "translation": "OpenGL", "doNotTranslate": true },
+  { "term": "Vulkan", "translation": "Vulkan", "doNotTranslate": true },
+  { "term": "Slang", "translation": "Slang", "doNotTranslate": true },
+  { "term": "WUI", "translation": "WUI", "doNotTranslate": true }
+]

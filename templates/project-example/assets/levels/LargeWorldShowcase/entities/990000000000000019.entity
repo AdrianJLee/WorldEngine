@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000019
+  World::TagComponent:
+    Tag: "Grand Steps Link (Stairs Transition)"
+  World::TransformComponent:
+    Location: [-5.0, 0.0, -10.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 3
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [4.0, 2.5, 6.0]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.55, 0.52, 0.48, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

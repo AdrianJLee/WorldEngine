@@ -1,0 +1,28 @@
+﻿ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 983000000000000008
+  World::TagComponent:
+    Tag: "Concrete Bunker Wall North"
+  World::TransformComponent:
+    Location: [-2.0, 1.4, 4.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [2.2, 2.8, 10.0]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::NavMeshObstacleComponent:
+    Extents: [1.1, 1.4, 5.0]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.48, 0.50, 0.54, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

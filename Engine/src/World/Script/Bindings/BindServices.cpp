@@ -1,0 +1,1450 @@
+#include "World/Core/EngineHostMode.h"
+#include "wldpch.h"
+#include "World/Script/Bindings/BindServices.h"
+#include "World/Core/Input.h"
+#include "World/Core/Application.h"
+#include "World/Core/KeyCodes.h"
+#include <GLFW/glfw3.h>
+#include "World/WUI/WuiContext.h"
+#include <cctype>
+
+#include "World/Gameplay/Runtime/GameApp.h"
+#include "World/Gameplay/Framework/InputMap.h"
+#include "World/Gameplay/Framework/LevelService.h"
+#include "World/Gameplay/Framework/SaveService.h"
+#include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Script/LuaType/LuaTypeHelpers.h"
+#include "World/Script/Vm/LuauVm.h"
+#include "World/Script/Vm/ScriptRef.h"
+#include "World/Script/Vm/ScriptValue.h"
+
+#include <algorithm>
+#include <cmath>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace World
+{
+	namespace
+	{
+		using Gameplay::GameApp;
+		using Gameplay::InputService;
+		using Gameplay::LevelLoadStateName;
+		using Gameplay::LevelService;
+		using Gameplay::SaveService;
+		using Gameplay::SaveSlotInfo;
+		using GlobalValue = SaveService::GlobalValue;
+
+		// ---- 前置条件:会话/服务 ----
+
+		GameApp& RequireGameApp()
+		{
+			GameApp* app = GameApp::TryGet();
+			if (!app)
+				throw std::logic_error("no GameApp session is active; script service calls require a running game session");
+			return *app;
+		}
+
+		SaveService& RequireSaveService()
+		{
+			SaveService* saves = RequireGameApp().Saves();
+			if (!saves)
+				throw std::logic_error("no save service is available; the host must call GameApp::CreateSaveService first");
+			return *saves;
+		}
+
+		ScriptTableRef MakeScriptTable()
+		{
+			return ScriptEngine::GetState().CreateTable();
+		}
+
+		// ---- 参数读取(不匹配 → 可读 C++ 异常 → Lua error) ----
+
+		const char* TypeNameOf(const ScriptValue& value)
+		{
+			return value.TypeName();
+		}
+
+		std::string MethodSignature(const std::string& table, const ScriptServiceMethod& method)
+		{
+			std::string signature = table + "." + method.Name + "(";
+			for (std::size_t i = 0; i < method.ParamCount; ++i)
+			{
+				if (i) signature += ", ";
+				signature += method.Params[i].Name;
+				if (!method.Params[i].Required) signature += "?";
+				signature += ": ";
+				signature += method.Params[i].LuaType;
+			}
+			return signature + ")";
+		}
+
+		void CheckArgumentCount(const std::string& table, const ScriptServiceMethod& method,
+			std::size_t count, std::size_t minimum)
+		{
+			if (count < minimum || count > method.ExpectedArgs)
+				throw std::logic_error(MethodSignature(table, method) + " expects between " +
+					std::to_string(minimum) + " and " + std::to_string(method.ExpectedArgs) +
+					" argument(s); got " + std::to_string(count));
+		}
+
+		bool MatchesType(ScriptServiceArgType accepted, const ScriptValue& value)
+		{
+			if ((static_cast<uint32_t>(accepted) & static_cast<uint32_t>(ScriptServiceArgType::Boolean)) &&
+				value.IsBoolean())
+				return true;
+			if ((static_cast<uint32_t>(accepted) & static_cast<uint32_t>(ScriptServiceArgType::Number)) &&
+				value.IsNumber())
+				return true;
+			if ((static_cast<uint32_t>(accepted) & static_cast<uint32_t>(ScriptServiceArgType::String)) &&
+				value.IsString())
+				return true;
+			if ((static_cast<uint32_t>(accepted) & static_cast<uint32_t>(ScriptServiceArgType::Table)) &&
+				value.IsTable())
+				return true;
+			return false;
+		}
+
+		const ScriptValue& RequireArg(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index)
+		{
+			if (index >= argCount || args[index].IsNil())
+				throw std::logic_error(MethodSignature(table, method) + " is missing required argument " +
+					std::to_string(index + 1));
+			if (!MatchesType(method.Params[index].Accepted, args[index]))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be " + method.Params[index].LuaType +
+					", got " + TypeNameOf(args[index]));
+			return args[index];
+		}
+
+		bool OptionalBool(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index, bool fallback)
+		{
+			if (index >= argCount || args[index].IsNil())
+				return fallback;
+			CheckArgumentCount(table, method, argCount, 0);
+			if (!MatchesType(method.Params[index].Accepted, args[index]))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be " + method.Params[index].LuaType +
+					", got " + TypeNameOf(args[index]));
+			bool result = fallback;
+			args[index].AsBool(&result);
+			return result;
+		}
+
+		std::string OptionalString(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index, const std::string& fallback)
+		{
+			if (index >= argCount || args[index].IsNil())
+				return fallback;
+			CheckArgumentCount(table, method, argCount, 0);
+			if (!MatchesType(method.Params[index].Accepted, args[index]))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be " + method.Params[index].LuaType +
+					", got " + TypeNameOf(args[index]));
+			std::string result = fallback;
+			args[index].AsString(&result);
+			return result;
+		}
+
+		std::string RequireString(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index)
+		{
+			const ScriptValue& value = RequireArg(table, method, args, argCount, index);
+			std::string result;
+			if (!value.AsString(&result))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be " + method.Params[index].LuaType);
+			return result;
+		}
+
+		uint32_t RequireSlot(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index)
+		{
+			const ScriptValue& value = RequireArg(table, method, args, argCount, index);
+			double number = 0.0;
+			if (!value.AsNumber(&number) || number < 0.0 || number > 4294967295.0 ||
+				number != static_cast<double>(static_cast<uint64_t>(number)))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be an integer in [0, 4294967295]");
+			return static_cast<uint32_t>(number);
+		}
+
+		uint32_t RequirePlayer(const std::string& table, const ScriptServiceMethod& method,
+			const ScriptValue* args, std::size_t argCount, std::size_t index)
+		{
+			if (index >= argCount || args[index].IsNil())
+				return 0;
+			const ScriptValue& value = args[index];
+			double number = 0.0;
+			if (!MatchesType(method.Params[index].Accepted, value) || !value.AsNumber(&number) ||
+				number < 0.0 || number > 4294967295.0 || number != static_cast<double>(static_cast<uint64_t>(number)))
+				throw std::logic_error(MethodSignature(table, method) + ": argument " + std::to_string(index + 1) +
+					" ('" + method.Params[index].Name + "') must be a non-negative integer player slot");
+			return static_cast<uint32_t>(number);
+		}
+
+		// 脚本侧只能写入 uint32 槽位;内部时间戳等 uint64 值按 double 输出(与 Lua number 精度一致)。
+		double ToLuaNumber(uint64_t value)
+		{
+			return static_cast<double>(value);
+		}
+
+		// ---- 每个方法的实现(独立函数,便于方法描述先构造、方法体后引用) ----
+
+		ScriptValue InputDownImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[0];
+			const std::string action = RequireString("Input", method, args, count, 0);
+			const uint32_t player = RequirePlayer("Input", method, args, count, 1);
+			bool down = false;
+			GameApp* session = GameApp::TryGet();
+			if (session)
+				down = session->Input().ActionDown(action, player);
+			return ScriptValue::Boolean(down);
+		}
+
+		ScriptValue InputPressedImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[1];
+			const std::string action = RequireString("Input", method, args, count, 0);
+			const uint32_t player = RequirePlayer("Input", method, args, count, 1);
+			bool pressed = false;
+			if (GameApp* app = GameApp::TryGet())
+				pressed = app->Input().ActionPressed(action, player);
+			return ScriptValue::Boolean(pressed);
+		}
+
+		ScriptValue InputReleasedImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[2];
+			const std::string action = RequireString("Input", method, args, count, 0);
+			const uint32_t player = RequirePlayer("Input", method, args, count, 1);
+			bool released = false;
+			if (GameApp* app = GameApp::TryGet())
+				released = app->Input().ActionReleased(action, player);
+			return ScriptValue::Boolean(released);
+		}
+
+		ScriptValue InputAxisImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[3];
+			const std::string axis = RequireString("Input", method, args, count, 0);
+			const uint32_t player = RequirePlayer("Input", method, args, count, 1);
+			float value = 0.0f;
+			if (GameApp* app = GameApp::TryGet())
+				value = app->Input().Axis(axis, player);
+			return ScriptValue::Number(static_cast<double>(value));
+		}
+
+		ScriptValue InputPlayerCountImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[4], count, 0);
+			uint32_t players = 0;
+			if (GameApp* app = GameApp::TryGet())
+				players = app->Input().GetPlayerCount();
+			return ScriptValue::Number(static_cast<double>(players));
+		}
+
+		// WP5:滚轮增量读的是**场景快照**(不是平台实时值)⇒ 同一可变帧内固定步循环
+		// 读到的滚轮逐位相同,与按键/轴/鼠标的确定性口径一致。
+		ScriptValue InputScrollImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[5], count, 0);
+			float scroll = 0.0f;
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				scroll = scene->GetInputSnapshot().ScrollDelta;
+			return ScriptValue::Number(static_cast<double>(scroll));
+		}
+
+		ScriptValue InputMouseDeltaImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[11], count, 0);
+			glm::vec2 delta { 0.0f };
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				delta = scene->GetInputSnapshot().MouseDelta;
+			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", delta);
+		}
+
+		// 0=左键、1=右键、2=中键(与 Gameplay::InputSnapshot::MouseButtons 的位序一致)。
+		// 未知按钮/无活动场景返回 false,不抛错 —— 脚本可以把它当作能力探测。
+		ScriptValue InputMouseButtonImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[12], count, 1);
+			double number = 0.0;
+			if (!args[0].AsNumber(&number) || !std::isfinite(number) || number != std::round(number) ||
+				number < 0.0 || number > 4.0)
+				return ScriptValue::Boolean(false);
+			const uint16_t mask = static_cast<uint16_t>(1U << static_cast<uint32_t>(number));
+			Scene* scene = ScriptEngine::GetActiveScene();
+			return ScriptValue::Boolean(scene ? (scene->GetInputSnapshot().MouseButtons & mask) != 0 : false);
+		}
+
+		// 指针在**窗口客户区**中的位置（物理像素）。HUD 悬停判定/自绘准星都用它，
+		// 与 MouseDelta 同源（场景快照），因此在固定步里读到的也是同一份数据。
+		ScriptValue InputMousePositionImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[13], count, 0);
+			glm::vec2 position { 0.0f };
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				position = scene->GetInputSnapshot().MousePosition;
+			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", position);
+		}
+
+		ScriptValue InputContentScaleImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args; (void)count;
+			float scale = 1.0f;
+			if (Application::HasInstance())
+			{
+				if (void* nativeWin = Application::Get().GetWindow().GetNativeWindow())
+				{
+					float sx = 0.0f, sy = 0.0f;
+					glfwGetWindowContentScale(static_cast<GLFWwindow*>(nativeWin), &sx, &sy);
+					if (sx > 0.0f)
+						scale = sx;
+				}
+			}
+			return ScriptValue::Number(static_cast<double>(scale));
+		}
+
+		ScriptValue InputViewportSizeImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args; (void)count;
+			glm::vec2 size { 1280.0f, 720.0f };
+			if (Application::HasInstance())
+			{
+				if (void* nativeWin = Application::Get().GetWindow().GetNativeWindow())
+				{
+					int w = 0, h = 0;
+					glfwGetWindowSize(static_cast<GLFWwindow*>(nativeWin), &w, &h);
+					if (w > 0 && h > 0)
+					{
+						size.x = static_cast<float>(w);
+						size.y = static_cast<float>(h);
+						return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", size);
+					}
+				}
+				size.x = static_cast<float>(Application::Get().GetWindow().GetWidth());
+				size.y = static_cast<float>(Application::Get().GetWindow().GetHeight());
+			}
+			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", size);
+		}
+
+		ScriptValue InputWindowSizeImpl(const ScriptValue* args, std::size_t count)
+		{
+			return InputViewportSizeImpl(args, count);
+		}
+
+		// 光标的显示与锁定是**玩家可感知的状态**，必须让玩法脚本能控制：
+		// 第三人称/第一人称需要"隐藏光标 + 指针锁定"，菜单/HUD 需要"显示光标"。
+		ScriptValue InputSetCursorVisibleImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[14], count, 1);
+			bool visible = true;
+			if (!args[0].AsBool(&visible))
+				return ScriptValue::Boolean(false);
+			if (!Application::HasInstance())
+				return ScriptValue::Boolean(false);
+			Application::Get().GetWindow().SetCursorVisible(visible);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue InputCursorVisibleImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[15], count, 0);
+			return ScriptValue::Boolean(Application::HasInstance()
+				&& Application::Get().GetWindow().IsCursorVisible());
+		}
+
+		ScriptValue InputSetCursorLockedImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[16], count, 1);
+			bool locked = true;
+			if (!args[0].AsBool(&locked))
+				return ScriptValue::Boolean(false);
+			if (!Application::HasInstance())
+				return ScriptValue::Boolean(false);
+			Application::Get().GetWindow().SetCursorLocked(locked);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue InputCursorLockedImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[17], count, 0);
+			return ScriptValue::Boolean(Application::HasInstance()
+				&& Application::Get().GetWindow().IsCursorLocked());
+		}
+
+		// ---- R1:上下文开关。名字 -> 映射表里的 contexts;找不到返回 false(不抛,便于脚本探测) ----
+		// 语义要点:
+		//   * Push 幂等 —— 已激活再 Push 返回 true,不会叠出第二份(叠了会让同一动作被两层同时驱动);
+		//   * 按映射表里的 priority 压栈,与引擎装载 default: true 的上下文走同一条入口;
+		//   * 只动"当前激活集合",不改文档 —— 与 Input.Down/Pressed 的只读口径一致。
+		const Gameplay::InputMappingContext* FindContextByName(const Gameplay::InputMap& map, const std::string& name)
+		{
+			for (const Gameplay::InputMappingContext& context : map.Contexts())
+				if (context.GetName() == name)
+					return &context;
+			return nullptr;
+		}
+
+		ScriptValue InputPushContextImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[7];
+			const std::string name = RequireString("Input", method, args, count, 0);
+			GameApp* app = GameApp::TryGet();
+			if (!app)
+				return ScriptValue::Boolean(false);
+			const Gameplay::InputMappingContext* context = FindContextByName(app->Input().GetMap(), name);
+			if (!context)
+				return ScriptValue::Boolean(false);
+			if (app->Input().HasContext(context->GetId()))
+				return ScriptValue::Boolean(true);
+			app->Input().PushContext(*context, context->GetPriority());
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue InputPopContextImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[8];
+			const std::string name = RequireString("Input", method, args, count, 0);
+			GameApp* app = GameApp::TryGet();
+			if (!app)
+				return ScriptValue::Boolean(false);
+			const Gameplay::InputMappingContext* context = FindContextByName(app->Input().GetMap(), name);
+			if (!context || !app->Input().HasContext(context->GetId()))
+				return ScriptValue::Boolean(false);
+			app->Input().PopContext(context->GetId());
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue InputHasContextImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[9];
+			const std::string name = RequireString("Input", method, args, count, 0);
+			GameApp* app = GameApp::TryGet();
+			if (!app)
+				return ScriptValue::Boolean(false);
+			const Gameplay::InputMappingContext* context = FindContextByName(app->Input().GetMap(), name);
+			return ScriptValue::Boolean(context != nullptr && app->Input().HasContext(context->GetId()));
+		}
+
+		ScriptValue InputRumbleImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[6];
+			CheckArgumentCount("Input", method, count, 2);
+			const ScriptValue& argLeft = RequireArg("Input", method, args, count, 0);
+			const ScriptValue& argRight = RequireArg("Input", method, args, count, 1);
+			double left = 0.0, right = 0.0, duration = 0.0;
+			argLeft.AsNumber(&left);
+			argRight.AsNumber(&right);
+			if (count >= 3 && !args[2].IsNil())
+				args[2].AsNumber(&duration);
+			const uint32_t player = RequirePlayer("Input", method, args, count, 3);
+
+			if (GameApp* app = GameApp::TryGet())
+			{
+				app->Input().SetVibration(player, static_cast<float>(left), static_cast<float>(right), static_cast<float>(duration));
+				return ScriptValue::Boolean(true);
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+
+		// ---- WP5:Time(只读帧时间服务;推进全在引擎侧,脚本没有写入口) ----
+
+		// 无活动场景时返回 0 而不是抛错(与 Input 无会话时返回 false/0 的容错口径一致)。
+		const Scene::FrameTimeService* ActiveTimeService()
+		{
+			Scene* scene = ScriptEngine::GetActiveScene();
+			return scene ? &scene->GetTime() : nullptr;
+		}
+
+		ScriptValue TimeElapsedImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[0], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? time->ElapsedSeconds : 0.0);
+		}
+
+		ScriptValue TimeDeltaImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[1], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? static_cast<double>(time->DeltaSeconds) : 0.0);
+		}
+
+		ScriptValue TimeFixedDeltaImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[2], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? static_cast<double>(time->FixedDeltaSeconds) : 0.0);
+		}
+
+		ScriptValue TimeFrameCountImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[3], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? ToLuaNumber(time->FrameCount) : 0.0);
+		}
+
+		ScriptValue TimeFixedStepCountImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[4], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? ToLuaNumber(time->FixedStepCount) : 0.0);
+		}
+
+		ScriptValue TimeScaleImpl(const ScriptValue* args, std::size_t count)
+		{
+			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[5], count, 0);
+			const Scene::FrameTimeService* time = ActiveTimeService();
+			return ScriptValue::Number(time ? static_cast<double>(time->TimeScale) : 0.0);
+		}
+
+		ScriptValue LevelRequestImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[0];
+			const std::string id = RequireString("Level", method, args, count, 0);
+			const bool additive = OptionalBool("Level", method, args, count, 1, false);
+			return ScriptValue::Boolean(RequireGameApp().Levels().RequestLoad(id, additive));
+		}
+
+		ScriptValue LevelIsLoadingImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[1], count, 0);
+			return ScriptValue::Boolean(RequireGameApp().Levels().IsLoading());
+		}
+
+		ScriptValue LevelStateImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[2], count, 0);
+			return ScriptValue::String(LevelLoadStateName(RequireGameApp().Levels().GetState()));
+		}
+
+		ScriptValue LevelLastErrorImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[3], count, 0);
+			return ScriptValue::String(RequireGameApp().Levels().GetLastError());
+		}
+
+		ScriptValue LevelPrimaryImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[4], count, 0);
+			return ScriptValue::String(RequireGameApp().Levels().GetPrimaryLevel());
+		}
+
+		ScriptValue LevelActiveLevelsImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[5], count, 0);
+			const std::vector<std::string>& levels = RequireGameApp().Levels().GetActiveLevels();
+			ScriptTableRef result = MakeScriptTable();
+			for (std::size_t index = 0; index < levels.size(); ++index)
+				result.SetArrayElement(index + 1, ScriptValue::String(levels[index]));
+			return result.ToValue();
+		}
+
+		ScriptValue LevelUnloadImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[6];
+			const std::string id = RequireString("Level", method, args, count, 0);
+			RequireGameApp().Levels().Unload(id);
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue LevelUnloadAllImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[7], count, 0);
+			RequireGameApp().Levels().UnloadAll();
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue LevelEntriesImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[8], count, 0);
+			// 关卡集合来自内容根目录结构(assets/levels/<Id>/),没有清单文件。
+			const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
+			ScriptTableRef result = MakeScriptTable();
+			for (std::size_t index = 0; index < levels.size(); ++index)
+			{
+				ScriptTableRef entry = MakeScriptTable();
+				entry.SetField("Id", ScriptValue::String(levels[index].Id));
+				entry.SetField("Name", ScriptValue::String(levels[index].DisplayName));
+				entry.SetField("Path", ScriptValue::String(levels[index].EntryPath.u8string()));
+				result.SetArrayElement(index + 1, entry.ToValue());
+			}
+			return result.ToValue();
+		}
+
+		ScriptValue LevelGetDataLayersImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[9], count, 0);
+			const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
+			const std::string primaryId = RequireGameApp().Levels().GetPrimaryLevel();
+			ScriptTableRef result = MakeScriptTable();
+			for (const auto& info : levels)
+			{
+				if (info.Id == primaryId)
+				{
+					for (std::size_t i = 0; i < info.DataLayers.size(); ++i)
+					{
+						ScriptTableRef entry = MakeScriptTable();
+						entry.SetField("Mask", ScriptValue::Number(static_cast<double>(info.DataLayers[i].LayerMask)));
+						entry.SetField("Name", ScriptValue::String(info.DataLayers[i].Name));
+						entry.SetField("DefaultActive", ScriptValue::Boolean(info.DataLayers[i].DefaultActive));
+						result.SetArrayElement(i + 1, entry.ToValue());
+					}
+					break;
+				}
+			}
+			return result.ToValue();
+		}
+
+		ScriptValue LevelGetActiveDataLayersImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[10], count, 0);
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				return ScriptValue::Number(static_cast<double>(scene->GetActiveDataLayers()));
+			return ScriptValue::Number(static_cast<double>(0xFFFFFFFFu));
+		}
+
+		ScriptValue LevelSetActiveDataLayersImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[11];
+			CheckArgumentCount("Level", method, count, 1);
+			if (!args[0].IsNumber())
+				throw std::logic_error("Level.SetActiveDataLayers: mask must be a number");
+			double num = 0.0;
+			args[0].AsNumber(&num);
+			const uint32_t mask = static_cast<uint32_t>(num);
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				scene->SetActiveDataLayers(mask);
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue LevelSetDataLayerActiveImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[12];
+			CheckArgumentCount("Level", method, count, 2);
+			if (!args[1].IsBoolean())
+				throw std::logic_error("Level.SetDataLayerActive: active must be a boolean");
+			bool active = false;
+			args[1].AsBool(&active);
+			uint32_t mask = 0;
+			if (args[0].IsNumber())
+			{
+				double num = 0.0;
+				args[0].AsNumber(&num);
+				mask = static_cast<uint32_t>(num);
+			}
+			else if (args[0].IsString())
+			{
+				std::string name;
+				args[0].AsString(&name);
+				const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
+				const std::string primaryId = RequireGameApp().Levels().GetPrimaryLevel();
+				for (const auto& info : levels)
+				{
+					if (info.Id == primaryId)
+					{
+						for (const auto& layer : info.DataLayers)
+						{
+							if (layer.Name == name)
+							{
+								mask = layer.LayerMask;
+								break;
+							}
+						}
+						break;
+					}
+				}
+				if (mask == 0)
+					return ScriptValue::Boolean(false);
+			}
+			else
+			{
+				throw std::logic_error("Level.SetDataLayerActive: layer must be a mask number or layer name string");
+			}
+
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+			{
+				uint32_t current = scene->GetActiveDataLayers();
+				if (active) current |= mask;
+				else current &= ~mask;
+				scene->SetActiveDataLayers(current);
+				return ScriptValue::Boolean(true);
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue LevelIsDataLayerActiveImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[13];
+			CheckArgumentCount("Level", method, count, 1);
+			uint32_t mask = 0;
+			if (args[0].IsNumber())
+			{
+				double num = 0.0;
+				args[0].AsNumber(&num);
+				mask = static_cast<uint32_t>(num);
+			}
+			else if (args[0].IsString())
+			{
+				std::string name;
+				args[0].AsString(&name);
+				const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
+				const std::string primaryId = RequireGameApp().Levels().GetPrimaryLevel();
+				for (const auto& info : levels)
+				{
+					if (info.Id == primaryId)
+					{
+						for (const auto& layer : info.DataLayers)
+						{
+							if (layer.Name == name)
+							{
+								mask = layer.LayerMask;
+								break;
+							}
+						}
+						break;
+					}
+				}
+				if (mask == 0)
+					return ScriptValue::Boolean(false);
+			}
+			else
+			{
+				throw std::logic_error("Level.IsDataLayerActive: layer must be a mask number or layer name string");
+			}
+
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				return ScriptValue::Boolean((scene->GetActiveDataLayers() & mask) != 0);
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue SaveToSlot(const ScriptServiceMethod& method, const ScriptValue* args, std::size_t count)
+		{
+			const uint32_t slot = RequireSlot("Save", method, args, count, 0);
+			// 第二参数缺省 = 当前主关卡(与 LevelService::GetPrimaryLevel 同口径;空表示无活动关卡)。
+			const std::string fallback = RequireGameApp().Levels().GetPrimaryLevel();
+			const std::string levelId = OptionalString("Save", method, args, count, 1, fallback);
+			SaveService& saves = RequireSaveService();
+			return ScriptValue::Boolean(saves.Save(slot, levelId));
+		}
+
+		ScriptValue SaveLoadImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[2].Methods[1];
+			const uint32_t slot = RequireSlot("Save", method, args, count, 0);
+			SaveService& saves = RequireSaveService();
+			return ScriptValue::Boolean(saves.Load(slot));
+		}
+
+		ScriptValue SaveDeleteImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[2].Methods[2];
+			const uint32_t slot = RequireSlot("Save", method, args, count, 0);
+			SaveService& saves = RequireSaveService();
+			return ScriptValue::Boolean(saves.Delete(slot));
+		}
+
+		ScriptValue SaveListImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Save", GameplayServiceBindings(nullptr)[2].Methods[3], count, 0);
+			const std::vector<SaveSlotInfo> slots = RequireSaveService().ListSaves();
+			ScriptTableRef result = MakeScriptTable();
+			for (std::size_t index = 0; index < slots.size(); ++index)
+			{
+				const SaveSlotInfo& info = slots[index];
+				ScriptTableRef entry = MakeScriptTable();
+				entry.SetField("slot", ScriptValue::Number(static_cast<double>(info.Slot)));
+				entry.SetField("level_id", ScriptValue::String(info.Header.LevelId));
+				entry.SetField("version", ScriptValue::Number(static_cast<double>(info.Header.Version)));
+				entry.SetField("timestamp", ScriptValue::Number(ToLuaNumber(info.Header.Timestamp)));
+				entry.SetField("valid", ScriptValue::Boolean(info.Valid));
+				entry.SetField("error", ScriptValue::String(info.Error));
+				result.SetArrayElement(index + 1, entry.ToValue());
+			}
+			return result.ToValue();
+		}
+
+		ScriptValue SaveSetGlobalImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[2].Methods[4];
+			const std::string key = RequireString("Save", method, args, count, 0);
+			const ScriptValue& value = RequireArg("Save", method, args, count, 1);
+			GlobalValue global;
+			if (value.IsBoolean())
+			{
+				bool boolean = false;
+				value.AsBool(&boolean);
+				global.Type = GlobalValue::Kind::Bool;
+				global.Bool = boolean;
+			}
+			else if (value.IsNumber())
+			{
+				double number = 0.0;
+				value.AsNumber(&number);
+				// Lua 只有 number:整数值在 int64 范围内才落成 Int,否则落成 Float(类型随值保留)。
+				if (number == static_cast<double>(static_cast<int64_t>(number)))
+				{
+					global.Type = GlobalValue::Kind::Int;
+					global.Int = static_cast<int64_t>(number);
+				}
+				else
+				{
+					global.Type = GlobalValue::Kind::Float;
+					global.Float = number;
+				}
+			}
+			else if (value.IsString())
+			{
+				std::string text;
+				value.AsString(&text);
+				global.Type = GlobalValue::Kind::String;
+				global.String = std::move(text);
+			}
+			else
+			{
+				throw std::logic_error(MethodSignature("Save", method) +
+					": argument 2 ('value') must be number, boolean or string, got " + TypeNameOf(value));
+			}
+			RequireSaveService().SetGlobal(key, std::move(global));
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue SaveGetGlobalImpl(const ScriptValue* args, std::size_t count)
+		{
+			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[2].Methods[5];
+			const std::string key = RequireString("Save", method, args, count, 0);
+			GlobalValue stored;
+			if (!RequireSaveService().TryGetGlobal(key, &stored))
+				return ScriptValue::Nil();
+			switch (stored.Type)
+			{
+				case GlobalValue::Kind::Int:    return ScriptValue::Number(static_cast<double>(stored.Int));
+				case GlobalValue::Kind::Float:  return ScriptValue::Number(stored.Float);
+				case GlobalValue::Kind::Bool:   return ScriptValue::Boolean(stored.Bool);
+				case GlobalValue::Kind::String: return ScriptValue::String(stored.String);
+			}
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue SaveLastErrorImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			CheckArgumentCount("Save", GameplayServiceBindings(nullptr)[2].Methods[6], count, 0);
+			return ScriptValue::String(RequireSaveService().GetLastError());
+		}
+
+		// 创建 table,写入全部方法,注册为全局。
+		bool RegisterServiceTable(ScriptBindingContext& bindings, const ScriptServiceBinding& service,
+			std::string* error)
+		{
+			LuauVm* vm = bindings.Vm();
+			if (!vm || !service.Name || !service.Name[0] || !service.Methods || service.MethodCount == 0)
+			{
+				if (error) *error = "invalid service binding descriptor";
+				return false;
+			}
+			if (vm->GetGlobal(service.Name).Type() != ScriptValueType::Nil)
+			{
+				if (error) *error = std::string("global name is already in use: ") + service.Name;
+				return false;
+			}
+			ScriptTableRef table = vm->CreateTable();
+			if (!table.IsValid())
+			{
+				if (error) *error = std::string("failed to create the service table: ") + service.Name;
+				return false;
+			}
+			for (std::size_t index = 0; index < service.MethodCount; ++index)
+			{
+				const ScriptServiceMethod& method = service.Methods[index];
+				if (!method.Name || !method.Name[0] || !method.Function)
+				{
+					if (error) *error = std::string("service '") + service.Name + "' has an invalid method entry";
+					return false;
+				}
+				std::size_t required = 0;
+				for (std::size_t param = 0; param < method.ParamCount; ++param)
+					if (method.Params[param].Required) ++required;
+				if (required > method.ExpectedArgs || method.ExpectedArgs > method.ParamCount)
+				{
+					if (error) *error = std::string("service '") + service.Name + "." + method.Name +
+						"' has an inconsistent parameter descriptor";
+					return false;
+				}
+				if (!table.SetField(method.Name, bindings.CreateFunction(method.Name, method.Function)))
+				{
+					if (error) *error = std::string("failed to bind ") + service.Name + "." + method.Name;
+					return false;
+				}
+			}
+			if (!table.SetMetaField("__newindex", bindings.CreateFunction(service.Name,
+				[](const ScriptValue*, std::size_t) -> ScriptValue
+				{
+					throw std::logic_error("service tables are read-only; use the documented methods");
+				})))
+			{
+				if (error) *error = std::string("failed to lock the service table: ") + service.Name;
+				return false;
+			}
+			if (!vm->SetGlobal(service.Name, table.ToValue()))
+			{
+				if (error) *error = std::string("failed to publish the service table: ") + service.Name;
+				return false;
+			}
+			return true;
+		}
+	}
+
+	bool RegisterGameplayServiceBindings(ScriptBindingContext& bindings, std::string* error)
+	{
+		std::size_t count = 0;
+		const ScriptServiceBinding* services = GameplayServiceBindings(&count);
+		for (std::size_t index = 0; index < count; ++index)
+		{
+			if (!RegisterServiceTable(bindings, services[index], error))
+				return false;
+		}
+		if (error) error->clear();
+		return true;
+	}
+
+			static int ParseKeyCodeArgument(const ScriptValue* args, std::size_t count, std::size_t startIndex = 0)
+		{
+			if (count <= startIndex || args[startIndex].IsNil())
+				return -1;
+
+			// 冒号调用容错: 若第0个参数为 Table (即 Input:IsKeyPressed), 取下一个参数
+			if (startIndex == 0 && count >= 2 && args[0].IsTable())
+				return ParseKeyCodeArgument(args, count, 1);
+
+			const ScriptValue& arg = args[startIndex];
+			if (arg.IsNumber())
+			{
+				double num = 0.0;
+				arg.AsNumber(&num);
+				return static_cast<int>(num);
+			}
+			if (arg.IsString())
+			{
+				std::string str;
+				arg.AsString(&str);
+				for (char& c : str) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+				if (str == "SPACE") return KeyCodes::Space;
+				if (str == "TAB") return KeyCodes::Tab;
+				if (str == "ESCAPE" || str == "ESC") return KeyCodes::Escape;
+				if (str == "ENTER" || str == "RETURN") return KeyCodes::Enter;
+				if (str == "LEFT") return KeyCodes::Left;
+				if (str == "RIGHT") return KeyCodes::Right;
+				if (str == "UP") return KeyCodes::Up;
+				if (str == "DOWN") return KeyCodes::Down;
+				if (str == "W") return KeyCodes::W;
+				if (str == "A") return KeyCodes::A;
+				if (str == "S") return KeyCodes::S;
+				if (str == "D") return KeyCodes::D;
+				if (str == "F") return KeyCodes::F;
+				if (str.length() == 1)
+				{
+					if (str[0] >= 'A' && str[0] <= 'Z')
+						return KeyCodes::A + (str[0] - 'A');
+					if (str[0] >= '0' && str[0] <= '9')
+						return KeyCodes::D0 + (str[0] - '0');
+				}
+			}
+			return -1;
+		}
+
+		ScriptValue InputIsKeyPressedImpl(const ScriptValue* args, std::size_t count)
+		{
+			if (Wui::WuiTextFocus::Get().Active())
+				return ScriptValue::Boolean(false);
+
+			const int keyCode = ParseKeyCodeArgument(args, count);
+			if (keyCode >= 0)
+			{
+				return ScriptValue::Boolean(World::Input::IsKeyPressed(keyCode));
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue InputIsKeyJustPressedImpl(const ScriptValue* args, std::size_t count)
+		{
+			if (Wui::WuiTextFocus::Get().Active())
+				return ScriptValue::Boolean(false);
+
+			const int keyCode = ParseKeyCodeArgument(args, count);
+			if (keyCode >= 0)
+			{
+				return ScriptValue::Boolean(World::Input::IsKeyJustPressed(keyCode));
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue InputIsKeyJustReleasedImpl(const ScriptValue* args, std::size_t count)
+		{
+			if (Wui::WuiTextFocus::Get().Active())
+				return ScriptValue::Boolean(false);
+
+			const int keyCode = ParseKeyCodeArgument(args, count);
+			if (keyCode >= 0)
+			{
+				return ScriptValue::Boolean(World::Input::IsKeyJustReleased(keyCode));
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue AppQuitImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			if (Application::HasInstance())
+			{
+				Application::Get().Close();
+				return ScriptValue::Boolean(true);
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue AppIsEditorImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			return ScriptValue::Boolean(EngineEnvironment::IsEditor());
+		}
+
+		ScriptValue AppIsRuntimeImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			return ScriptValue::Boolean(EngineEnvironment::IsRuntime());
+		}
+
+		ScriptValue AppIsPackagedImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			return ScriptValue::Boolean(EngineEnvironment::IsPackaged());
+		}
+
+		ScriptValue AppHostModeImpl(const ScriptValue* args, std::size_t count)
+		{
+			(void)args;
+			(void)count;
+			return ScriptValue::String(std::string(EngineEnvironment::GetHostModeName()));
+		}
+
+const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
+	{
+		// 方法描述是纯数据;方法体是独立函数,因此可以在描述表里直接引用、无需数组自引用。
+		// 描述表必须是 static:GameplayServiceBindings() 每次调用返回同一份只读描述,
+		// 存根渲染/运行时注册/方法体的签名诊断都引用它;放在栈上会让上一次调用的指针变悬垂。
+		static const ScriptServiceParam inputActionPlayer[] = {
+			{ "action", "string", ScriptServiceArgType::String, true, "Registered action name." },
+			{ "player", "integer", ScriptServiceArgType::Number, false, "Player slot; 0 is the primary player." },
+		};
+		// R1:上下文名(映射表 contexts: 里的 name)。
+		static const ScriptServiceParam inputContextName[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "Context name as written under contexts: in the input map." },
+		};
+		static const ScriptServiceParam inputRumbleParams[] = {
+			{ "left", "number", ScriptServiceArgType::Number, true, "Left motor vibration [0, 1]." },
+			{ "right", "number", ScriptServiceArgType::Number, true, "Right motor vibration [0, 1]." },
+			{ "seconds", "number", ScriptServiceArgType::Number, false, "Duration in seconds (0 = persistent)." },
+			{ "player", "integer", ScriptServiceArgType::Number, false, "Player slot index, default 0." },
+		};
+		static const ScriptServiceParam inputAxis[] = {
+			{ "axis", "string", ScriptServiceArgType::String, true, "Registered axis name." },
+			{ "player", "integer", ScriptServiceArgType::Number, false, "Player slot; 0 is the primary player." },
+		};
+				static const ScriptServiceParam inputKeyParam[] = {
+			{ "key", "string|number", ScriptServiceArgType::String | ScriptServiceArgType::Number, true, "Key name ('Space', 'F', 'A', 'D') or integer keycode." },
+		};
+		static const ScriptServiceParam inputMouseButtonParam[] = {
+			{ "button", "integer", ScriptServiceArgType::Number, true, "Mouse button: 0 = left, 1 = right, 2 = middle." },
+		};
+		// 带参数的方法必须给参数描述表：注册/存根渲染会按 MinimumArgs 读 params，
+		// 传 nullptr 会在脚本引擎初始化时空指针崩溃（实测 0xC0000005）。
+		static const ScriptServiceParam inputSetCursorParam[] = {
+			{ "enabled", "boolean", ScriptServiceArgType::Boolean, true, "true = visible / locked, false = hidden / unlocked." },
+		};
+		static const ScriptServiceMethod inputMethods[] = {
+			// 方法体先包装成 ScriptNativeFunction:描述表是静态的,函数指针需要显式构造。
+			{ "Down", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputDownImpl(args, count);
+			}, inputActionPlayer, 2, 2, "boolean",
+				"Whether any binding for the action is held; unknown actions and out-of-range players return false." },
+			{ "Pressed", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputPressedImpl(args, count);
+			}, inputActionPlayer, 2, 2, "boolean",
+				"Whether the action went down this frame; requires the host's end-of-frame update." },
+			{ "Released", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputReleasedImpl(args, count);
+			}, inputActionPlayer, 2, 2, "boolean",
+				"Whether the action went up this frame; requires the host's end-of-frame update." },
+			{ "Axis", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputAxisImpl(args, count);
+			}, inputAxis, 2, 2, "number",
+				"Axis value in [-1, 1]; unknown axes and out-of-range players return 0." },
+			{ "PlayerCount", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputPlayerCountImpl(args, count);
+			}, nullptr, 0, 0, "integer",
+				"Number of configured player slots." },
+			{ "Scroll", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputScrollImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Vertical wheel delta for this frame; 0 when there is no wheel input." },
+			{ "Rumble", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputRumbleImpl(args, count);
+			// ExpectedArgs = 运行期实际读取的参数个数(见 ScriptServiceMethod 注释),这里必须是 4 ——
+			// 实现会读 args[3](player)。写成 2 会让 CheckArgumentCount(minimum=2) 把上限当成 2:
+			// 示例脚本 `Input.Rumble(0.4, 0.6, 0.25)` 传 3 个即抛
+			// "expects between 2 and 2 argument(s); got 3"(M38 实测立案)。
+			}, inputRumbleParams, 4, 4, "boolean",
+				"Trigger gamepad vibration (rumble) for player slot; returns true on success." },
+			// R1:上下文开关 —— 让 trigger/modifier 只在"该状态"生效,而不是全局常开。
+			{ "PushContext", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputPushContextImpl(args, count);
+			}, inputContextName, 1, 1, "boolean",
+				"Activate a mapping context by name; idempotent, returns false when the name is unknown." },
+			{ "PopContext", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputPopContextImpl(args, count);
+			}, inputContextName, 1, 1, "boolean",
+				"Deactivate a mapping context by name; returns false when it is not active." },
+			{ "HasContext", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputHasContextImpl(args, count);
+			}, inputContextName, 1, 1, "boolean",
+				"Whether a mapping context is currently active." },
+			{ "IsKeyPressed", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputIsKeyPressedImpl(args, count);
+			}, inputKeyParam, 1, 1, "boolean",
+				"Direct hardware key poll (key name like 'Space', 'F' or keycode number). Returns true while key is held." },
+			// 追加在方法表末尾:既有 Methods[i] 下标(含上面的实现函数引用)保持不变。
+			{ "MouseDelta", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputMouseDeltaImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Mouse movement since the previous frame (scene input snapshot)." },
+			{ "MouseButton", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputMouseButtonImpl(args, count);
+			}, inputMouseButtonParam, 1, 1, "boolean",
+				"Whether a mouse button is held: 0 = left, 1 = right, 2 = middle, 3/4 = extra; unknown buttons return false." },
+			{ "MousePosition", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputMousePositionImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Pointer position in window client pixels (same snapshot as MouseDelta)." },
+			{ "SetCursorVisible", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputSetCursorVisibleImpl(args, count);
+			}, inputSetCursorParam, 1, 1, "boolean",
+				"Show or hide the system cursor; ignored while the cursor is locked." },
+			{ "CursorVisible", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputCursorVisibleImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the system cursor is currently visible." },
+			{ "SetCursorLocked", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputSetCursorLockedImpl(args, count);
+			}, inputSetCursorParam, 1, 1, "boolean",
+				"Lock and hide the cursor for mouse-look (raw motion). Unlocking restores the previous visibility." },
+			{ "CursorLocked", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputCursorLockedImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the cursor is locked for mouse-look." },
+			{ "Quit", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppQuitImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Request the application to close gracefully; returns true if the close request was issued." },
+			{ "ViewportSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputViewportSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Current active viewport or client size in physical pixels." },
+			{ "WindowSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputWindowSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Current physical window client size in pixels." },
+			{ "ContentScale", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputContentScaleImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Window content DPI scale." },
+			{ "IsKeyJustPressed", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputIsKeyJustPressedImpl(args, count);
+			}, inputKeyParam, 1, 1, "boolean",
+				"Whether the key was just pressed down this frame (rising-edge trigger; avoids repeat firing)." },
+			{ "IsKeyJustReleased", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputIsKeyJustReleasedImpl(args, count);
+			}, inputKeyParam, 1, 1, "boolean",
+				"Whether the key was just released this frame (falling-edge trigger)." },
+		};
+
+		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。
+		static const ScriptServiceMethod timeMethods[] = {
+			{ "Elapsed", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeElapsedImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Seconds elapsed in the running session; frozen while the session is paused." },
+			{ "Delta", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeDeltaImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Variable-frame delta in seconds, already scaled by TimeScale." },
+			{ "FixedDelta", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeFixedDeltaImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Fixed simulation step in seconds; never scaled by TimeScale." },
+			{ "FrameCount", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeFrameCountImpl(args, count);
+			}, nullptr, 0, 0, "integer",
+				"Number of variable frames advanced so far." },
+			{ "FixedStepCount", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeFixedStepCountImpl(args, count);
+			}, nullptr, 0, 0, "integer",
+				"Number of fixed simulation steps advanced so far." },
+			{ "TimeScale", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return TimeScaleImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Current time scale applied to Delta; 1 = real time." },
+		};
+
+		static const ScriptServiceParam levelRequest[] = {
+			{ "id", "string", ScriptServiceArgType::String, true, "Level id from the level list." },
+			{ "additive", "boolean", ScriptServiceArgType::Boolean, false, "Push the level on top of the current stack instead of replacing it." },
+		};
+		static const ScriptServiceParam levelActiveMask[] = {
+			{ "mask", "number", ScriptServiceArgType::Number, true, "Bitwise active layer mask." },
+		};
+		static const ScriptServiceParam levelSetLayer[] = {
+			{ "layer", "number|string", static_cast<ScriptServiceArgType>(static_cast<uint32_t>(ScriptServiceArgType::Number) | static_cast<uint32_t>(ScriptServiceArgType::String)), true, "Layer mask number or layer name string." },
+			{ "active", "boolean", ScriptServiceArgType::Boolean, true, "Whether the layer should be active." },
+		};
+		static const ScriptServiceParam levelIsLayer[] = {
+			{ "layer", "number|string", static_cast<ScriptServiceArgType>(static_cast<uint32_t>(ScriptServiceArgType::Number) | static_cast<uint32_t>(ScriptServiceArgType::String)), true, "Layer mask number or layer name string." },
+		};
+		static const ScriptServiceParam levelUnload[] = {
+			{ "id", "string", ScriptServiceArgType::String, true, "Active level id to unload." },
+		};
+		static const ScriptServiceMethod levelMethods[] = {
+			{ "Request", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelRequestImpl(args, count);
+			}, levelRequest, 2, 2, "boolean",
+				"Request a level load; the next host frame pumps it. Unknown ids return false and set LastError." },
+			{ "IsLoading", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelIsLoadingImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether a level request is being processed." },
+			{ "State", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelStateImpl(args, count);
+			}, nullptr, 0, 0, "string",
+				"Current load state: Idle/Reading/Deserializing/Activating/Failed." },
+			{ "LastError", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelLastErrorImpl(args, count);
+			}, nullptr, 0, 0, "string",
+				"Last level-load error; empty when the last request succeeded." },
+			{ "Primary", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelPrimaryImpl(args, count);
+			}, nullptr, 0, 0, "string",
+				"Id of the primary (index 0) active level; empty when nothing is active." },
+			{ "ActiveLevels", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelActiveLevelsImpl(args, count);
+			}, nullptr, 0, 0, "string[]",
+				"Active level ids, primary level first." },
+			{ "Unload", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelUnloadImpl(args, count);
+			}, levelUnload, 1, 1, "",
+				"Unload one active level; unknown ids are a no-op." },
+			{ "UnloadAll", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelUnloadAllImpl(args, count);
+			}, nullptr, 0, 0, "",
+				"Unload every active level." },
+			{ "Entries", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelEntriesImpl(args, count);
+			}, nullptr, 0, 0, "table",
+				"Discovered level packages as {Id, Name, Path} tables \u2014 one entry per folder under assets/levels/." },
+			{ "GetDataLayers", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelGetDataLayersImpl(args, count);
+			}, nullptr, 0, 0, "table",
+				"List of data layers {Mask, Name, DefaultActive} declared in the active level manifest." },
+			{ "GetActiveDataLayers", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelGetActiveDataLayersImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Active data layer mask of the current scene." },
+			{ "SetActiveDataLayers", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelSetActiveDataLayersImpl(args, count);
+			}, levelActiveMask, 1, 1, "",
+				"Set the active data layer mask of the current scene." },
+			{ "SetDataLayerActive", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelSetDataLayerActiveImpl(args, count);
+			}, levelSetLayer, 2, 2, "boolean",
+				"Toggle a data layer on or off by mask number or name." },
+			{ "IsDataLayerActive", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return LevelIsDataLayerActiveImpl(args, count);
+			}, levelIsLayer, 1, 1, "boolean",
+				"Check if a data layer is currently active by mask number or name." },
+			{ "Quit", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppQuitImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Request the application to close gracefully; returns true if the close request was issued." },
+		};
+
+		static const ScriptServiceParam saveSlot[] = {
+			{ "slot", "integer", ScriptServiceArgType::Number, true, "Save slot index." },
+		};
+		static const ScriptServiceParam saveSlotLevel[] = {
+			{ "slot", "integer", ScriptServiceArgType::Number, true, "Save slot index." },
+			{ "levelId", "string", ScriptServiceArgType::String, false, "Level id written into the save header; defaults to Level.Primary()." },
+		};
+		static const ScriptServiceParam saveGlobal[] = {
+			{ "key", "string", ScriptServiceArgType::String, true, "Global value key." },
+			{ "value", "number|boolean|string", ScriptServiceArgType::Number | ScriptServiceArgType::Boolean | ScriptServiceArgType::String, true, "Typed global value." },
+		};
+		static const ScriptServiceParam saveKey[] = {
+			{ "key", "string", ScriptServiceArgType::String, true, "Global value key." },
+		};
+		static const ScriptServiceMethod saveMethods[] = {
+			{ "Save", [](const ScriptValue* args, std::size_t count)
+				{
+					return SaveToSlot(GameplayServiceBindings(nullptr)[2].Methods[0], args, count);
+				},
+				saveSlotLevel, 2, 2, "boolean",
+				"Write a save slot; the level id defaults to the current primary level. Failure returns false and sets LastError." },
+			{ "Load", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return SaveLoadImpl(args, count);
+			}, saveSlot, 1, 1, "boolean",
+				"Load a save slot into the active scene. Failure returns false and sets LastError." },
+			{ "Delete", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return SaveDeleteImpl(args, count);
+			}, saveSlot, 1, 1, "boolean", "Delete one save slot." },
+			{ "List", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return SaveListImpl(args, count);
+			}, nullptr, 0, 0, "table",
+				"Existing save slots as {slot, level_id, version, timestamp, valid, error} tables." },
+			{ "SetGlobal", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return SaveSetGlobalImpl(args, count);
+			}, saveGlobal, 2, 2, "boolean",
+				"Store a typed global value; the type is preserved across save/load." },
+			{ "GetGlobal", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return SaveGetGlobalImpl(args, count);
+			}, saveKey, 1, 1, "number|boolean|string|nil",
+				"Read a stored global value; missing keys return nil." },
+			{ "LastError", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return SaveLastErrorImpl(args, count);
+			}, nullptr, 0, 0, "string",
+				"Last save/load error; empty when the last operation succeeded." },
+		};
+		static const ScriptServiceMethod appMethods[] = {
+			{ "Quit", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppQuitImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Request the application to close gracefully; returns true if the close request was issued." },
+			{ "Close", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppQuitImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Alias of App.Quit(); requests the application to close gracefully." },
+			{ "ViewportSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputViewportSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Current active viewport or client size in physical pixels." },
+			{ "WindowSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputWindowSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Current physical window client size in pixels." },
+			{ "IsEditor", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppIsEditorImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the current process is running inside the editor host." },
+			{ "IsRuntime", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppIsRuntimeImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the current process is running in standalone development runtime mode." },
+			{ "IsPackaged", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppIsPackagedImpl(args, count);
+			}, nullptr, 0, 0, "boolean",
+				"Whether the current process is running as a packaged standalone game release." },
+			{ "HostMode", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AppHostModeImpl(args, count);
+			}, nullptr, 0, 0, "string",
+				"Current engine host environment mode string ('Editor', 'Runtime', 'Packaged', 'Headless', 'Tool')." },
+		};
+		static const ScriptServiceBinding services[] = {
+			{ "Input", "Read-only input service table; no raw key/device feed is exposed to scripts.", inputMethods, sizeof(inputMethods) / sizeof(inputMethods[0]) },
+			{ "Level", "Read-only level/flow service table; scene handles and host callbacks are not exposed.", levelMethods, sizeof(levelMethods) / sizeof(levelMethods[0]) },
+			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, sizeof(saveMethods) / sizeof(saveMethods[0]) },
+			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, sizeof(timeMethods) / sizeof(timeMethods[0]) },
+			{ "App", "Application lifecycle service table; manages graceful shutdown and process lifecycle.", appMethods, sizeof(appMethods) / sizeof(appMethods[0]) },
+		};
+		if (count)
+			*count = sizeof(services) / sizeof(services[0]);
+		return services;
+	}
+}

@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 900000000000000003
+  World::TagComponent:
+    Tag: Mesh:Cube Orange
+  World::TransformComponent:
+    Location: [-2.47874117, 0.5, 0]
+    Rotation: [0, 35, 0]
+    Scale: [1, 1, 1]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [1, 0.550000012, 0.119999997, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

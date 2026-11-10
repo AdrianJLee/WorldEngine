@@ -1,0 +1,47 @@
+﻿ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 983000000000000011
+  World::TagComponent:
+    Tag: "AI Flank Striker (EQS Flank + BT)"
+  World::TransformComponent:
+    Location: [10.0, 0.9, 12.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::EQSComponent:
+    QueryCenter: [10.0, 0.9, 12.0]
+    QueryRadius: 24.0
+    GridSpacing: 2.0
+    BestCoverFound: 1
+    QueryMode: 1
+    GeneratorMode: 1
+    IncludeCrouchCover: 1
+    ThreatEntityHint: 7
+    OptimalDistance: 12.0
+  World::BehaviorTreeComponent:
+    BlackboardTargetPos: [-4.0, 0.9, 14.0]
+    ExecutionTimer: 0.0
+    BlackboardValue: 2.80
+    TreeAssetId: 1
+    TargetEntity: 7
+    BlackboardTag: 88
+    CurrentNodeIndex: 0
+    Status: 1
+    Enabled: 1
+    StateMachineState: 1
+  World::WhiteboxComponent:
+    Shape: 1
+    Subdivisions: 1
+    Steps: 12
+    Dimensions: [0.8, 1.8, 0.8]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.15, 0.88, 0.65, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

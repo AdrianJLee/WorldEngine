@@ -1,0 +1,14 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "editor",
+  "$language": "zh-CN",
+  "$owns": [
+    "shell.prefab."
+  ],
+  "shell.prefab.editing": "正在编辑预制体: ",
+  "shell.prefab.hint": "保存会把改动写回资产;返回则回到原来的场景。",
+  "shell.prefab.back": "返回场景",
+  "shell.prefab.back.tooltip": "回到之前编辑的场景(未保存的预制体改动仍留在文档里)。",
+  "shell.prefab.save": "保存预制体",
+  "shell.prefab.save.tooltip": "把文档写回这个 .wprefab(Ctrl+S 同效)。"
+}

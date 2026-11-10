@@ -1,0 +1,63 @@
+﻿#pragma once
+#include "World/Core/Export.h"
+#include "World/Core/Window.h"
+#include "World/Core/WorldContext.h"
+#include "World/Core/LayerStack.h"
+#include "World/Events/ApplicationEvent.h"
+#include "World/Events/Event.h"
+#include "World/Core/Memory/DualTrackAllocator.h"
+
+namespace World
+{
+	class WLD_API Application
+	{
+	public:
+		Application(const std::string& name, WorldContext& context);
+		virtual ~Application();
+		static void SetInstance(Application* instance) { s_Instance = instance; }
+		static bool HasInstance() { return s_Instance != nullptr; }
+		void Run();
+
+		void OnEvent(Event& e);
+
+		void PushLayer(Layer* layer);
+		void PushOverlay(Layer* layer);
+
+		static Application& Get();
+		WorldContext& GetContext() { return m_Context; }
+		const WorldContext& GetContext() const { return m_Context; }
+		inline Window& GetWindow() { return *m_Window; };
+
+		void Close();
+
+		DualTrackAllocator& GetEngineAllocator() { return *m_EngineAllocator; }
+		// 运行时切换渲染后端时重建主窗口:GL 上下文与 Vulkan 表面无法在同一
+		// HWND 上可靠共存(切回 GL 后呈现会失效),按后端重建窗口与上下文。
+		void RecreateWindow();
+	private:
+		void Shutdown();
+		bool OnWindowClose(WindowCloseEvent& e);
+		bool OnWindowResize(WindowResizeEvent& e);
+	private:
+		WorldContext& m_Context;
+		std::string m_Title;
+		std::unique_ptr<DualTrackAllocator> m_EngineAllocator;
+
+		std::unique_ptr<Window> m_Window;
+
+		float m_LastFrameTime = 0.0f;
+
+		bool m_Running = true;
+		bool m_Minimized = false;
+		bool m_Shutdown = false;
+
+		LayerStack m_LayerStack;
+
+		static Application* s_Instance;
+
+
+	};
+
+	// To be defined in CLIENT
+	Application* CreateApplication(WorldContext& context);
+}

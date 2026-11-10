@@ -1,0 +1,1191 @@
+#include "World/Environment/PCGBiome.h"
+#include "World/Gameplay/Framework/BehaviorTreeAsset.h"
+
+#include "World/Math/Curve/CubicBezierCurve.h"
+#include "World/Animation/AnimGraph.h"
+#include "World/Asset/WAnimationClipIO.h"
+#include "World/Asset/WSkeletonIO.h"
+#include "World/Physics/PhysicsMaterial.h"
+#include "World/Renderer/ParticleAsset.h"
+#include "World/Audio/SoundEvent.h"
+#include "World/Renderer/TextureAtlas.h"
+#include "World/Renderer/SpriteAnimation.h"
+#include "World/Renderer/Tilemap.h"
+#include "World/Math/Curve/CubicBezierCurve.h"
+#include <fstream>
+#include "ContentBrowserPanel_Internal.h"
+
+// M7a(GameUI):「新建 UI 文档」写出的 `.wui` 用引擎自己的文档模型 + UiDocumentIO::SaveFile,
+// 而不是在这里手抄一份 YAML 模板(与"新建场景"用 SceneSerializer 同口径:格式演进不两处漂移)。
+#include "World/UI/UiDocument.h"
+
+namespace World
+{
+
+using namespace ContentBrowserPanelDetail;
+
+
+	// ---- P4-UX16:"新建资产"注册表 ----
+	// 用户 2026-09-20:「不能每加一个类似的资产就新增一个按钮」。
+	// 这里把"有哪些资产类型、怎么创建"收敛成**一次注册**;菜单/右键菜单/快捷键只读注册表,
+	// 以后加 Model / Texture 等类型 → 再 Register 一条,内容浏览器的 UI 代码不动。
+	// 生命周期:Create 回调捕获 this,析构必须反注册(见 ~ContentBrowserPanel)。
+void ContentBrowserPanel::RegisterDefaultAssetTypes(){
+		if (m_AssetTypesRegistered)
+			return;
+		m_AssetTypesRegistered = true;
+
+		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
+		auto add = [&registry](const char* id, const char* label, const char* extension, int order,
+			bool isFolder, std::function<bool(const std::filesystem::path&, std::string*)> create)
+		{
+			AssetTypeDesc desc;
+			desc.Id = id;
+			desc.Label = label;
+			desc.Extension = extension;
+			desc.SortOrder = order;
+			desc.IsFolder = isFolder;
+			desc.Create = std::move(create);
+			registry.Register(std::move(desc));
+		};
+
+		// Folder:唯一"建完立刻改名"的类型(与资源管理器同款手感,沿用 D10-6 的既有路径)。
+		add("folder", "Folder", "", 0, true,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				if (!m_Ctx)
+				{
+					if (error) *error = "content browser has no active UI context";
+					return false;
+				}
+				if (CreateFolderIn(*m_Ctx, dir).empty())
+				{
+					if (error) *error = "could not create a folder under " + dir.string();
+					return false;
+				}
+				return true;
+			});
+		// Material(U25-M2 起):走**新建向导** —— 模板 / 名称 / 目录 / 实时落点全部在确认前可见,
+		// 创建成功后由向导自己选中新资产并在材质编辑器里打开它。这里只负责把向导排进下一帧
+		// (注册表回调也可能从快捷键路径进来,那时没有 WuiContext)。
+		add("vfx", "Particle VFX (粒子特效)", ".wvfx", 27, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				ParticleAsset asset;
+				asset.Name = "NewVFX";
+				asset.Seed = 1337;
+				ParticleEmitterLayer layer;
+				layer.Name = "CoreEmitter";
+				layer.MaxParticles = 500;
+				layer.Lifetime = 2.0f;
+				layer.EmissionRate = 60.0f;
+				layer.Speed = 4.0f;
+				layer.Material.BlendMode = ParticleBlendMode::Additive;
+				layer.Collision.Mode = ParticleCollisionMode::Plane;
+				layer.Collision.Restitution = 0.5f;
+				asset.Emitters.push_back(layer);
+
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_particle", ".wvfx");
+				if (!ParticleAssetSerializer::Serialize(asset, target.string()))
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-vfx");
+				return true;
+			});
+		add("physics_material", "Physics Material (物理材质)", ".wphysmat", 28, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				PhysicsMaterial mat;
+				mat.Friction = 0.5f;
+				mat.Restitution = 0.0f;
+				mat.FrictionCombine = PhysMatCombineMode::Average;
+				mat.RestitutionCombine = PhysMatCombineMode::Average;
+
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "physics_material", ".wphysmat");
+				if (!mat.SaveToFile(target.string()))
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-physics-material");
+				return true;
+			});
+		// 曲线资产(.wcurve):工业级曲线资产
+		// PCG Graph (.wpcggraph): 纯净程序化内容规则图资产
+		add("pcggraph", "PCG Graph (PCG 规则图)", ".wpcggraph", 35, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_pcg_rules", ".wpcggraph");
+				PCGGraphAsset asset;
+				asset.Name = target.stem().string();
+				asset.RuleGraph = PCGRuleGraphDesc::CreateBlank();
+				if (!asset.SaveToFile(target.string(), error))
+				{
+					if (error && error->empty()) *error = "could not write " + target.string();
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-pcggraph");
+				std::error_code ec;
+				std::string rel = std::filesystem::relative(target, Paths::ProjectDir(), ec).generic_string();
+				m_Host.OpenPcgEditor(rel.empty() ? target.string() : rel);
+				return true;
+			});
+
+		add("curve", "Curve (曲线资产)", ".wcurve", 29, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "curve", ".wcurve");
+				CubicBezierCurve curve = CubicBezierCurve::EaseInOut();
+				if (!curve.SaveToFile(target.string()))
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-curve");
+				return true;
+			});
+		// M4:动画图(.wanimgraph)—— 状态机 + 1D/2D 混合空间;默认模板 = Idle + Locomotion。
+		// 与其它资产同一套向导:落点/名字在确认前可见,写出后选中新资产。
+		add("animgraph", "Animation Graph (动画图)", ".wanimgraph", 30, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "animation_graph", ".wanimgraph");
+
+				AnimGraph graph;
+				graph.SetGraphName(target.stem().string());
+				graph.SetModelHint("engine/models/characters/mannequin.wmodel");
+				// 模板也声明类型/范围：新建图打开后实时预览直接得到滑杆/勾选框，而不是猜。
+				graph.SetParameterDefinition(AnimGraph::AnimParameterDefinition {
+					"Speed", AnimGraph::AnimParameterType::Float, 0.0f, 0.0f, 10.0f, "m/s" });
+				graph.SetParameterDefinition(AnimGraph::AnimParameterDefinition {
+					"Direction", AnimGraph::AnimParameterType::Float, 0.0f, -180.0f, 180.0f, "deg" });
+				graph.SetParameterDefinition(AnimGraph::AnimParameterDefinition {
+					"IsFalling", AnimGraph::AnimParameterType::Bool, 0.0f, 0.0f, 1.0f, "" });
+				graph.SetParameterDefinition(AnimGraph::AnimParameterDefinition {
+					"AimWeight", AnimGraph::AnimParameterType::Float, 0.0f, 0.0f, 1.0f, "" });
+
+				AnimState idle;
+				idle.Name = "Idle";
+				idle.Kind = AnimStateKind::SingleClip;
+				idle.ClipName = "Idle";
+				idle.Loop = true;
+				{
+					AnimTransition toLocomotion;
+					toLocomotion.TargetState = "Locomotion";
+					toLocomotion.Duration = 0.20f;
+					toLocomotion.ConditionExpression = "Speed > 0.10";
+					idle.Transitions.push_back(toLocomotion);
+				}
+				graph.AddState(idle);
+
+				AnimState locomotion;
+				locomotion.Name = "Locomotion";
+				locomotion.Kind = AnimStateKind::BlendSpace2D;
+				locomotion.ParameterX = "Speed";
+				locomotion.ParameterY = "Direction";
+				locomotion.Blend2D.AddSample({ 0.0f, 0.0f }, "Idle");
+				locomotion.Blend2D.AddSample({ 1.6f, 0.0f }, "Walk");
+				locomotion.Blend2D.AddSample({ 4.5f, 0.0f }, "Run");
+				locomotion.Blend2D.AddSample({ 1.6f, 90.0f }, "StrafeRight");
+				locomotion.Blend2D.AddSample({ 1.6f, -90.0f }, "StrafeLeft");
+				{
+					AnimTransition toIdle;
+					toIdle.TargetState = "Idle";
+					toIdle.Duration = 0.18f;
+					toIdle.ConditionExpression = "Speed < 0.10 && IsFalling < 0.50";
+					locomotion.Transitions.push_back(toIdle);
+				}
+				graph.AddState(locomotion);
+				graph.SetInitialState("Idle");
+
+				std::string saveError;
+				if (!graph.SaveToFile(target.string(), &saveError))
+				{
+					if (error)
+						*error = "could not write " + target.string()
+							+ (saveError.empty() ? std::string() : (": " + saveError));
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-animgraph");
+				return true;
+			});
+		// 动画片段(.wclip):工业级骨骼动画序列片段
+		add("animation_clip", "Animation Clip (动画片段)", ".wclip", 31, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_clip", ".wclip");
+				Asset::WAnimationClipData clip;
+				clip.Name = target.stem().string();
+				clip.Duration = 1.0f;
+				clip.SkeletonPath = "engine/models/characters/mannequin.wskeleton";
+
+				Asset::WSkeletonData skel;
+				if (Asset::WSkeletonIO::ReadFile(clip.SkeletonPath, skel))
+				{
+					clip.Channels.reserve(skel.Bones.size());
+					for (const auto& bone : skel.Bones)
+					{
+						Asset::AnimationChannel ch;
+						ch.BoneName = bone.Name;
+						ch.BoneNameStr = bone.NameStr;
+						ch.PositionKeys.push_back({ 0.0f, bone.BindPoseLocal.Translation });
+						ch.RotationKeys.push_back({ 0.0f, bone.BindPoseLocal.Rotation });
+						ch.ScaleKeys.push_back({ 0.0f, bone.BindPoseLocal.Scale });
+						clip.Channels.push_back(std::move(ch));
+					}
+				}
+
+				std::string saveErr;
+				if (!Asset::WAnimationClipIO::WriteFile(target.string(), clip, &saveErr))
+				{
+					if (error) *error = "could not write " + target.string() + ": " + saveErr;
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-clip");
+				m_Host.OpenModelPreview(target.string());
+				return true;
+			});
+		// 骨架资产(.wskeleton):3D骨骼层级与绑定姿态
+		add("skeleton", "Skeleton (骨架资产)", ".wskeleton", 32, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_skeleton", ".wskeleton");
+				Asset::WSkeletonData skel;
+				if (!Asset::WSkeletonIO::ReadFile("engine/models/characters/mannequin.wskeleton", skel))
+				{
+					Asset::SkeletonBone rootBone;
+					rootBone.Name = StringPool::Get().InternName("Root");
+					rootBone.NameStr = "Root";
+					rootBone.ParentIndex = -1;
+					rootBone.BindPoseLocal.Translation = glm::vec3(0.0f);
+					rootBone.BindPoseLocal.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+					rootBone.BindPoseLocal.Scale = glm::vec3(1.0f);
+					skel.Bones.push_back(rootBone);
+				}
+
+				std::string saveErr;
+				if (!Asset::WSkeletonIO::WriteFile(target.string(), skel, &saveErr))
+				{
+					if (error) *error = "could not write " + target.string() + ": " + saveErr;
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-skeleton");
+				m_Host.OpenModelPreview(target.string());
+				return true;
+			});
+		add("material", "Material", ".wmat", 10, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				(void)error;
+				m_NewMaterialPendingDir = dir;
+				m_NewMaterialPendingOpen = true;
+				m_NewMaterialPendingFromSelection = false;
+				return true;
+			});
+		// Slang-B1:Material Shader(`.slang`,主扩展名)—— 与材质同一套"先向导后创建":
+		// 名称/目录/实时落点全部在确认前可见,确认后写出起始代码(含三条硬规则的注释头)
+		// 并在材质编辑器的**代码形态**里打开。产物固定 `.slang`。
+		add("shader", "Material Shader", ".slang", 15, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				(void)error;
+				m_NewShaderPendingDir = dir;
+				m_NewShaderPendingOpen = true;
+				return true;
+			});
+		// Level 2.0:关卡**不从这里新建** —— 关卡是"入口文件 + 内容目录"的成对结构
+		// (`scenes/<Id>.wlevel` + `levels/<Id>/`),不是在某个任意目录里落一个文件;
+		// 而且这里的 dir 由浏览器的当前目录决定,关卡却必须落在内容根下。
+		// 唯一创建入口是 Levels 面板(新建 / 重命名 / 删除三件套,见 LevelPanel)。
+		// M7a(GameUI):`.wui` 游戏 UI 文档(排序紧跟在场景之后)。只创建 + 选中,
+		// **不自动打开** —— 设计器是单实例面板,打开会替换它当前载入的文档;
+		// 双击该资产才是显式打开(见 ContentBrowserPanel::OpenItem / ui_designer)。
+		add("ui", "UI Document", ".wui", 25, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				// 最小自洽模板:单一 FormatVersion + 命名 Screen + 设计分辨率/缩放 +
+				// 一个撑满父级的 Panel 根(Column 布局)。UiDocumentIO::SaveFile 的产物
+				// 一定过得了 UiDocumentIO::Parse(同一套模型/序列化)。
+				UI::UiDocument document;
+				document.Screen = "HUD";
+				document.Design.Resolution = { 1920.0f, 1080.0f };
+				document.Design.ScaleMode = UI::UiScaleMode::ScaleWithScreenSize;
+				document.Design.Match = 0.5f;
+				UI::UiNode root;
+				root.Id = "root";
+				root.Type = "Panel";
+				root.Anchor.Min = { 0.0f, 0.0f };
+				root.Anchor.Max = { 1.0f, 1.0f };
+				root.Anchor.Pivot = { 0.5f, 0.5f };
+				root.Layout.Kind = UI::UiLayoutKind::Column;
+				root.Layout.Gap = 8.0f;
+				document.Nodes.push_back(root);
+
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "screen", ".wui");
+				std::string localError;
+				if (!UI::UiDocumentIO::SaveFile(target, document, &localError))
+				{
+					WLD_CORE_ERROR("Could not create UI document: {0}", localError);
+					if (error) *error = localError.empty()
+						? ("could not write " + target.string()) : localError;
+					return false;
+				}
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-ui-document");
+				return true;
+			});
+		// PECS-T11:Lua 只有**一个**入口 —— 旧 `Script`(落右键目录、`.lua`,在 assets/ 根
+		// 新建就永远不会被加载)与 T9 的 `Lua System`(固定 scripts/systems/)合并成
+		// 「Lua Script…」:点它打开宿主**同一个**「新建 Lua …」向导(系统 / 脚本库 / 空
+		// 在向导里选),落点/模板/扩展名全由向导保证,面板不再自己写盘。
+		// 面板渲染期拿不到安全的模态打开点 ⇒ 只置标记,宿主在帧边界取走(与 C++ 的
+		// `RequestNewCppScript()` 同一件事,只是那条走 PanelHost 虚函数、这里走帧边界标记)。
+		add("script", "Lua Script…", ".luau", 30, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				(void)dir;     // 落点由向导按类型决定(scripts/systems|lib|/),与右键目录无关
+				(void)error;   // 需要项目/内容根时由向导给可读提示,这里不拦
+				m_PendingLuaWizard = true;
+				return true;
+			});
+		add("sound_event", "Sound Event", ".wsound", 32, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				Audio::SoundEvent evt("New_SoundEvent", Audio::kBusSfx);
+				std::string yaml = evt.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "sound_event", ".wsound");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-sound-event");
+				return true;
+			});
+
+		add("behaviortree", "Behavior Tree (行为树)", ".wbt", 35, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_behavior_tree", ".wbt");
+				std::ofstream out(target, std::ios::binary | std::ios::trunc);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << "FormatVersion: 1\n";
+				out << "Name: " << target.stem().string() << "\n";
+				out << "Blackboard: []\n";
+				out << "Nodes: []\n";
+				out.close();
+
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-behaviortree");
+				return true;
+			});
+		add("blackboard", "Blackboard (AI 黑板)", ".wbb", 36, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_blackboard", ".wbb");
+				Gameplay::BlackboardAsset asset;
+				asset.AddKey({ "TargetPos", Gameplay::BlackboardKeyType::Vector3, glm::vec3(0.0f) });
+				asset.AddKey({ "CoverPos", Gameplay::BlackboardKeyType::Vector3, glm::vec3(0.0f) });
+				asset.AddKey({ "HasThreat", Gameplay::BlackboardKeyType::Bool, false });
+				asset.AddKey({ "Value", Gameplay::BlackboardKeyType::Float, 0.0f });
+				asset.AddKey({ "Tag", Gameplay::BlackboardKeyType::Int32, int32_t(0) });
+				if (!asset.SaveToFile(target.string(), error))
+				{
+					return false;
+				}
+
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-blackboard");
+				return true;
+			});
+		add("eqsquery", "EQS Query (AI 空间查询)", ".weqs", 37, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_eqs_query", ".weqs");
+				EQS::EQSAsset asset;
+				asset.Name = target.stem().string();
+				asset.GeneratorDesc.Type = "ProjectedGrid";
+				asset.GeneratorDesc.Radius = 20.0f;
+				asset.GeneratorDesc.Spacing = 2.0f;
+
+				EQS::EQSTestDesc tOverlap;
+				tOverlap.Name = "Overlap Filter";
+				tOverlap.TestType = "Overlap";
+				tOverlap.Purpose = EQS::TestPurpose::FilterOnly;
+				asset.Tests.push_back(tOverlap);
+
+				EQS::EQSTestDesc tTrace;
+				tTrace.Name = "Trace LOS";
+				tTrace.TestType = "Trace";
+				tTrace.Purpose = EQS::TestPurpose::FilterAndScore;
+				tTrace.Curve = EQS::ScoringCurve::Linear;
+				tTrace.Weight = 1.8f;
+				asset.Tests.push_back(tTrace);
+
+				EQS::EQSTestDesc tWall;
+				tWall.Name = "Wall Proximity";
+				tWall.TestType = "WallProximity";
+				tWall.Purpose = EQS::TestPurpose::ScoreOnly;
+				tWall.Curve = EQS::ScoringCurve::ClampedGaussian;
+				tWall.Weight = 1.2f;
+				tWall.IdealValue = 0.85f;
+				asset.Tests.push_back(tWall);
+
+				EQS::EQSTestDesc tDist;
+				tDist.Name = "Distance";
+				tDist.TestType = "Distance";
+				tDist.ContextType = "Querier";
+				tDist.Purpose = EQS::TestPurpose::ScoreOnly;
+				tDist.Curve = EQS::ScoringCurve::Inverse;
+				tDist.Weight = 0.7f;
+				asset.Tests.push_back(tDist);
+
+				if (!asset.SaveToFile(target.string(), error))
+				{
+					return false;
+				}
+
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-eqsquery");
+				return true;
+			});
+		add("audio_shader", "Audio Shader", ".washader", 35, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_shader", ".washader");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << "// WorldEngine Audio Shader: " << target.stem().string() << "\n"
+					<< "param float Frequency = 440.0 [20.0, 2000.0], \"基础振荡频率 (Hz)\";\n"
+					<< "param float Decay = 2.5 [0.1, 10.0], \"声音指数衰减率\";\n"
+					<< "param float Overdrive = 1.5 [1.0, 8.0], \"饱和失真度\";\n\n"
+					<< "float osc = poly_saw(Frequency, t);\n"
+					<< "float shaped = wavefold(osc * Overdrive, 0.85);\n"
+					<< "float env = exp(-Decay * t);\n"
+					<< "float sig = filter_lp(shaped * env, clamp(Frequency * 3.0, 100.0, 16000.0), 1.5);\n"
+					<< "out = stereo(sig, sig);\n";
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-audio-shader");
+				return true;
+			});
+
+		add("sound_synth", "Sound Synth Patch", ".wsynth", 34, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_synth", ".wsynth");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << "uuid: \"" << target.stem().string() << "\"\n"
+					<< "version: 1\n"
+					<< "name: \"" << target.stem().string() << "\"\n"
+					<< "material: Stone\n"
+					<< "excitation: ImpulseStrike\n"
+					<< "durationSeconds: 1.5\n"
+					<< "mass: 0.5\n"
+					<< "hardness: 0.6\n"
+					<< "roughness: 0.4\n"
+					<< "damping: 0.5\n"
+					<< "velocity: 0.7\n"
+					<< "cavityResonance: 0.3\n"
+					<< "pitchShiftSemi: 0.0\n"
+					<< "formantScale: 1.0\n"
+					<< "breathRoughness: 0.15\n"
+					<< "rateScale: 1.0\n";
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-sound-synth");
+				return true;
+			});
+
+		add("sprite_atlas", "2D Sprite Atlas (图集)", ".watlas", 38, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				TextureAtlas atlas("assets/textures/Icon.wtex", 256, 256);
+				atlas.AddSubTexture(SubTexture2D("sprite_0", { 0.0f, 0.0f, 64.0f, 64.0f }, 256, 256, { 0.5f, 0.5f }));
+				atlas.AddSubTexture(SubTexture2D("sprite_1", { 64.0f, 0.0f, 64.0f, 64.0f }, 256, 256, { 0.5f, 0.5f }));
+				std::string yaml = atlas.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_atlas", ".watlas");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				out.close();
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-sprite-atlas");
+				std::error_code ec;
+				const std::filesystem::path rel = std::filesystem::relative(target, m_Model.Root, ec);
+				m_Host.OpenAtlasEditor(ec ? target.generic_string() : rel.generic_string());
+				return true;
+			});
+
+		add("sprite_animation", "2D Sprite Animation (序列帧动画)", ".wanim", 40, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				SpriteAnimation anim("new_animation", 12.0f, AnimationLoopMode::Loop);
+				anim.SetAtlasPath("assets/textures/characters/hero_atlas.watlas");
+				anim.AddFrame(SpriteAnimationFrame("hero_idle", 0.0833f));
+				anim.AddFrame(SpriteAnimationFrame("hero_walk", 0.0833f));
+				std::string yaml = anim.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_animation", ".wanim");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				out.close();
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-sprite-animation");
+				std::error_code ec;
+				const std::filesystem::path rel = std::filesystem::relative(target, m_Model.Root, ec);
+				m_Host.OpenAnimationEditor(ec ? target.generic_string() : rel.generic_string());
+				return true;
+			});
+
+		add("tilemap", "2D Tilemap (瓦片地图)", ".wtilemap", 42, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				Tilemap tm("new_tilemap", 12, 8, "assets/textures/characters/dungeon_atlas.watlas");
+				tm.FillRect(0, 0, 11, 7, 1, false);
+				tm.FillRect(0, 0, 11, 0, 2, true);
+				tm.FillRect(0, 7, 11, 7, 2, true);
+				tm.FillRect(0, 0, 0, 7, 2, true);
+				tm.FillRect(11, 0, 11, 7, 2, true);
+				std::string yaml = tm.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_tilemap", ".wtilemap");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				out.close();
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-tilemap");
+				std::error_code ec;
+				const std::filesystem::path rel = std::filesystem::relative(target, m_Model.Root, ec);
+				m_Host.OpenTilemapEditor(ec ? target.generic_string() : rel.generic_string());
+				return true;
+			});
+
+		add("ruletile", "2D Rule Tile (规则瓦片)", ".wruletile", 43, false,
+			[this](const std::filesystem::path& dir, std::string* error)
+			{
+				RuleTile rt = RuleTile::CreateStandard47Template("new_ruletile", "assets/textures/characters/dungeon_atlas.watlas", 1);
+				std::string yaml = rt.SerializeYaml();
+				const std::filesystem::path target = MakeUniqueAssetPath(dir, "new_ruletile", ".wruletile");
+				std::ofstream out(target);
+				if (!out.is_open())
+				{
+					if (error) *error = "could not write " + target.string();
+					return false;
+				}
+				out << yaml;
+				out.close();
+				NotifyAssetWritten(target);
+				SelectCreated(target, "new-ruletile");
+				std::error_code ec;
+				const std::filesystem::path rel = std::filesystem::relative(target, m_Model.Root, ec);
+				m_Host.OpenRuleTileEditor(ec ? target.generic_string() : rel.generic_string());
+				return true;
+			});
+
+	}
+
+
+void ContentBrowserPanel::UnregisterDefaultAssetTypes(){
+		if (!m_AssetTypesRegistered)
+			return;
+		m_AssetTypesRegistered = false;
+		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
+		// 只撤销本面板注册的 id:别的组件(宿主/插件/测试)注册的类型不受影响。
+		for (const char* id : { "folder", "material", "shader", "scene", "ui", "script", "sound_event", "behaviortree", "sprite_atlas", "sprite_animation", "tilemap", "vfx" })
+			registry.Unregister(id);
+	}
+
+
+bool ContentBrowserPanel::CreateAssetFromRegistry(const std::string& typeId, std::string* error){
+		const AssetTypeDesc* desc = AssetTypeRegistry::Get().Find(typeId);
+		if (!desc || !desc->Create)
+		{
+			if (error) *error = "asset type is not registered: " + typeId;
+			return false;
+		}
+		std::error_code dirError;
+		if (!std::filesystem::is_directory(m_Model.Current, dirError))
+		{
+			if (error) *error = "target folder does not exist: " + m_Model.Current.string();
+			return false;
+		}
+		std::string localError;
+		if (!desc->Create(m_Model.Current, &localError))
+		{
+			if (error) *error = localError.empty() ? ("could not create " + typeId) : localError;
+			return false;
+		}
+		return true;
+	}
+
+
+void ContentBrowserPanel::SelectCreated(const std::filesystem::path& path, const char* op){
+		m_Model.Selected.clear();
+		m_Model.Selected.insert(path);
+		m_Model.LastSelected = path;
+		InvalidateContents();
+		SaveState();
+		if (m_Ctx && op)
+			m_Ctx->RecordOp("browser", op, path.filename().string(), "");
+	}
+
+
+	// P4-U13d:按逻辑路径选中一个已存在的资产(创建预制体成功后由宿主调用)。
+	// 选中的路径存的是**绝对路径**(与 SelectCreated / 内容区切片一致);目标不在当前目录时
+	// 先导航过去(导航会清选中,所以选中必须放在导航之后)。
+bool ContentBrowserPanel::SelectAsset(const std::string& logicalPath, const char* op){
+		std::string normalized = logicalPath;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		if (normalized.empty())
+			return false;
+
+		std::error_code ec;
+		std::filesystem::path targetAbsolute;
+		BrowserRootScope targetScope = BrowserRootScope::Content;
+
+		// 1. 判断是否带有 "engine/" 前缀
+		if (normalized.rfind("engine/", 0) == 0)
+		{
+			std::string stripped = normalized.substr(7);
+			std::filesystem::path cand = EngineContentRoot() / std::filesystem::path(stripped);
+			if (std::filesystem::exists(cand, ec))
+			{
+				targetAbsolute = cand;
+				targetScope = BrowserRootScope::EngineContent;
+			}
+		}
+
+		// 2. 判断是否在当前项目内容根下
+		if (targetAbsolute.empty())
+		{
+			std::filesystem::path cand = World::Paths::AssetRoot() / std::filesystem::path(normalized);
+			if (std::filesystem::exists(cand, ec))
+			{
+				targetAbsolute = cand;
+				targetScope = BrowserRootScope::Content;
+			}
+		}
+
+		// 3. 判断是否在引擎全局内容根下
+		if (targetAbsolute.empty() && EngineContentAvailable())
+		{
+			std::filesystem::path cand = EngineContentRoot() / std::filesystem::path(normalized);
+			if (std::filesystem::exists(cand, ec))
+			{
+				targetAbsolute = cand;
+				targetScope = BrowserRootScope::EngineContent;
+			}
+		}
+
+		// 4. 绝对路径回退判定
+		if (targetAbsolute.empty())
+		{
+			std::filesystem::path absPath(normalized);
+			if (std::filesystem::exists(absPath, ec))
+			{
+				targetAbsolute = absPath;
+				if (EngineContentAvailable() && targetAbsolute.generic_string().find(EngineContentRoot().generic_string()) != std::string::npos)
+				{
+					targetScope = BrowserRootScope::EngineContent;
+				}
+				else
+				{
+					targetScope = BrowserRootScope::Content;
+				}
+			}
+		}
+
+		if (targetAbsolute.empty())
+			return false;
+
+		// 切换到目标根(项目内容库或引擎内容库)
+		if (m_Model.Scope != targetScope)
+		{
+			SwitchRoot(targetScope);
+		}
+
+		// 导航至所在目录并高亮选中该资产条目
+		if (targetAbsolute.parent_path() != m_Model.Current)
+		{
+			Navigate(targetAbsolute.parent_path());
+		}
+		SelectCreated(targetAbsolute, op);
+		return true;
+	}
+
+
+bool ContentBrowserPanel::CreateMaterialAsset(const std::filesystem::path& dir, std::string* error, std::filesystem::path* outPath){
+		// 写一份默认 .wmat 模板(重名自动编号)。
+		// 关键:MaterialIO 的路径解析只认"内容根/<path>"(World::Paths::AssetRoot()),绝对路径原样命中。
+		// 历史:早先还会回退 `<Game>/<path>`,相对逻辑路径**新建**时会落到项目目录之外
+		// (实测:内容浏览器新建材质写进了 Game/_ux_probe)。所以这里始终传绝对路径(旧 CreateMaterial 的同一个坑)。
+		const std::filesystem::path target = MakeUniqueAssetPath(dir, "material", ".wmat");
+		MaterialDesc desc;
+		desc.Name = target.stem().string();
+		std::string localError;
+		if (!MaterialIO::WriteFileText(target.generic_string(), MaterialIO::Serialize(desc, GenerateAssetId()), &localError))
+		{
+			WLD_CORE_ERROR("Could not create material: {0}", localError);
+			if (error) *error = localError;
+			return false;
+		}
+		NotifyAssetWritten(target);
+		SelectCreated(target, "new-material");
+		if (outPath) *outPath = target;
+		return true;
+	}
+
+
+	// PECS-T11:合并后的「Lua Script…」入口只排队 —— 宿主在帧边界取走标记并打开
+	// 同一个「新建 Lua …」向导(见 EditorShell::OnRender 的帧边界分支)。
+bool ContentBrowserPanel::ConsumePendingLuaWizardRequest(){
+		if (!m_PendingLuaWizard)
+			return false;
+		m_PendingLuaWizard = false;
+		return true;
+	}
+
+
+bool ContentBrowserPanel::RenderNewAssetRow(Wui::WuiContext& ctx, Wui::WuiId rowId, const Wui::WuiRect& row, const Wui::WuiTheme& theme){
+		// 子菜单指示三角用 ▶(U+25B6):字体子集里验证过的字形(树用 ▼/▶);
+		// "▸"(U+25B8)与"⋯"(U+22EF)一样不在子集里,会画成乱码。
+		const std::string label = Wui::Tr("panel.content_browser.menu.new", "New") + "  ▶";
+		return Wui::MenuItem(ctx, rowId, row, label, true, theme);
+	}
+
+
+
+	struct NewAssetCategory
+	{
+		std::string Id;
+		std::string Label;
+		std::vector<std::string> TypeIds;
+	};
+
+	static const std::vector<NewAssetCategory> s_NewAssetCategories = {
+		{ "material", "材质与着色 (Material & Shader)  ▶", { "material", "shader" } },
+		{ "vfx", "视觉特效 (Visual Effects)  ▶", { "vfx" } },
+		{ "2d", "2D 精灵系统 (2D Sprites & Tiles)  ▶", { "sprite_atlas", "sprite_animation", "tilemap", "ruletile" } },
+		{ "audio", "音频系统 (Audio System)  ▶", { "sound_event" } },
+		{ "physics", "物理与数学 (Physics & Math)  ▶", { "physics_material", "curve" } },
+				{ "ai", "AI 与行为树 (AI & Behavior Tree)  ▶", { "behaviortree", "blackboard", "eqsquery" } },
+		{ "script", "脚本与代码 (Scripts & Logic)  ▶", { "script", "behaviortree" } },
+		{ "ui", "用户界面 (User Interface)  ▶", { "ui" } }
+	};
+
+	Wui::WuiRect ContentBrowserPanel::RenderNewAssetSubmenu(Wui::WuiContext& ctx, const char* idPrefix,
+		const Wui::WuiRect& parentRow, const std::vector<std::string>& typeIds,
+		const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme)
+	{
+		AssetTypeRegistry& registry = AssetTypeRegistry::Get();
+		std::vector<const AssetTypeDesc*> items;
+		for (const auto& tid : typeIds)
+		{
+			if (const auto* desc = registry.Find(tid))
+			{
+				items.push_back(desc);
+			}
+		}
+
+		if (items.empty()) return {};
+
+		const float itemH = 22.0f;
+		const float subW = 230.0f;
+		const float subH = itemH * static_cast<float>(items.size()) + 8.0f;
+
+		Wui::WuiRect subPanel { parentRow.X + parentRow.W - 2.0f, parentRow.Y - 2.0f, subW, subH };
+
+		// 贴边翻转: 如果右侧超出可视区，向左翻转
+		if (subPanel.X + subPanel.W > clampArea.X + clampArea.W - 4.0f)
+			subPanel.X = parentRow.X - subPanel.W + 2.0f;
+		subPanel.X = std::max(clampArea.X + 4.0f, std::min(subPanel.X, clampArea.X + clampArea.W - subPanel.W - 4.0f));
+		subPanel.Y = std::max(clampArea.Y + 4.0f, std::min(subPanel.Y, clampArea.Y + clampArea.H - subPanel.H - 4.0f));
+
+		Wui::DrawPanelSurface(ctx, subPanel, theme);
+		ctx.RegisterOverlayRect(subPanel);
+
+		const std::string tooltip = Wui::Tr("panel.content_browser.new.tooltip", "Create in the current folder");
+
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			const auto* desc = items[i];
+			const Wui::WuiRect row { subPanel.X + 4.0f, subPanel.Y + 4.0f + itemH * static_cast<float>(i), subPanel.W - 8.0f, itemH };
+			const std::string label = Wui::Tr(("asset.type." + desc->Id).c_str(), desc->Label.c_str());
+			const Wui::WuiId itemId = Wui::HashId((std::string(idPrefix) + "sub." + desc->Id).c_str());
+
+			const bool clicked = Wui::MenuItem(ctx, itemId, row, label, true, theme);
+
+			{
+				Wui::WuiAccessNode node;
+				node.Id = itemId;
+				node.Window = Wui::WuiAccessibility::Get().CurrentWindow();
+				node.Panel = Wui::WuiAccessibility::Get().CurrentPanel();
+				node.Kind = "menu-item";
+				node.Label = label;
+				node.Value = desc->Extension.empty() ? "(folder)" : desc->Extension;
+				node.Tooltip = tooltip;
+				node.Rect = row;
+				Wui::WuiAccessibility::Get().Register(node);
+			}
+
+			if (clicked)
+			{
+				std::string error;
+				if (!CreateAssetFromRegistry(desc->Id, &error))
+					NotifyAssetFailure(error);
+				m_NewMenuOwner = 0;
+				m_ActiveNewAssetCategory.clear();
+				ctx.CloseAllPopups();
+				break;
+			}
+
+			if (!desc->Extension.empty())
+			{
+				const float textWidth = ctx.MeasureTextWidth(desc->Extension, 12.0f);
+				Wui::Label(ctx, { row.X + row.W - textWidth - 8.0f, row.Y + (row.H - 15.0f) * 0.5f },
+					desc->Extension, theme.TextMuted, 12.0f);
+			}
+			Wui::Tooltip(ctx, row, tooltip);
+		}
+
+		return subPanel;
+	}
+
+	Wui::WuiRect ContentBrowserPanel::RenderNewAssetItems(Wui::WuiContext& ctx, const char* idPrefix,
+		const Wui::WuiRect& parentMenu, const Wui::WuiRect& clampArea, const Wui::WuiTheme& theme)
+	{
+		const std::vector<AssetTypeDesc> allTypes = AssetTypeRegistry::Get().Sorted();
+		if (allTypes.empty()) return {};
+
+		const float itemH = 22.0f;
+		const float menuW = 240.0f;
+
+		// 收集未被分类归纳的额外资产类型 (向后完全兜底)
+		std::vector<const AssetTypeDesc*> uncategorized;
+		std::set<std::string> categorizedIds;
+		for (const auto& cat : s_NewAssetCategories)
+		{
+			for (const auto& tid : cat.TypeIds)
+				categorizedIds.insert(tid);
+		}
+
+		for (const auto& desc : allTypes)
+		{
+			if (desc.Id != "folder" && categorizedIds.find(desc.Id) == categorizedIds.end())
+			{
+				uncategorized.push_back(&desc);
+			}
+		}
+
+		// 总行数 = 1 (Folder) + 1 (Divider) + 分类总数 + 未分类项数
+		const size_t totalVisualRows = 1 + 1 + s_NewAssetCategories.size() + uncategorized.size();
+		const float totalDesiredH = static_cast<float>(totalVisualRows) * itemH + 12.0f;
+
+		// 自适应高度限制 (防止小窗口/矮面板穿透底部)
+		const float maxAllowedH = std::min(totalDesiredH, std::max(120.0f, clampArea.H - 12.0f));
+
+		Wui::WuiRect panel { parentMenu.X + parentMenu.W - 4.0f, parentMenu.Y + 4.0f, menuW, maxAllowedH };
+
+		// 贴边翻转
+		if (panel.X + panel.W > clampArea.X + clampArea.W - 4.0f)
+			panel.X = parentMenu.X - panel.W + 4.0f;
+		panel.X = std::max(clampArea.X + 4.0f, std::min(panel.X, clampArea.X + clampArea.W - panel.W - 4.0f));
+		panel.Y = std::max(clampArea.Y + 4.0f, std::min(panel.Y, clampArea.Y + clampArea.H - panel.H - 4.0f));
+
+		Wui::DrawPanelSurface(ctx, panel, theme);
+		ctx.RegisterOverlayRect(panel);
+
+		// 滚轮自适应滑动保护
+		const float maxScroll = std::max(0.0f, totalDesiredH - panel.H);
+		if (panel.Contains(ctx.Input().MousePos) && std::abs(ctx.Input().Wheel) > 0.01f)
+		{
+			m_NewAssetScrollY = std::clamp(m_NewAssetScrollY - ctx.Input().Wheel * 24.0f, 0.0f, maxScroll);
+		}
+
+		float curY = panel.Y + 4.0f - m_NewAssetScrollY;
+
+		// 1. 文件夹 (Folder 恒排第一项)
+		{
+			const Wui::WuiRect row { panel.X + 4.0f, curY, panel.W - 8.0f, itemH };
+			if (row.Y + row.H > panel.Y && row.Y < panel.Y + panel.H)
+			{
+				const std::string label = "新建文件夹 (Folder)";
+				const Wui::WuiId fId = Wui::HashId((std::string(idPrefix) + "folder").c_str());
+				if (Wui::MenuItem(ctx, fId, row, label, true, theme))
+				{
+					std::string error;
+					if (!CreateAssetFromRegistry("folder", &error))
+						NotifyAssetFailure(error);
+					m_NewMenuOwner = 0;
+					m_ActiveNewAssetCategory.clear();
+					ctx.CloseAllPopups();
+					return panel;
+				}
+				if (ctx.IsHovered(row))
+				{
+					m_ActiveNewAssetCategory.clear();
+				}
+			}
+			curY += itemH;
+		}
+
+		// 2. 分割线
+		{
+			const float divY = curY + 2.0f;
+			if (divY > panel.Y && divY < panel.Y + panel.H)
+			{
+				Wui::LineSegment(ctx, { panel.X + 8.0f, divY }, { panel.X + panel.W - 8.0f, divY }, theme.Border, 1.0f);
+			}
+			curY += 6.0f;
+		}
+
+		Wui::WuiRect activeSubmenuParentRow {};
+		std::vector<std::string> activeSubmenuTypeIds;
+
+		// 3. 渲染分类子菜单项
+		for (size_t cIdx = 0; cIdx < s_NewAssetCategories.size(); ++cIdx)
+		{
+			const auto& cat = s_NewAssetCategories[cIdx];
+			const Wui::WuiRect row { panel.X + 4.0f, curY, panel.W - 8.0f, itemH };
+
+			if (row.Y + row.H > panel.Y && row.Y < panel.Y + panel.H)
+			{
+				const Wui::WuiId catId = Wui::HashId((std::string(idPrefix) + "cat." + cat.Id).c_str());
+				const bool isCurrentActive = (m_ActiveNewAssetCategory == cat.Id);
+
+				const bool clicked = Wui::MenuItem(ctx, catId, row, cat.Label, true, theme);
+				if (clicked || ctx.IsHovered(row))
+				{
+					m_ActiveNewAssetCategory = cat.Id;
+				}
+
+				if (m_ActiveNewAssetCategory == cat.Id)
+				{
+					activeSubmenuParentRow = row;
+					activeSubmenuTypeIds = cat.TypeIds;
+				}
+			}
+			curY += itemH;
+		}
+
+		// 4. 渲染未分类的额外资产项 (如有)
+		for (size_t uIdx = 0; uIdx < uncategorized.size(); ++uIdx)
+		{
+			const auto* desc = uncategorized[uIdx];
+			const Wui::WuiRect row { panel.X + 4.0f, curY, panel.W - 8.0f, itemH };
+
+			if (row.Y + row.H > panel.Y && row.Y < panel.Y + panel.H)
+			{
+				const std::string label = Wui::Tr(("asset.type." + desc->Id).c_str(), desc->Label.c_str());
+				const Wui::WuiId itemId = Wui::HashId((std::string(idPrefix) + "uncat." + desc->Id).c_str());
+				if (Wui::MenuItem(ctx, itemId, row, label, true, theme))
+				{
+					std::string error;
+					if (!CreateAssetFromRegistry(desc->Id, &error))
+						NotifyAssetFailure(error);
+					m_NewMenuOwner = 0;
+					m_ActiveNewAssetCategory.clear();
+					ctx.CloseAllPopups();
+					return panel;
+				}
+			}
+			curY += itemH;
+		}
+
+		// 5. 渲染激活的二级子菜单
+		if (!m_ActiveNewAssetCategory.empty() && !activeSubmenuTypeIds.empty())
+		{
+			RenderNewAssetSubmenu(ctx, idPrefix, activeSubmenuParentRow, activeSubmenuTypeIds, clampArea, theme);
+		}
+
+		return panel;
+	}
+void ContentBrowserPanel::NotifyAssetFailure(const std::string& error){
+		const std::string text = Wui::Tr("panel.content_browser.new.failed", "Could not create asset: ") + error;
+		WLD_CORE_ERROR("[content-browser] {0}", text);
+		m_Host.Notify(text);
+	}
+
+
+bool ContentBrowserPanel::OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt){
+		(void)alt;
+		// P4-UX16:Ctrl+N = 打开"新建"清单;Ctrl+Shift+N = 新建文件夹(资源管理器同款)。
+		// 本函数是三层路由的第 2 层:内容浏览器**有焦点**时优先于引擎全局 Ctrl+N
+		// (File ▸ New Scene);没焦点时那条全局命令照旧生效,不抢别处。
+		if (!ctrl || keyCode != KeyCodes::N)
+			return false;
+		// 快捷键在渲染之外到达(拿不到 ctx),只排队;真正的动作在下一帧 OnRender 里做。
+		m_PendingNewShortcut = shift ? 2 : 1;
+		return true;
+	}
+
+
+void ContentBrowserPanel::ApplyRename(const std::filesystem::path& target, const std::string& newName){
+		if (newName.empty())
+		{
+			m_Model.RenameTarget.clear();
+			m_Model.RenameActive = false;
+			m_TreeRenameTarget.clear();
+			return;
+		}
+		const std::filesystem::path newPath = target.parent_path() / newName;
+		if (newPath != target)
+		{
+			std::error_code ignored;
+			std::filesystem::rename(target, newPath, ignored);
+			if (m_Ctx) m_Ctx->RecordOp("browser", "rename", target.filename().string(), "-> " + newPath.filename().string());
+		}
+		m_Model.RenameTarget.clear();
+		m_Model.RenameActive = false;
+		m_TreeRenameTarget.clear();
+		InvalidateContents();
+		SaveState();
+		if (m_Model.Search[0])
+			UpdateSearch();
+	}
+
+
+void ContentBrowserPanel::StartRename(Wui::WuiContext& ctx, const std::filesystem::path& path){
+		m_Model.RenameTarget = path;
+		// P4-UX15:重命名默认只编辑**主名**,后缀单独保留 —— 与资源管理器一致
+		// (用户:"重命名时还是会显示后缀名")。提交时若用户没写后缀,自动补回原名后缀。
+		m_Model.RenameExtension = path.extension().string();
+		m_Model.RenameEdit = m_Model.RenameExtension.empty() ? path.filename().string() : path.stem().string();
+		std::strncpy(m_Model.RenameBuffer, m_Model.RenameEdit.c_str(), sizeof(m_Model.RenameBuffer) - 1);
+		m_Model.RenameActive = true;
+		ctx.SetFocus(Wui::HashId("browser.rename"));
+		ctx.SetTextInputActive(true);
+	}
+
+
+void ContentBrowserPanel::RenderRenameField(Wui::WuiContext& ctx, const std::filesystem::path& path, const Wui::WuiRect& rect, const Wui::WuiTheme& theme){
+		const Wui::WuiId renameId = Wui::HashId("browser.rename");
+		// U2d:输入非法(空 / 非法字符 / 同目录重名)时用 TextFieldEx 行内显示原因并拒绝提交。
+		// TextFieldEx 没有 cancelled 回调,所以 Esc 取消在这里先于控件处理(否则会把"取消"
+		// 当成失焦提交,把非法名字写进 ApplyRename —— 语义就变了)。
+		const bool cancelRequested = ctx.Focus() == renameId && ctx.IsKeyPressed(KeyCodes::Escape);
+		const std::string error = RenameErrorFor(path, m_Model.RenameEdit);
+		const bool submitted = Wui::TextFieldEx(ctx, renameId, rect, m_Model.RenameEdit, theme, error);
+		if (cancelRequested)
+		{
+			// Escape 丢弃(与旧 TextField 的 cancelled 语义相同)。
+			m_Model.RenameTarget.clear();
+			m_Model.RenameEdit.clear();
+			m_Model.RenameActive = false;
+			m_TreeRenameTarget.clear();
+		}
+		else if (submitted)
+		{
+			// 回车提交:非法名字拒绝提交。TextFieldCore 在提交帧会自己失焦,这里把焦点还给
+			// 输入框 —— 否则下一帧就按"失焦提交"把框收掉,错误只闪一帧、也没法继续改。
+			if (error.empty())
+				ApplyRename(path, RenameNameWithExtension(path, m_Model.RenameEdit));
+			else
+			{
+				WLD_CORE_WARN("[browser] rename rejected: {0}", error);
+				ctx.SetFocus(renameId);
+				ctx.SetTextInputActive(true);
+			}
+		}
+		else if (m_Model.RenameActive && ctx.Focus() != renameId)
+		{
+			// 失焦提交:点选其他条目或空白处时收起重命名框。非法名字不提交(原名字不变,
+			// 也不留一个失去焦点、无法继续编辑的输入框)。
+			if (error.empty())
+				ApplyRename(path, RenameNameWithExtension(path, m_Model.RenameEdit));
+			else
+			{
+				WLD_CORE_WARN("[browser] rename rejected on blur: {0}", error);
+				m_Model.RenameTarget.clear();
+				m_Model.RenameEdit.clear();
+				m_Model.RenameActive = false;
+				m_TreeRenameTarget.clear();
+			}
+		}
+	}
+
+
+void ContentBrowserPanel::OpenInExplorer(const std::filesystem::path& path){
+		// /select 让资源管理器打开所在文件夹并选中该项,而不是直接打开文件。
+		const std::wstring parameters = L"/select,\"" + std::filesystem::absolute(path).wstring() + L"\"";
+		const HINSTANCE result = ShellExecuteW(nullptr, L"open", L"explorer.exe", parameters.c_str(), nullptr, SW_SHOWNORMAL);
+		if (reinterpret_cast<intptr_t>(result) <= 32)
+			WLD_CORE_WARN("Could not open Explorer for '{0}' (error {1})", path.string(), reinterpret_cast<intptr_t>(result));
+	}
+
+
+void ContentBrowserPanel::OpenFolderInExplorer(const std::filesystem::path& path){
+		// D10-6:直接打开该目录本身(面板既有的系统调用风格,见 OpenItem 的兜底分支)。
+		const std::string cmd = "start \"\" explorer.exe \"" + std::filesystem::absolute(path).string() + "\"";
+		system(cmd.c_str());
+	}
+
+
+void ContentBrowserPanel::Cut(){
+		m_Model.Clipboard.assign(m_Model.Selected.begin(), m_Model.Selected.end());
+		m_Model.ClipboardCut = true;
+	}
+
+
+void ContentBrowserPanel::Copy(){
+		m_Model.Clipboard.assign(m_Model.Selected.begin(), m_Model.Selected.end());
+		m_Model.ClipboardCut = false;
+	}
+
+
+void ContentBrowserPanel::SelectAll(const std::vector<std::filesystem::path>& paths){
+		m_Model.Selected.clear();
+		m_Model.Selected.insert(paths.begin(), paths.end());
+		if (!paths.empty())
+			m_Model.LastSelected = paths.back();
+	}
+
+
+	// D10-10(用户 2026-09-19):导入位置选择器已搬到 EditorShell 的窗口级模态(居中 + 全窗口挡输入)。
+	// 面板这里只保留 shell 需要的刷新入口(与工具栏 Refresh / 内容区菜单同一条路径)。
+void ContentBrowserPanel::RefreshContents(){
+		InvalidateContents();
+		if (m_Model.Search[0])
+			UpdateSearch();
+	}
+
+}
+
+
+

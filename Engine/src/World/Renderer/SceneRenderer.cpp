@@ -1,0 +1,4272 @@
+#include "World/Scene/Systems/WeatherSystem.h"
+#include "wldpch.h"
+#include "World/Profiling/ProfilingMacros.h"
+#include "World/Renderer/SceneRenderer.h"
+#include "World/NavMesh/NavMesh.h"
+#include "World/Renderer/Lighting2D.h"
+
+#include "World/RHI/RhiFramebufferBridge.h"
+#include "World/Renderer/PostProcess/PostProcessPasses.h"
+#include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/ParticleAsset.h"
+#include "World/Script/Bindings/BindParticle.h"
+
+#include "World/Renderer/Renderer.h"
+#include "World/Renderer/Renderer2D.h"
+#include "World/Renderer/Renderer3D.h"
+#include "World/Renderer/AnimationSystem.h"
+#include "World/Animation/AnimGraphSystem.h"
+#include "World/Renderer/MaterialLibrary.h"
+#include "World/Renderer/Mesh.h"
+#include "World/Renderer/Texture/TextureLibrary.h"
+#include "World/Renderer/TextureAtlas.h"
+#include "World/Renderer/Tilemap.h"
+#include "World/Asset/AssetCatalog.h"
+#include "World/Asset/AsyncLoader.h"
+#include "World/Utils/Paths.h"
+#include "World/Renderer/AssetRegistry.h"
+#include "World/Renderer/ShaderUtils.h"
+#include "World/Renderer/ProjectionConventions.h"
+#include "World/Renderer/FrustumCull.h"
+#include "World/Math/Simd/FrustumCullSimd.h"
+#include "World/Renderer/RenderSettings.h"
+#include "World/Environment/WaterSimulation.h"
+#include "World/Environment/WeatherSimulation.h"
+#include "World/Renderer/FrameExtract.h"
+#include "World/Level/WhiteboxBuilder.h"
+#include "World/Level/Spline3D.h"
+#include "World/Renderer/MeshLOD.h"
+#include "World/Scene/SceneOctree.h"
+#include "World/Renderer/TransformInterpolation.h"
+#include "World/Terrain/TerrainRenderer.h"
+#include "World/Foliage/FoliageRenderer.h"
+#include "World/Foliage/FoliageInteraction.h"
+#include "World/Renderer/Decal.h"
+#include "World/Renderer/CSM.h"
+#include "World/Scene/Components.h"
+#include "World/Scene/Hierarchy.h"
+#include "World/Scene/Systems/TransformSystem.h"
+#include "World/Core/Thread/JobSystem.h"
+#include "World/Core/Memory/FrameArena.h"
+
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <array>
+#include <chrono>
+#include <cfloat>
+#include <cmath>
+#include <map>
+#include <tuple>
+
+namespace World
+{
+	namespace
+	{
+		struct WhiteboxRenderVertex
+		{
+			glm::vec3 Position;
+			glm::vec3 Normal;
+			glm::vec2 TexCoord;
+		};
+
+		Ref<Mesh> CreateMeshFromWhitebox(const WhiteboxMesh& wbMesh, const std::string& name)
+		{
+			if (wbMesh.Vertices.empty() || wbMesh.Indices.empty())
+				return nullptr;
+
+			MeshDesc desc;
+			desc.DebugName = name;
+			desc.Layout = Mesh::MakeStandardLayout();
+			desc.VertexLayoutId = Mesh::kVertexLayoutStandard;
+			desc.Indices = wbMesh.Indices;
+			desc.VertexData.resize(wbMesh.Vertices.size() * sizeof(WhiteboxRenderVertex));
+			auto* verts = reinterpret_cast<WhiteboxRenderVertex*>(desc.VertexData.data());
+			for (size_t i = 0; i < wbMesh.Vertices.size(); ++i)
+			{
+				verts[i].Position = wbMesh.Vertices[i];
+				verts[i].Normal = wbMesh.Normals[i];
+				verts[i].TexCoord = wbMesh.UVs[i];
+			}
+			return Mesh::Create(desc);
+		}
+	}
+	namespace Detail
+	{
+		template <typename T, typename = void>
+		struct IsCompleteType : std::false_type {};
+
+		template <typename T>
+		struct IsCompleteType<T, std::void_t<decltype(sizeof(T))>> : std::true_type {};
+	}
+	namespace
+	{
+		// 并行阈值:低于此规模时串行更快(调度/缓存开销 > 收益)。实测口径见
+		// docs 的 job-system 契约;两个阈值都只影响"是否并行",不影响结果。
+		constexpr size_t kParallelCullThreshold = 256;     // 逐 draw 视锥判定
+		constexpr size_t kParallelBoundsThreshold = 512;   // 阴影包围盒归约
+		constexpr size_t kCullTile = 16;                   // 视锥剔除:16 对象/tile = 4 个 SSE 批(B 轴 SIMD)
+	}
+
+	uint32_t SceneRenderer::FrameSlot() const
+	{
+		return static_cast<uint32_t>(Renderer::FrameSlot());
+	}
+
+	// ---- P1b D8b:GPU 时间戳 ----
+
+	void SceneRenderer::InitGpuTiming()
+	{
+		m_GpuTiming = RenderSettings::Get().GpuTiming;
+		if (!m_GpuTiming)
+			return;
+		const Rhi::Handle<Rhi::Device>& device = Renderer::GetDevice();
+		if (!device)
+		{
+			// 设备不可用 → 明确退回关闭并告警,不是静默返回 0 让上层误以为"GPU 不耗时"。
+			WLD_CORE_WARN("rendering.gpu_timing 已开启,但当前渲染设备不可用;GPU 耗时保持 0");
+			m_GpuTiming = false;
+			return;
+		}
+		if (!device->GetCapabilities().TimestampQueries)
+		{
+			// 设备不支持时间戳 → 明确退回关闭(同样是显式告警,不是静默)。
+			WLD_CORE_WARN("rendering.gpu_timing 已开启,但当前设备不支持时间戳查询;GPU 耗时保持 0");
+			m_GpuTiming = false;
+			return;
+		}
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_TimestampPools[slot] = device->CreateQueryPool(Rhi::QueryType::Timestamp, 2);
+			Rhi::BufferDesc bufferDesc;
+			bufferDesc.Size = sizeof(uint64_t) * 2;
+			bufferDesc.Usage = Rhi::BufferUsageTransferDst;
+			bufferDesc.Memory = Rhi::MemoryHint::HostVisible;
+			// 初值清零:异步读回下缓冲可能在被首次成功写入前就被读取,初值必须是"无效对"
+			// (stamps[1] <= stamps[0]),ReadGpuTiming 才会退回上一次有效值而不是未初始化内存。
+			const uint64_t zeroStamps[2] = { 0, 0 };
+			bufferDesc.InitialData = zeroStamps;
+			bufferDesc.DebugName = "SceneRenderer.GpuTimestamps";
+			m_TimestampBuffers[slot] = device->CreateBuffer(bufferDesc);
+			m_TimestampPending[slot] = false;
+		}
+	}
+
+	void SceneRenderer::BeginGpuTiming(uint32_t slot)
+	{
+		if (!m_GpuTiming || !m_TimestampPools[slot])
+			return;
+		m_CommandBuffers[slot]->ResetQueryPool(m_TimestampPools[slot], 0, 2);
+		m_CommandBuffers[slot]->WriteTimestamp(m_TimestampPools[slot], 0);
+	}
+
+	void SceneRenderer::EndGpuTiming(uint32_t slot)
+	{
+		if (!m_GpuTiming || !m_TimestampPools[slot])
+			return;
+		m_CommandBuffers[slot]->WriteTimestamp(m_TimestampPools[slot], 1);
+		m_TimestampPending[slot] = true;
+		// D8b(2026-10-06):异步读回。此处不等待 GPU;对"尚未成功读回"的每个槽位在本帧重发一次
+		// CopyQueryResults,后端只在结果可用时才拷贝(不可用则跳过,下一帧再试),因此本段永不
+		// 阻塞主线程。成功写入的读回缓冲在该槽位复用时由 ReadGpuTiming 取走。
+		for (uint32_t pending = 0; pending < kFramesInFlight; ++pending)
+			if (m_TimestampPending[pending] && m_TimestampPools[pending] && m_TimestampBuffers[pending])
+				m_CommandBuffers[slot]->CopyQueryResults(m_TimestampPools[pending],
+					m_TimestampBuffers[pending], 0, 2);
+	}
+
+	double SceneRenderer::ReadGpuTiming(uint32_t slot)
+	{
+		// 缓冲初值清零、拷贝失败时保持上一次的完整一对时间戳 ⇒ 这里读到的要么是本轮有效值,
+		// 要么是上一轮有效值;不会是"半写/未初始化"的脏值(见 EndGpuTiming 注释)。
+		if (!m_GpuTiming || !m_TimestampPending[slot] || !m_TimestampBuffers[slot])
+			return m_LastGpuMilliseconds;
+		uint64_t stamps[2] = {};
+		if (void* mapped = m_TimestampBuffers[slot]->Map(0, sizeof(stamps)))
+		{
+			std::memcpy(stamps, mapped, sizeof(stamps));
+			m_TimestampBuffers[slot]->Unmap();
+		}
+		m_TimestampPending[slot] = false;
+		if (stamps[1] <= stamps[0])
+			return m_LastGpuMilliseconds;
+		const double periodNs = Renderer::GetDevice() ? Renderer::GetDevice()->GetTimestampPeriodNanoseconds() : 1.0;
+		m_LastGpuMilliseconds = static_cast<double>(stamps[1] - stamps[0]) * periodNs / 1.0e6;
+		return m_LastGpuMilliseconds;
+	}
+
+	namespace
+	{
+		// 旧 Framebuffer 接口适配器:编辑器显示/拾取仍走 GL id,迁到 RHI 后移除。
+		class RhiFramebufferAdapter final : public Framebuffer
+		{
+		public:
+			SceneRenderer* Owner = nullptr;
+			Rhi::Handle<Rhi::Framebuffer> Target;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+
+			void Resize(uint32_t width, uint32_t height) override
+			{
+				if (Owner)
+					Owner->OnResize(width, height);
+			}
+
+			const FramebufferSpecification& GetSpecification() const override
+			{
+				static FramebufferSpecification spec;
+				return spec;
+			}
+
+			uint32_t GetColorAttachmentRendererID(size_t index = 0) const override
+			{
+				return Rhi::FramebufferAttachmentId(Target, index);
+			}
+
+			void Bind() override {}
+			void Unbind() override {}
+
+			int ReadPixel(uint32_t attachmentIndex, int x, int y) override
+			{
+				return Rhi::FramebufferReadPixel(Target, attachmentIndex, x, y);
+			}
+
+			void ClearAttachment(uint32_t, int) override {}
+		};
+	}
+
+	void SceneRenderer::Init()
+	{
+		WLD_TRACE_FUNCTION();
+		if (m_Device)
+			Shutdown();
+		m_Device = Renderer::GetDevice();
+		// D8b:GPU 时间戳池/读回缓冲(rendering.gpu_timing;设备不支持时自降级为关闭)。
+		InitGpuTiming();
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_CommandBuffers[slot] = m_Device->CreateCommandBuffer("SceneRenderer");
+		}
+
+		// P4-4b:MSAA 生效采样数(启动期参数;设备上限已在 RenderSettings::Msaa 里折算)。
+		// msaa==1 时下面的一切与旧代码逐字节一致:三附件全 Count1、ResolveAttachments 为空。
+		m_Samples = RenderSettings::Msaa();
+		const Rhi::SampleCount sceneSamples = static_cast<Rhi::SampleCount>(m_Samples);
+		const bool multisampled = m_Samples > 1;
+
+		Rhi::RenderPassDesc passDesc;
+		Rhi::RenderPassAttachment color;
+		color.Format = Rhi::Format::R8G8B8A8_UNORM;
+		color.Samples = sceneSamples;
+		color.Load = Rhi::LoadOp::Clear;
+		color.Store = Rhi::StoreOp::Store;
+		// 三个附件都是"每帧 Clear、内容不保留":初始布局声明为 Undefined,让渲染通道
+		// 自己完成 隐式转换(如果声明成 ColorAttachment 而实际还在 Undefined,
+		// 渲染通道会跳过转换 → 附件被以 Undefined 布局使用,验证层报 vkCmdDraw-None-09600)。
+		color.InitialLayout = Rhi::AttachmentLayout::Undefined;
+		color.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		color.Clear.Color = { 0.1f, 0.1f, 0.1f, 1.0f };
+
+		Rhi::RenderPassAttachment entityId;
+		entityId.Format = Rhi::Format::R32_SINT;
+		entityId.Samples = sceneSamples;
+		entityId.Load = Rhi::LoadOp::Clear;
+		entityId.Store = Rhi::StoreOp::Store;
+		entityId.InitialLayout = Rhi::AttachmentLayout::Undefined;
+		entityId.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+		const int minusOne = -1;
+		std::memcpy(&entityId.Clear.Color, &minusOne, sizeof(int));
+
+		Rhi::RenderPassAttachment depth;
+		depth.Format = Rhi::Format::D24_UNORM_S8_UINT;
+		depth.Samples = sceneSamples;
+		depth.Load = Rhi::LoadOp::Clear;
+		depth.Store = Rhi::StoreOp::Store;
+		depth.InitialLayout = Rhi::AttachmentLayout::Undefined;
+		depth.FinalLayout = Rhi::AttachmentLayout::DepthStencilAttachment;
+		depth.Clear.IsDepthStencil = true;
+		depth.Clear.DepthStencil.Depth = 1.0f;
+
+		passDesc.Attachments = { color, entityId, depth };
+		Rhi::SubpassDesc subpass;
+		subpass.ColorAttachments = {
+			{ 0, Rhi::AttachmentLayout::ColorAttachment },
+			{ 1, Rhi::AttachmentLayout::ColorAttachment },
+		};
+		subpass.DepthStencilAttachment = { 2, Rhi::AttachmentLayout::DepthStencilAttachment };
+		if (multisampled)
+		{
+			// P4-4b:五附件结构(与 Renderer2D/3D 的兼容通道、两个预览面板逐项一致,
+			// 这是 Vulkan 复用同一批管线的前提):
+			//   0 = 多采样颜色(R8G8B8A8_UNORM)   1 = 多采样实体 id(R32_SINT)
+			//   2 = 多采样深度(D24_UNORM_S8_UINT,不 resolve)
+			//   3 = 单采样颜色 resolve 目标(= 现有 m_ColorTexture)
+			//   4 = 单采样实体 id resolve 目标(= 现有 m_EntityTexture)
+			// resolve 目标必须出现在 FramebufferDesc::Attachments 的**同一附件下标**上。
+			// 布局声明与旧的单采样颜色/实体附件一致(Initial Undefined = 每帧整体重写,
+			// Final ColorAttachment = 帧末那条 ColorAttachment→ShaderReadOnly 屏障的前态)。
+			Rhi::RenderPassAttachment colorResolve;
+			colorResolve.Format = Rhi::Format::R8G8B8A8_UNORM;
+			colorResolve.Samples = Rhi::SampleCount::Count1;
+			colorResolve.Load = Rhi::LoadOp::DontCare;   // resolve 会整体覆盖
+			colorResolve.Store = Rhi::StoreOp::Store;
+			colorResolve.InitialLayout = Rhi::AttachmentLayout::Undefined;
+			colorResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			Rhi::RenderPassAttachment entityResolve;
+			entityResolve.Format = Rhi::Format::R32_SINT;
+			entityResolve.Samples = Rhi::SampleCount::Count1;
+			entityResolve.Load = Rhi::LoadOp::DontCare;
+			entityResolve.Store = Rhi::StoreOp::Store;
+			entityResolve.InitialLayout = Rhi::AttachmentLayout::Undefined;
+			entityResolve.FinalLayout = Rhi::AttachmentLayout::ColorAttachment;
+			passDesc.Attachments.push_back(colorResolve);    // 3
+			passDesc.Attachments.push_back(entityResolve);   // 4
+			subpass.ResolveAttachments = { 3, 4 };
+			passDesc.DebugName = "SceneRenderer.ScenePass";
+			WLD_CORE_INFO("[msaa] 场景渲染通道:颜色 / 实体 id / 深度 {0}x 多采样,resolve 到单采样颜色 / 实体 id 目标",
+				m_Samples);
+		}
+		passDesc.Subpasses = { subpass };
+		m_RenderPass = m_Device->CreateRenderPass(passDesc);
+
+		Rhi::BufferDesc cameraDesc;
+		cameraDesc.Size = sizeof(glm::mat4);
+		cameraDesc.Usage = Rhi::BufferUsageUniform;
+		cameraDesc.Memory = Rhi::MemoryHint::HostVisible;
+		// D4:灯光 UBO(std140,496 字节:阴影矩阵 + 阴影参数 + 环境光 + 数量 + 8 盏灯)。
+		Rhi::BufferDesc lightDesc;
+		lightDesc.Size = sizeof(LightUniforms);
+		lightDesc.Usage = Rhi::BufferUsageUniform;
+		lightDesc.Memory = Rhi::MemoryHint::HostVisible;
+		lightDesc.DebugName = "SceneRenderer.LightUBO";
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_CameraBuffers[slot] = m_Device->CreateBuffer(cameraDesc);
+			m_LightBuffers[slot] = m_Device->CreateBuffer(lightDesc);
+			m_GlobalDescriptorSets[slot] = m_Device->CreateDescriptorSet(
+				Renderer::GetGlobalDescriptorSetLayout());
+			// set0 的全部 binding 必须**一次**写完:GL 后端的描述符集 Update 是"整体替换"
+			// 语义(binding 2 = 灯光 UBO、binding 3 = 阴影贴图,见 Renderer::GetGlobalDescriptorSetLayout)。
+			std::vector<Rhi::DescriptorWrite> writes;
+			Rhi::DescriptorWrite cameraWrite;
+			cameraWrite.Binding = 0;
+			cameraWrite.Type = Rhi::DescriptorType::UniformBuffer;
+			cameraWrite.Buffer = m_CameraBuffers[slot];
+			writes.push_back(cameraWrite);
+			for (const Rhi::DescriptorWrite& extra : Renderer3D::MakeGlobalLightingWrites(m_LightBuffers[slot]))
+				writes.push_back(extra);
+			m_GlobalDescriptorSets[slot]->Update(writes);
+		}
+
+		m_FramebufferView = CreateRef<RhiFramebufferAdapter>();
+		static_cast<RhiFramebufferAdapter*>(m_FramebufferView.get())->Owner = this;
+		// P4-3:目标尺寸 = 请求尺寸 × rendering.render_scale。默认 1.0 时第一次换算
+		// 得到的就是原来的 1280×720(同尺寸、同一条创建路径)。
+		ApplyRenderScale();
+	}
+
+	void SceneRenderer::Shutdown()
+	{
+		WLD_TRACE_FUNCTION();
+		// 抽取 sink 是跨帧装在场景上的:渲染器先死时把它摘掉,避免场景留着悬垂指针。
+		if (m_ExtractSinkScene)
+		{
+			m_ExtractSinkScene->SetRenderExtractSink(nullptr);
+			m_ExtractSinkScene = nullptr;
+		}
+		m_WhiteboxMeshCache.clear();
+		m_SplineMeshCache.clear();
+		for (auto& [e, m] : m_WaterMeshCache)
+		{
+			if (m)
+				Renderer3D::PurgeMeshGpu(m.get());
+		}
+		m_WaterMeshCache.clear();
+		m_WaterModelMatrices.clear();
+		m_SkyDomePipeline = nullptr;
+		m_SkyVertexBuffer = nullptr;
+		m_SkyIndexBuffer = nullptr;
+		m_SkyDescriptorSetLayout = nullptr;
+		for (uint32_t i = 0; i < kFramesInFlight; ++i)
+		{
+			m_SkyDescriptorSets[i] = nullptr;
+			m_SkyUniformBuffers[i] = nullptr;
+		}
+		m_ActiveScene = nullptr;
+		m_Framebuffer = nullptr;
+		m_FramebufferView = nullptr;
+		m_ColorTexture = nullptr;
+		m_EntityTexture = nullptr;
+		m_DepthTexture = nullptr;
+		// P4-4b:多采样附件(msaa>1 时才有)同样在设备销毁前放掉。
+		m_ColorMsaaTexture = nullptr;
+		m_EntityMsaaTexture = nullptr;
+		m_DepthMsaaTexture = nullptr;
+		m_RenderPass = nullptr;
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_CommandBuffers[slot] = nullptr;
+			m_CameraBuffers[slot] = nullptr;
+			m_LightBuffers[slot] = nullptr;
+			m_GlobalDescriptorSets[slot] = nullptr;
+			// D8b:时间戳查询池/读回缓冲必须在设备销毁前释放(同 D4 阴影资源的口径)。
+			m_TimestampPools[slot] = nullptr;
+			m_TimestampBuffers[slot] = nullptr;
+			m_TimestampPending[slot] = false;
+		}
+		m_GpuTiming = false;
+		m_LastGpuMilliseconds = 0.0;
+		m_FramebufferView = nullptr;
+		m_Device = nullptr;
+	}
+
+	namespace
+	{
+		// P4-3:请求尺寸 → 渲染目标尺寸(宽高都乘倍率,四舍五入,最少 1 像素)。
+		// 取整口径固定为 std::lround(0.5 远离零),再 clamp 到 ≥1 —— 倍率 0.25 时
+		// 再小的请求尺寸也不会变成 0(0 尺寸纹理/帧缓冲非法)。
+		uint32_t ScaleRenderExtent(uint32_t extent, float scale)
+		{
+			const long scaled = std::lround(static_cast<double>(extent) * static_cast<double>(scale));
+			return static_cast<uint32_t>(std::max(1L, scaled));
+		}
+	}
+
+	void SceneRenderer::ApplyRenderScale()
+	{
+		// 设备未就绪(Init 之前 / Shutdown 之后)不碰目标;Init 末尾会自己调一次。
+		if (!m_Device)
+			return;
+		// 夹取:清单加载期已拒绝越界值(ProjectManifest::ValidateManifest);这里再夹一次,
+		// 避免"直接 RenderSettings::Set 出 0/负数"把目标算成 0 尺寸。
+		const float scale = std::clamp(RenderSettings::RenderScale(),
+			Asset::RenderingSettings::MinRenderScale, Asset::RenderingSettings::MaxRenderScale);
+		const uint32_t width = ScaleRenderExtent(m_RequestedWidth, scale);
+		const uint32_t height = ScaleRenderExtent(m_RequestedHeight, scale);
+		// 无变化(默认倍率 1.0 的常见路径):不创建也不释放任何资源,与旧代码同一条路径。
+		if (m_Framebuffer && m_AppliedRenderScale == scale && width == m_Width && height == m_Height)
+			return;
+		m_AppliedRenderScale = scale;
+		RecreateTargets(width, height);
+	}
+
+	void SceneRenderer::RecreateTargets(uint32_t width, uint32_t height)
+	{
+		m_Width = std::max(1u, width);
+		m_Height = std::max(1u, height);
+		// 旧目标可能仍被在飞的帧引用:交给延迟释放队列,在栅栏通过后回收。
+		if (m_Framebuffer || m_ColorTexture || m_EntityTexture || m_DepthTexture ||
+			m_ColorMsaaTexture || m_EntityMsaaTexture || m_DepthMsaaTexture)
+		{
+			auto oldFramebuffer = m_Framebuffer;
+			auto oldColor = m_ColorTexture;
+			auto oldEntity = m_EntityTexture;
+			auto oldDepth = m_DepthTexture;
+			auto oldColorMsaa = m_ColorMsaaTexture;
+			auto oldEntityMsaa = m_EntityMsaaTexture;
+			auto oldDepthMsaa = m_DepthMsaaTexture;
+			Renderer::QueueRelease([oldFramebuffer, oldColor, oldEntity, oldDepth,
+				oldColorMsaa, oldEntityMsaa, oldDepthMsaa]() {});
+		}
+
+		Rhi::TextureDesc colorDesc;
+		colorDesc.Type = Rhi::TextureType::Texture2D;
+		colorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+		colorDesc.Extent = { m_Width, m_Height, 1 };
+		colorDesc.Usage = Rhi::TextureUsageColorAttachment | Rhi::TextureUsageSampled;
+		m_ColorTexture = m_Device->CreateTexture(colorDesc);
+
+		Rhi::TextureDesc entityDesc;
+		entityDesc.Type = Rhi::TextureType::Texture2D;
+		entityDesc.Format = Rhi::Format::R32_SINT;
+		entityDesc.Extent = { m_Width, m_Height, 1 };
+		entityDesc.Usage = Rhi::TextureUsageColorAttachment;
+		m_EntityTexture = m_Device->CreateTexture(entityDesc);
+
+		Rhi::TextureDesc depthDesc;
+		depthDesc.Type = Rhi::TextureType::Texture2D;
+		depthDesc.Format = Rhi::Format::D24_UNORM_S8_UINT;
+		depthDesc.Extent = { m_Width, m_Height, 1 };
+		depthDesc.Usage = Rhi::TextureUsageDepthStencilAttachment;
+		m_DepthTexture = m_Device->CreateTexture(depthDesc);
+
+		Rhi::FramebufferDesc framebufferDesc;
+		framebufferDesc.RenderPass = m_RenderPass;
+		framebufferDesc.Extent = { m_Width, m_Height };
+		if (m_Samples > 1)
+		{
+			// P4-4b:三类附件按生效采样数创建(resolve 目标仍是上面两张单采样纹理)。
+			// 顺序必须与渲染通道附件表一致:0 颜色 / 1 实体 id / 2 深度 / 3 颜色 resolve / 4 实体 id resolve。
+			const Rhi::SampleCount sceneSamples = static_cast<Rhi::SampleCount>(m_Samples);
+			Rhi::TextureDesc msaaColorDesc = colorDesc;
+			msaaColorDesc.Samples = sceneSamples;
+			// 多采样颜色只做绘制附件(内容由 resolve 写入 m_ColorTexture,WUI/抓图不采样它)。
+			msaaColorDesc.Usage = Rhi::TextureUsageColorAttachment;
+			msaaColorDesc.DebugName = "SceneRenderer.ColorMSAA";
+			m_ColorMsaaTexture = m_Device->CreateTexture(msaaColorDesc);
+			Rhi::TextureDesc msaaEntityDesc = entityDesc;
+			msaaEntityDesc.Samples = sceneSamples;
+			msaaEntityDesc.DebugName = "SceneRenderer.EntityIdMSAA";
+			m_EntityMsaaTexture = m_Device->CreateTexture(msaaEntityDesc);
+			Rhi::TextureDesc msaaDepthDesc = depthDesc;
+			msaaDepthDesc.Samples = sceneSamples;
+			msaaDepthDesc.DebugName = "SceneRenderer.DepthMSAA";
+			m_DepthMsaaTexture = m_Device->CreateTexture(msaaDepthDesc);
+			framebufferDesc.Attachments = { m_ColorMsaaTexture, m_EntityMsaaTexture, m_DepthMsaaTexture,
+				m_ColorTexture, m_EntityTexture };
+		}
+		else
+		{
+			framebufferDesc.Attachments = { m_ColorTexture, m_EntityTexture, m_DepthTexture };
+		}
+		m_Framebuffer = m_Device->CreateFramebuffer(framebufferDesc);
+
+		if (m_FramebufferView)
+		{
+			auto* adapter = static_cast<RhiFramebufferAdapter*>(m_FramebufferView.get());
+			adapter->Target = m_Framebuffer;
+			adapter->Width = m_Width;
+			adapter->Height = m_Height;
+		}
+	}
+
+	void SceneRenderer::BeginScene(Scene* scene, const SceneRendererOptions& options)
+	{
+		// P4-3:帧起点重查 rendering.render_scale —— 编辑器面板改倍率后不重启、不缩放
+		// 视口也能生效(BeginScene 在任何目标使用之前、上一帧提交之后运行)。倍率与尺寸
+		// 都没变时 ApplyRenderScale 直接返回,不产生任何资源操作。
+		ApplyRenderScale();
+		m_ActiveScene = scene;
+		m_Options = options;
+		// L2 资产驻留层:惰性登记到世界资源表(渲染域在消费点登记自己的世界级服务),
+		// 然后推进帧号 —— Resolve*/CollectGarbage 的记账都以这一帧号为准。
+		m_AssetRegistry = nullptr;
+		if (m_ActiveScene)
+		{
+			WorldContext& context = m_ActiveScene->GetContext();
+			if (!context.Resources().Has<AssetRegistry>())
+				context.Resources().Emplace<AssetRegistry>();
+			m_AssetRegistry = &context.Resources().Get<AssetRegistry>();
+			// 目录服务(可选):把世界上下文交给驻留层,让"路径失效 → 按身份找回"可用。
+			m_AssetRegistry->BindContext(&context);
+			// T5c 主线程提交点:把工作线程算完的 CPU 侧网格交给 Mesh 的进程内缓存。
+			// 必须在**命令缓冲录制之前**(本函数即该位置)—— 之后本帧的 Resolve 就能命中。
+			if (AsyncLoader* loader = context.Resources().TryGet<AsyncLoader>())
+			{
+				const std::size_t committed = loader->PumpCompletions();
+				(void)committed;
+			}
+			// 纹理异步解码的提交点(同一位置:命令缓冲录制之前)。纹理驻留是进程级的,
+			// 不随世界上下文走,但提交时机必须同样在主线程的这一段。
+			TextureLibrary::Get().PumpCompletions();
+			// 资产目录(L1):首次进入该世界会话时建立(共享入口保证只有一处知道内容根)。
+			AssetCatalog& catalog = EnsureAssetCatalog(context);
+			(void)catalog;
+			const uint64_t frame = m_AssetRegistry->BeginFrame();
+			// 帧边界回收(低频):超期未用的资产在这里真正让出 GPU 资源。
+			if (frame % (AssetRegistry::kResidentIdleFrames / 2) == 1)
+				m_AssetRegistry->CollectGarbage();
+		}
+		// PURE-ECS:把抽取宿主装到场景上。**跨帧保持**(EndScene 不摘)—— 下一帧的
+		// `render-extract` 帧系统要在渲染之前就抽好;每帧摘掉会让它在 Play 里永远空转。
+		// 换场景时先把旧的摘掉;场景析构会回调 OnExtractSceneDestroyed;Shutdown 兜底。
+		if (m_ExtractSinkScene && m_ExtractSinkScene != scene)
+			m_ExtractSinkScene->SetRenderExtractSink(nullptr);
+		if (m_ActiveScene)
+		{
+			m_ActiveScene->SetRenderExtractSink(this);
+			m_ExtractSinkScene = m_ActiveScene;
+		}
+	}
+
+	void SceneRenderer::EndScene()
+	{
+		m_ActiveScene = nullptr;
+	}
+
+	void SceneRenderer::OnExtractSceneDestroyed(Scene& scene)
+	{
+		if (m_ExtractSinkScene == &scene)
+			m_ExtractSinkScene = nullptr;
+	}
+
+	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		RecordSubmit(camera, cameraTransform, Entity());
+	}
+
+	void SceneRenderer::SubmitScene(const Camera& camera, const glm::mat4& cameraTransform, Entity entity)
+	{
+		RecordSubmit(camera, cameraTransform, entity);
+	}
+
+	// ---- PURE-ECS:Extract 阶段(相机无关的收集)----
+	// 契约见 Renderer/RenderExtract.h:`render-extract` 帧系统(PreRender,排在 animation-system
+	// 之后)在 Play/Simulate 调用它;编辑态不跑帧系统,由 SubmitScene 兜底调同一份(幂等)。
+	void SceneRenderer::ExtractScene(Scene& scene, float deltaSeconds)
+	{
+		// 形参留给以后需要帧上下文的收集(LOD / 时间相关筛选);当前收集只看组件 ——
+		// 动画已由 animation-system 按同一步长推进过。
+		(void)deltaSeconds;
+		FrameExtract& extract = scene.RenderExtract();
+		// P6:插值缓冲由 Scene::EnsureInterpolatedWorldTransforms 一次算好(层级合成),
+		// draw.Model 指向它的元素 ⇒ 抽取期间不能再往里追加(会重分配,让已取指针失效)。
+		const bool interpolatePhysics = scene.IsPhysicsInterpolationEnabled();
+		const float interpolationAlpha = scene.FixedStepAlpha();
+		if (interpolatePhysics)
+			scene.EnsureInterpolatedWorldTransforms(interpolationAlpha);
+		// 开启插值时把 draw.Model 换成插值后的矩阵(指针稳定:见上面的 reserve);关闭时原样返回。
+		const auto resolveRenderMatrix = [&](entt::entity entity, const glm::mat4* authoritative) -> const glm::mat4*
+		{
+			if (!interpolatePhysics) return authoritative;
+			const auto found = extract.InterpolatedIndex.find(entity);
+			if (found == extract.InterpolatedIndex.end()) return authoritative;
+			return &extract.InterpolatedModels[found->second];
+		};
+		// ---- 3D 网格收集(D2c/D3) ----
+		// 收集前移到阴影通道之前:方向光阴影的正交矩阵要覆盖本帧所有网格实体的世界包围盒。
+		// 有 Material 时走材质(贴图/粗糙度/透明),否则沿用 Color 常量色(旧行为)。
+		{
+			auto meshView = scene.m_Registry.view<TransformComponent, MeshRendererComponent>();
+			for (auto entity : meshView)
+			{
+				// D5c-4a:同时挂 SkinnedMeshRendererComponent 的实体交给下面的蒙皮收集块,
+				// 这里跳过以免同一个实体画两遍(只挂 MeshRendererComponent 的实体逐字节不变)。
+				if (scene.m_Registry.all_of<SkinnedMeshRendererComponent>(entity) ||
+					scene.m_Registry.all_of<WhiteboxComponent>(entity) ||
+					scene.m_Registry.all_of<SplineComponent>(entity))
+					continue;
+				// Level 2.0 数据层:不在当前激活层的实体不参与本帧收集(昼夜/战损切换的真实剔除点)。
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& [transform, meshComponent] =
+					meshView.get<TransformComponent, MeshRendererComponent>(entity);
+				// D5:Mesh 指向 .wmodel 时优先加载(进程内缓存);坏文件/读不到时回退到
+				// 内置 primitive 并只警告一次,不阻断整帧渲染。PathId 直达缓存键,热路径不物化字符串。
+				Ref<Mesh> mesh;
+				if (meshComponent.Mesh.HasPath() || meshComponent.Mesh.Identity.IsValid())
+				{
+					std::string meshError;
+					mesh = ResolveMeshAsset(meshComponent.Mesh, &meshError);
+					if (!mesh)
+					{
+						const std::string& meshPath = StringPool::Get().PathOf(meshComponent.Mesh.Path);
+						WarnOnce(meshPath, "网格加载失败 '" + meshPath + "': " + meshError + "(回退到 Primitive)");
+					}
+				}
+				if (!mesh)
+				{
+					// D3:支持 sphere 原语(材质预览用;编辑器中也可直接摆球)。
+					const bool plane = meshComponent.Primitive == MeshRendererComponent::PrimitiveShape::Plane;
+					const bool sphere = meshComponent.Primitive == MeshRendererComponent::PrimitiveShape::Sphere;
+					Ref<Mesh>& primitive = plane ? m_DebugPlane : (sphere ? m_DebugSphere : m_DebugCube);
+					if (!primitive)
+						primitive = plane ? Mesh::CreateUnitPlane(1.0f)
+							: (sphere ? Mesh::CreateUnitSphere(1.0f, 32, 16) : Mesh::CreateUnitCube(1.0f));
+					mesh = primitive;
+				}
+				if (!mesh)
+					continue;
+
+				// 实体级材质:非空 = **覆盖**该网格全部 submesh 的材质槽。
+				// 加载失败(路径写错/文件坏)时回退到 Color/材质槽路径,不阻断整帧渲染。
+				Ref<Material> overrideMaterial;
+				if (meshComponent.Material.HasPath() || meshComponent.Material.Identity.IsValid())
+				{
+					std::string error;
+					overrideMaterial = ResolveMaterialAsset(meshComponent.Material, &error);
+					if (!overrideMaterial)
+					{
+						const std::string& materialPath = StringPool::Get().PathOf(meshComponent.Material.Path);
+						WarnOnce(materialPath, "材质加载失败 '" + materialPath + "': " + error + "(回退到 Color/材质槽)");
+					}
+				}
+				// 层级实体用求解后的世界矩阵:直接提交本地矩阵会让子实体不跟随父实体
+				// (实测"移动父项子项不动")。世界矩阵由本轮统一求解(见上方 UpdateWorldTransforms)。
+				const glm::mat4* modelMatrix = nullptr;
+				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				else
+					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
+
+				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
+
+				const auto makeDraw = [&](uint32_t submeshIndex, const Ref<Material>& material)
+				{
+					FrameMeshDraw draw;
+					draw.Entity = entity;
+					draw.Model = renderMatrix;
+					draw.MeshAsset = mesh;
+					draw.SubmeshIndex = submeshIndex;
+					draw.MaterialAsset = material;
+					draw.Color = meshComponent.Color;
+					draw.Transparent = material
+						&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+					// D8a:世界 AABB(逐子网格用子网格局部盒;整网格用整体盒)。
+					const MeshBounds& localBounds = (submeshIndex != UINT32_MAX
+						&& submeshIndex < mesh->GetSubmeshes().size())
+						? mesh->GetSubmeshes()[submeshIndex].Bounds
+						: mesh->GetBounds();
+					TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max,
+						draw.WorldMin, draw.WorldMax);
+					extract.Draws.push_back(std::move(draw));
+				};
+
+				if (mesh->HasSubmeshes() && !mesh->GetMeshes().empty())
+				{
+					// MeshIndex 越界(资产被替换/手填)回退到 mesh 0,不让实体整帧消失。
+					uint32_t meshIndex = 0;
+					if (meshComponent.MeshIndex > 0
+						&& static_cast<size_t>(meshComponent.MeshIndex) < mesh->GetMeshes().size())
+						meshIndex = static_cast<uint32_t>(meshComponent.MeshIndex);
+					const MeshRange& range = mesh->GetMeshes()[meshIndex];
+					const std::vector<std::string>& slots = mesh->GetMaterialSlots();
+					for (uint32_t offset = 0; offset < range.SubmeshCount; ++offset)
+					{
+						const uint32_t submeshIndex = range.FirstSubmesh + offset;
+						if (submeshIndex >= mesh->GetSubmeshes().size())
+							break;
+						Ref<Material> material = overrideMaterial;
+						if (!material)
+						{
+							const int32_t slot = mesh->GetSubmeshes()[submeshIndex].MaterialSlot;
+							if (slot >= 0 && static_cast<size_t>(slot) < slots.size() && !slots[slot].empty())
+							{
+								std::string slotError;
+								const AssetRef slotAsset { StringPool::Get().InternPath(slots[slot]), AssetId() };
+								material = ResolveMaterialAsset(slotAsset, &slotError);
+								if (!material)
+									WarnOnce(slots[slot], "材质槽加载失败 '" + slots[slot] + "': " + slotError);
+							}
+						}
+						makeDraw(submeshIndex, material);
+					}
+				}
+				else
+				{
+					makeDraw(UINT32_MAX, overrideMaterial);
+				}
+			}
+		}
+
+		// ---- D5c-4a:蒙皮网格收集(SkinnedMeshRendererComponent) ----
+		// 与静态路径同一套网格/材质/层级矩阵口径,只是多了"该实体本帧的调色板"并标记 Skinned。
+		// 组件没有 Color 字段:常量色路径用白色(等价于 Renderer3D::Submit 的默认基色)。
+		{
+			auto skinnedView = scene.m_Registry.view<TransformComponent, SkinnedMeshRendererComponent>();
+			for (auto entity : skinnedView)
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& [transform, skinned] =
+					skinnedView.get<TransformComponent, SkinnedMeshRendererComponent>(entity);
+				if (!skinned.Mesh.HasPath() && !skinned.Mesh.Identity.IsValid())
+				{
+					WarnOnce("skinned-path:" + std::to_string(static_cast<uint32_t>(entity)),
+						"蒙皮网格缺少 Mesh(实体 " + std::to_string(static_cast<uint32_t>(entity))
+							+ "):跳过该实体的绘制");
+					continue;
+				}
+				std::string meshError;
+				Ref<Mesh> mesh = ResolveMeshAsset(skinned.Mesh, &meshError);
+				if (!mesh)
+				{
+					const std::string& meshPath = StringPool::Get().PathOf(skinned.Mesh.Path);
+					WarnOnce(meshPath, "网格加载失败 '" + meshPath + "': " + meshError);
+					continue;
+				}
+				// 实体级材质:非空 = 覆盖该网格全部 submesh 的材质槽(与静态路径同语义)。
+				Ref<Material> overrideMaterial;
+				if (skinned.Material.HasPath() || skinned.Material.Identity.IsValid())
+				{
+					std::string error;
+					overrideMaterial = ResolveMaterialAsset(skinned.Material, &error);
+					if (!overrideMaterial)
+					{
+						const std::string& materialPath = StringPool::Get().PathOf(skinned.Material.Path);
+						WarnOnce(materialPath, "材质加载失败 '" + materialPath + "': " + error + "(回退到 Color/材质槽)");
+					}
+				}
+				// 层级实体用求解后的世界矩阵(与静态路径同一约定)。
+				const glm::mat4* modelMatrix = nullptr;
+				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				else
+					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
+				const std::vector<glm::mat4>* palette = nullptr;
+				if (const auto* graphPalette = AnimGraphSystem::GetPalette(entity))
+					palette = graphPalette;
+				else
+					palette = AnimationSystem::GetPalette(entity);
+
+				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
+
+				const auto makeSkinnedDraw = [&](uint32_t submeshIndex, const Ref<Material>& material)
+				{
+					FrameMeshDraw draw;
+					draw.Entity = entity;
+					draw.Model = renderMatrix;
+					draw.MeshAsset = mesh;
+					draw.SubmeshIndex = submeshIndex;
+					draw.MaterialAsset = material;
+					draw.Color = glm::vec4(1.0f);
+					draw.Transparent = material
+						&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+					draw.Skinned = true;
+					draw.Palette = palette;
+					const MeshBounds& localBounds = (submeshIndex != UINT32_MAX
+						&& submeshIndex < mesh->GetSubmeshes().size())
+						? mesh->GetSubmeshes()[submeshIndex].Bounds
+						: mesh->GetBounds();
+					TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max,
+						draw.WorldMin, draw.WorldMax);
+					extract.Draws.push_back(std::move(draw));
+				};
+
+				if (mesh->HasSubmeshes() && !mesh->GetMeshes().empty())
+				{
+					// MeshIndex 越界回退到 mesh 0(与静态路径同一规则)。
+					uint32_t meshIndex = 0;
+					if (skinned.MeshIndex > 0
+						&& static_cast<size_t>(skinned.MeshIndex) < mesh->GetMeshes().size())
+						meshIndex = static_cast<uint32_t>(skinned.MeshIndex);
+					const MeshRange& range = mesh->GetMeshes()[meshIndex];
+					const std::vector<std::string>& slots = mesh->GetMaterialSlots();
+					for (uint32_t offset = 0; offset < range.SubmeshCount; ++offset)
+					{
+						const uint32_t submeshIndex = range.FirstSubmesh + offset;
+						if (submeshIndex >= mesh->GetSubmeshes().size())
+							break;
+						Ref<Material> material = overrideMaterial;
+						if (!material)
+						{
+							const int32_t slot = mesh->GetSubmeshes()[submeshIndex].MaterialSlot;
+							if (slot >= 0 && static_cast<size_t>(slot) < slots.size() && !slots[slot].empty())
+							{
+								std::string slotError;
+								const AssetRef slotAsset { StringPool::Get().InternPath(slots[slot]), AssetId() };
+								material = ResolveMaterialAsset(slotAsset, &slotError);
+								if (!material)
+									WarnOnce(slots[slot], "材质槽加载失败 '" + slots[slot] + "': " + slotError);
+							}
+						}
+						makeSkinnedDraw(submeshIndex, material);
+					}
+				}
+				else
+				{
+					makeSkinnedDraw(UINT32_MAX, overrideMaterial);
+				}
+			}
+		}
+
+		// ---- 3D 白盒原型几何体收集 (WhiteboxComponent) ----
+		{
+			auto whiteboxView = scene.m_Registry.view<TransformComponent, WhiteboxComponent>();
+			for (auto entity : whiteboxView)
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				if (scene.m_Registry.all_of<MeshRendererComponent>(entity))
+				{
+					const auto& mr = scene.m_Registry.get<MeshRendererComponent>(entity);
+					if (mr.Mesh.HasPath() || mr.Mesh.Identity.IsValid())
+						continue;
+				}
+
+				const auto& [transform, wb] =
+					whiteboxView.get<TransformComponent, WhiteboxComponent>(entity);
+
+				Ref<Mesh> mesh = GetOrCreateWhiteboxMesh(wb);
+				if (!mesh)
+					continue;
+
+				Ref<Material> material;
+				glm::vec4 color(0.40f, 0.42f, 0.45f, 1.0f);
+				if (scene.m_Registry.all_of<MeshRendererComponent>(entity))
+				{
+					const auto& mr = scene.m_Registry.get<MeshRendererComponent>(entity);
+					color = mr.Color;
+					if (mr.Material.HasPath() || mr.Material.Identity.IsValid())
+					{
+						std::string error;
+						material = ResolveMaterialAsset(mr.Material, &error);
+					}
+				}
+
+				const glm::mat4* modelMatrix = nullptr;
+				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				else
+					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
+
+				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
+
+				FrameMeshDraw draw;
+				draw.Entity = entity;
+				draw.Model = renderMatrix;
+				draw.MeshAsset = mesh;
+				draw.SubmeshIndex = UINT32_MAX;
+				draw.MaterialAsset = material;
+				draw.Color = color;
+				draw.Transparent = material
+					&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+				const MeshBounds& localBounds = mesh->GetBounds();
+				TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max, draw.WorldMin, draw.WorldMax);
+				extract.Draws.push_back(std::move(draw));
+			}
+		}
+
+		// ---- 3D 样条线道路带状网格收集 (SplineComponent) ----
+		{
+			auto splineView = scene.m_Registry.view<TransformComponent, SplineComponent>();
+			for (auto entity : splineView)
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& [transform, splineComp] =
+					splineView.get<TransformComponent, SplineComponent>(entity);
+
+				if (!splineComp.ExtrudeRoad)
+					continue;
+
+				Ref<Mesh> mesh = GetOrCreateSplineMesh(scene, entity, splineComp);
+				if (!mesh)
+					continue;
+
+				Ref<Material> material;
+				glm::vec4 color(0.28f, 0.29f, 0.32f, 1.0f);
+				if (splineComp.SplineMeshAsset.HasPath() || splineComp.SplineMeshAsset.Identity.IsValid())
+				{
+					std::string error;
+					material = ResolveMaterialAsset(splineComp.SplineMeshAsset, &error);
+				}
+				if (!material && scene.m_Registry.all_of<MeshRendererComponent>(entity))
+				{
+					const auto& mr = scene.m_Registry.get<MeshRendererComponent>(entity);
+					color = mr.Color;
+					if (mr.Material.HasPath() || mr.Material.Identity.IsValid())
+					{
+						std::string error;
+						material = ResolveMaterialAsset(mr.Material, &error);
+					}
+				}
+
+				const glm::mat4* modelMatrix = nullptr;
+				if (scene.m_Registry.all_of<WorldTransformComponent>(entity))
+					modelMatrix = &scene.m_Registry.get<WorldTransformComponent>(entity).Matrix;
+				else
+					modelMatrix = &scene.m_Registry.get_or_emplace<WorldTransformComponent>(entity, transform.GetLocalMatrix()).Matrix;
+
+				const glm::mat4* renderMatrix = resolveRenderMatrix(entity, modelMatrix);
+
+				FrameMeshDraw draw;
+				draw.Entity = entity;
+				draw.Model = renderMatrix;
+				draw.MeshAsset = mesh;
+				draw.SubmeshIndex = UINT32_MAX;
+				draw.MaterialAsset = material;
+				draw.Color = color;
+				draw.Transparent = material
+					&& material->GetDesc().BlendMode == MaterialBlendMode::Transparent;
+				const MeshBounds& localBounds = mesh->GetBounds();
+				TransformAabb(*modelMatrix, localBounds.Min, localBounds.Max, draw.WorldMin, draw.WorldMax);
+				extract.Draws.push_back(std::move(draw));
+			}
+		}
+
+		// ---- 3D 物理水面网格收集 (WaterBodyComponent) ----
+		{
+			auto waterView = scene.m_Registry.view<TransformComponent, WaterBodyComponent>();
+			for (auto entity : waterView)
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& [transform, waterComp] =
+					waterView.get<TransformComponent, WaterBodyComponent>(entity);
+
+				glm::vec2 extents(
+					transform.Scale.x > 1.01f ? transform.Scale.x : 100.0f,
+					transform.Scale.z > 1.01f ? transform.Scale.z : 100.0f);
+
+				float sceneTime = static_cast<float>(scene.GetTime().ElapsedSeconds);
+				if (sceneTime <= 0.0001f)
+				{
+					m_WaterAccumulatedTime += (deltaSeconds > 0.0f && deltaSeconds < 1.0f) ? deltaSeconds : 0.016f;
+					sceneTime = m_WaterAccumulatedTime;
+				}
+
+				std::vector<WaterMeshVertex> vertices;
+				std::vector<uint32_t> indices;
+				const uint32_t subs = std::clamp(static_cast<uint32_t>(waterComp.GridResolution), 8u, 64u);
+
+				glm::mat4 waterModel(1.0f);
+				if (waterComp.Type == WaterBodyComponent::WaterType::Ocean)
+				{
+					glm::vec3 camPos(0.0f);
+					for (auto camEnt : scene.m_Registry.view<CameraComponent, TransformComponent>())
+					{
+						const auto& c = scene.m_Registry.get<CameraComponent>(camEnt);
+						if (c.Primary)
+						{
+							camPos = scene.m_Registry.get<TransformComponent>(camEnt).Location;
+							break;
+						}
+					}
+					WaterSimulation::GenerateOceanCameraCenteredMesh(
+						waterComp, camPos, 2.0f, 150.0f, 3500.0f, 48, 24, 64, sceneTime, vertices, indices);
+					waterModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, transform.Location.y, 0.0f));
+				}
+				else
+				{
+					WaterSimulation::GenerateWaterSurfaceMesh(waterComp, extents, subs, sceneTime, vertices, indices);
+					waterModel = glm::translate(glm::mat4(1.0f), transform.Location);
+					waterModel = glm::rotate(waterModel, transform.Rotation.z, glm::vec3(0, 0, 1));
+					waterModel = glm::rotate(waterModel, transform.Rotation.y, glm::vec3(0, 1, 0));
+					waterModel = glm::rotate(waterModel, transform.Rotation.x, glm::vec3(1, 0, 0));
+				}
+
+				MeshDesc desc;
+				desc.DebugName = "WaterSurfaceMesh";
+				desc.Layout = Mesh::MakeStandardLayout();
+				desc.VertexLayoutId = Mesh::kVertexLayoutStandard;
+				desc.Indices = std::move(indices);
+				desc.VertexData.resize(vertices.size() * sizeof(WaterMeshVertex));
+				std::memcpy(desc.VertexData.data(), vertices.data(), desc.VertexData.size());
+
+				Ref<Mesh> mesh = Mesh::Create(desc);
+				if (!mesh)
+					continue;
+
+				const uint32_t entityId = static_cast<uint32_t>(entity);
+				auto it = m_WaterMeshCache.find(entityId);
+				if (it != m_WaterMeshCache.end() && it->second)
+				{
+					Renderer3D::PurgeMeshGpu(it->second.get());
+				}
+				m_WaterMeshCache[entityId] = mesh;
+				m_WaterModelMatrices[entityId] = waterModel;
+
+				FrameMeshDraw draw;
+				draw.Entity = entity;
+				draw.Model = &m_WaterModelMatrices[entityId];
+				draw.MeshAsset = mesh;
+				draw.SubmeshIndex = UINT32_MAX;
+				draw.MaterialAsset = nullptr;
+				const float alpha = std::clamp(1.0f - waterComp.WaterClarity * 0.02f, 0.6f, 0.95f);
+				draw.Color = glm::vec4(waterComp.WaterColor, alpha);
+				draw.Transparent = true;
+
+				const MeshBounds& localBounds = mesh->GetBounds();
+				TransformAabb(waterModel, localBounds.Min, localBounds.Max, draw.WorldMin, draw.WorldMax);
+				extract.Draws.push_back(std::move(draw));
+			}
+		}
+
+		// ---- D4:灯光收集(registry 遍历顺序 = 截断顺序)+ 方向光阴影矩阵 + 灯光 UBO ----
+		LightRig lightRig;
+		{
+			std::vector<DirectionalLightData> directionalLights;
+			for (auto entity : scene.m_Registry.view<DirectionalLightComponent>())
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& light = scene.m_Registry.get<DirectionalLightComponent>(entity);
+				directionalLights.push_back({ light.Color, light.Intensity, light.Direction, light.CastShadow });
+			}
+			std::vector<PointLightData> pointLights;
+			for (auto entity : scene.m_Registry.view<PointLightComponent>())
+			{
+				if (!scene.IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& light = scene.m_Registry.get<PointLightComponent>(entity);
+				// 点光位置取实体世界位置(有层级时用求解后的世界矩阵,与网格同一约定)。
+				glm::vec3 position { 0.0f };
+				if (const auto* world = scene.m_Registry.try_get<WorldTransformComponent>(entity))
+					position = glm::vec3(world->Matrix[3]);
+				else if (const auto* transform = scene.m_Registry.try_get<TransformComponent>(entity))
+					position = transform->Location;
+				pointLights.push_back({ light.Color, light.Intensity, position, light.Range });
+			}
+			AmbientLightData ambientLight;
+			bool hasAmbient = false;
+			for (auto entity : scene.m_Registry.view<AmbientLightComponent>())
+			{
+				// 场景级:多盏时第一盏生效(与上限截断同一"registry 顺序"语义)。
+				const auto& light = scene.m_Registry.get<AmbientLightComponent>(entity);
+				ambientLight = { light.Color, light.Intensity };
+				hasAmbient = true;
+				break;
+			}
+			// 天气大气与生物群系光照联动
+			bool hasWeather = false;
+			WeatherAtmosphereParams weatherParams;
+			if (!scene.m_Registry.view<WeatherSystemComponent>().empty())
+			{
+				weatherParams = WeatherSystem::GetAtmosphere(scene);
+				hasWeather = true;
+			}
+
+			if (hasWeather)
+			{
+				const float dayWeight = glm::smoothstep(-1.0f, 1.0f, weatherParams.SunElevation);
+				const glm::vec3 activeLightDir = (dayWeight > 0.5f) ? weatherParams.SunDirection : weatherParams.MoonDirection;
+				const glm::vec3 activeLightColor = glm::mix(weatherParams.MoonLightColor, weatherParams.SunLightColor, dayWeight);
+				float activeLightIntensity = glm::mix(weatherParams.MoonLightIntensity, weatherParams.SunLightIntensity, dayWeight);
+
+				// 采样相机/焦点位置动态流云投影衰减 (Cloud Shadows)
+				glm::vec3 camPos(0.0f);
+				for (auto camEnt : scene.m_Registry.view<CameraComponent, TransformComponent>())
+				{
+					const auto& c = scene.m_Registry.get<CameraComponent>(camEnt);
+					if (c.Primary)
+					{
+						camPos = scene.m_Registry.get<TransformComponent>(camEnt).Location;
+						break;
+					}
+				}
+				const float cloudShadow = WeatherSimulation::SampleCloudShadow(camPos, weatherParams, static_cast<float>(scene.GetTime().ElapsedSeconds));
+				activeLightIntensity *= cloudShadow;
+
+				if (directionalLights.empty())
+				{
+					directionalLights.push_back({ activeLightColor, activeLightIntensity, activeLightDir, false });
+				}
+				else
+				{
+					for (auto& dirLight : directionalLights)
+					{
+						dirLight.Color = activeLightColor;
+						dirLight.Intensity = activeLightIntensity;
+						dirLight.Direction = activeLightDir;
+					}
+				}
+
+				if (!hasAmbient)
+				{
+					ambientLight = { weatherParams.AmbientColor, 1.0f };
+					hasAmbient = true;
+				}
+				else
+				{
+					ambientLight.Color = weatherParams.AmbientColor;
+				}
+			}
+
+			const bool glDepthConvention = Renderer::GetBackendName() != "vulkan";
+			extract.Lights = Renderer3D::BuildLightRig(directionalLights, pointLights,
+				hasAmbient ? &ambientLight : nullptr, glDepthConvention);
+		}
+
+	}
+
+	void SceneRenderer::RecordSubmit(const Camera& camera, const glm::mat4& cameraTransform, Entity selectedEntity)
+	{
+		if (!m_ActiveScene)
+			return;
+
+		// D8a:场景提交总耗时(统计阈值起点,与 Renderer 的帧时间口径不同:
+		// 这里只量"收集 → 剔除 → 阴影 → 主通道 → 命令缓冲提交"这一段 CPU 时间)。
+		// 同一个区间同时开一个遥测作用域 ⇒ trace 里的 "Scene.Submit" 与 SceneStatistics
+		// 的 SceneMilliseconds 是**同一段**,不必在两个数字之间做对账。
+		WLD_TRACE_SCOPE("Scene.Submit");
+		// 归因标签:这段里产生的堆分配算在 "Renderer" 名下(零开销,见 ProfilingMacros)。
+		WLD_MEM_TAG("Renderer");
+		const auto sceneStart = std::chrono::steady_clock::now();
+		glm::mat4 viewProjection = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+		// 编辑/运行期都会改 Transform:每帧先重算层级世界矩阵,子实体才会跟随父实体
+		// (此前只有序列化/Prefab 路径求解,见 Hierarchy.h)。
+		// PURE-ECS:改成**帧内幂等** —— Play 时 `transform-system` 已经算过,这里是 no-op;
+		// 编辑态不跑帧系统 ⇒ 由这里兜底(此前两处各跑一遍,Play 时每帧整棵树白传播一次)。
+		m_ActiveScene->EnsureWorldTransforms();
+		// D5c-4a:先推进骨骼动画(写回 Time + 采样 → 节点世界矩阵 → 调色板),再收集绘制 ——
+		// 蒙皮提交拿的是本帧的调色板。步长来自宿主 SetDeltaSeconds(默认 0 = 不推进)。
+		// 同样幂等:Play 时 `animation-system`(PreRender 阶段)已经推进过。
+		m_ActiveScene->EnsureAnimationAdvanced(Timestep(m_DeltaSeconds));
+		// 后端适配:场景渲染到**离屏纹理**(WUI 用固定 UV 贴到视口),
+		// 因此 Vulkan 只补深度范围、**不翻 Y**(翻了会在视口里上下颠倒,实测)。
+		viewProjection = AdaptViewProjectionForOffscreen(viewProjection, Renderer::GetBackendName() == "vulkan");
+		const uint32_t slot = FrameSlot();
+		// D8b:该槽位 3 帧后被复用,上一轮提交的 GPU 工作已完成(帧栅栏)→ 读回上一轮时间戳。
+		const double gpuMilliseconds = ReadGpuTiming(slot);
+		m_CameraBuffers[slot]->SetData(&viewProjection, sizeof(glm::mat4));
+
+		// PURE-ECS:本帧要画什么来自 Extract 阶段(相机无关)。Play/Simulate 由 `render-extract`
+		// 帧系统填好;编辑态不跑帧系统,这里的 Ensure 兜底(同一份实现、幂等)。
+		m_ActiveScene->EnsureRenderExtract(m_DeltaSeconds);
+		FrameExtract& extract = m_ActiveScene->RenderExtract();
+		std::vector<FrameMeshDraw>& draws = extract.Draws;
+
+		// 重置 MeshLODManager 统计并获取相机位置
+		MeshLODManager::Get().ResetStats();
+		const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
+
+		const auto& reg = static_cast<const Scene&>(*m_ActiveScene).GetRegistry();
+		std::unordered_set<uint32_t> culledEntities;
+
+		// 对带有 MeshLODComponent 的实体计算相机距离，评估 LOD 并记录结果
+		auto lodView = reg.view<MeshLODComponent>();
+		for (auto entity : lodView)
+		{
+			if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+				continue;
+			glm::vec3 entityPos(0.0f);
+			if (const auto* wt = reg.try_get<WorldTransformComponent>(entity))
+				entityPos = glm::vec3(wt->Matrix[3]);
+			else if (const auto* tc = reg.try_get<TransformComponent>(entity))
+				entityPos = tc->Location;
+
+			const float dist = glm::distance(cameraPos, entityPos);
+			auto& mutReg = const_cast<entt::registry&>(reg);
+			auto& comp = mutReg.get<MeshLODComponent>(entity);
+			const uint8_t targetLOD = MeshLODManager::Get().EvaluateLOD(dist, comp, comp.CurrentLOD);
+			comp.CurrentLOD = targetLOD;
+			MeshLODManager::Get().RecordLODResult(targetLOD);
+
+			if (targetLOD == MeshLODEvaluator::kCulled)
+			{
+				culledEntities.insert(static_cast<uint32_t>(entity));
+			}
+		}
+
+		// 对 draws 应用 LOD 网格切换与着色
+		for (auto& draw : draws)
+		{
+			if (draw.Entity == entt::null || !reg.valid(draw.Entity))
+				continue;
+			if (const auto* lodComp = reg.try_get<MeshLODComponent>(draw.Entity))
+			{
+				const uint8_t currentLOD = lodComp->CurrentLOD;
+				if (currentLOD >= 1 && currentLOD != MeshLODEvaluator::kCulled)
+				{
+					Ref<Mesh> lodMesh;
+					std::string err;
+
+					// 1. 优先检查组件上的特殊替代体覆盖 (CustomMeshOverride)
+					if (lodComp->CustomMeshOverride.HasPath())
+					{
+						lodMesh = ResolveMeshAsset(lodComp->CustomMeshOverride, &err);
+					}
+					else
+					{
+						// 2. 约定式自动解析 (Zero-Config Auto LOD Resolution: 槽位为空或 currentLOD >= 3)
+						std::string basePath;
+						if (const auto* mr = reg.try_get<MeshRendererComponent>(draw.Entity))
+						{
+							if (mr->Mesh.HasPath())
+								basePath = StringPool::Get().PathOf(mr->Mesh.Path);
+						}
+						if (basePath.empty())
+						{
+							if (const auto* sm = reg.try_get<SkinnedMeshRendererComponent>(draw.Entity))
+							{
+								if (sm->Mesh.HasPath())
+									basePath = StringPool::Get().PathOf(sm->Mesh.Path);
+							}
+						}
+						if (basePath.empty() && draw.MeshAsset)
+						{
+							const std::string& debugName = draw.MeshAsset->GetDesc().DebugName;
+							if (debugName.size() >= 7 && debugName.compare(debugName.size() - 7, 7, ".wmodel") == 0)
+								basePath = debugName;
+						}
+
+						if (!basePath.empty())
+						{
+							std::filesystem::path p(basePath);
+							std::string ext = p.extension().string();
+							for (char& c : ext)
+							{
+								if (c >= 'A' && c <= 'Z')
+									c += ('a' - 'A');
+							}
+
+							if (ext == ".wmodel")
+							{
+								std::filesystem::path parentDir = p.parent_path();
+								std::string stem = p.stem().string();
+								const size_t lodPos = stem.rfind("_LOD");
+								if (lodPos != std::string::npos && lodPos + 4 < stem.size())
+								{
+									bool allDigits = true;
+									for (size_t i = lodPos + 4; i < stem.size(); ++i)
+									{
+										const char c = stem[i];
+										if (c < '0' || c > '9')
+										{
+											allDigits = false;
+											break;
+										}
+									}
+									if (allDigits)
+										stem = stem.substr(0, lodPos);
+								}
+
+								const std::string lodFilename = stem + "_LOD" + std::to_string(currentLOD) + ".wmodel";
+								const std::filesystem::path lodPath = parentDir.empty() ? std::filesystem::path(lodFilename) : (parentDir / lodFilename);
+								const std::string lodPathStr = lodPath.generic_string();
+
+								const AssetRef autoLODRef = AssetRef::FromPath(lodPathStr);
+								lodMesh = ResolveMeshAsset(autoLODRef, &err);
+							}
+						}
+					}
+
+					if (lodMesh)
+					{
+						draw.MeshAsset = lodMesh;
+						if (draw.SubmeshIndex != UINT32_MAX && (!lodMesh->HasSubmeshes() || draw.SubmeshIndex >= lodMesh->GetSubmeshes().size()))
+							draw.SubmeshIndex = UINT32_MAX;
+					}
+				}
+
+				if (MeshLODManager::Get().IsLODColorationEnabled())
+				{
+					draw.Color = MeshLODManager::Get().GetLODColor(currentLOD);
+				}
+			}
+		}
+
+		// ---- D8a:相机视锥剔除与八叉树加速 ----
+		const bool cullingEnabled = RenderSettings::CullingEnabled();
+		std::vector<uint32_t> visibleDraws;
+		visibleDraws.reserve(draws.size());
+		double cullMilliseconds = 0.0;
+		{
+			const auto cullStart = std::chrono::steady_clock::now();
+			const size_t drawCount = draws.size();
+			const FrustumPlanes cameraFrustum = ExtractFrustumPlanes(viewProjection);
+			auto* visibleMask = static_cast<std::uint8_t*>(FrameArena::Get().Allocate(drawCount, alignof(std::uint8_t)));
+			if (!cullingEnabled)
+			{
+				for (uint32_t index = 0; index < drawCount; ++index)
+				{
+					if (culledEntities.find(static_cast<uint32_t>(draws[index].Entity)) == culledEntities.end())
+						visibleDraws.push_back(index);
+				}
+			}
+			else
+			{
+				// 八叉树视锥剔除查询加速
+				if (m_ActiveScene->GetOctree().GetTotalElementCount() > 0)
+				{
+					std::vector<uint32_t> octreeVisibleEntities;
+					m_ActiveScene->GetOctree().QueryFrustum(cameraFrustum, octreeVisibleEntities);
+					std::unordered_set<uint32_t> octreeVisibleSet(octreeVisibleEntities.begin(), octreeVisibleEntities.end());
+
+					for (size_t index = 0; index < drawCount; ++index)
+					{
+						const uint32_t entId = static_cast<uint32_t>(draws[index].Entity);
+						if (culledEntities.find(entId) != culledEntities.end())
+						{
+							visibleMask[index] = 0;
+						}
+						else if (octreeVisibleSet.find(entId) != octreeVisibleSet.end())
+						{
+							visibleMask[index] = 1;
+						}
+						else if (!m_ActiveScene->m_Registry.valid(draws[index].Entity)
+							|| m_ActiveScene->m_Registry.all_of<WaterBodyComponent>(draws[index].Entity)
+							|| m_ActiveScene->m_Registry.all_of<WhiteboxComponent>(draws[index].Entity)
+							|| m_ActiveScene->m_Registry.all_of<SplineComponent>(draws[index].Entity))
+						{
+							visibleMask[index] = AabbInFrustum(cameraFrustum, draws[index].WorldMin, draws[index].WorldMax) ? 1 : 0;
+						}
+						else
+						{
+							visibleMask[index] = 0;
+						}
+					}
+				}
+				else
+				{
+					const auto getAabb = [&draws](std::size_t i, glm::vec3& outMin, glm::vec3& outMax)
+					{
+						outMin = draws[i].WorldMin;
+						outMax = draws[i].WorldMax;
+					};
+					const std::size_t tileCount = Math::Simd::AabbCullTileCount(drawCount);
+					const auto cullTile = [&](std::size_t tile)
+					{
+						Math::Simd::AabbInFrustumTile(cameraFrustum.Planes, drawCount, tile, getAabb, visibleMask);
+					};
+
+					if (drawCount >= kParallelCullThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
+					{
+						JobSystem::ParallelFor(static_cast<uint32_t>(tileCount), 4, cullTile);
+					}
+					else
+					{
+						for (std::size_t tile = 0; tile < tileCount; ++tile)
+							cullTile(tile);
+					}
+
+					for (size_t index = 0; index < drawCount; ++index)
+					{
+						if (culledEntities.find(static_cast<uint32_t>(draws[index].Entity)) != culledEntities.end())
+							visibleMask[index] = 0;
+					}
+				}
+
+				// 按原索引顺序串行压缩 ⇒ visibleDraws 的顺序与旧实现逐元素相同(绘制顺序/像素不变)。
+				for (uint32_t index = 0; index < drawCount; ++index)
+					if (visibleMask[index] != 0u)
+						visibleDraws.push_back(index);
+			}
+			cullMilliseconds = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - cullStart).count();
+			WLD_TRACE_COUNTER("Scene.CullUs", static_cast<int64_t>(cullMilliseconds * 1000.0));
+		}
+		uint32_t shadowCasters = 0;
+
+		LightRig lightRig = extract.Lights;
+
+		// D8a2:项目清单 `rendering.shadows=false` → 整条阴影通道关掉(投影者不提交、
+		// 主通道不采样)。WLD_NO_SHADOWS=1 同样强制关闭(自动化)。
+		const bool csmDebugActive = Renderer3D::IsCascadeDebugVisualization() || (std::getenv("WLD_CSM_DEBUG") != nullptr && std::strcmp(std::getenv("WLD_CSM_DEBUG"), "0") != 0);
+		if (!RenderSettings::ShadowsEnabled() && !csmDebugActive && lightRig.ShadowCaster)
+		{
+			lightRig.ShadowCaster = false;
+			lightRig.Uniforms.ShadowParams.x = 0.0f;
+		}
+
+		// 4 级 CSM 级联正交投影与切片深度计算
+		glm::mat4 cascadeVP[4] = { glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f) };
+		if (lightRig.ShadowCaster && !draws.empty())
+		{
+			// 从主相机提取参数
+			const glm::mat4& proj = camera.GetProjectionMatrix();
+			float fovY = glm::radians(60.0f);
+			float aspect = 16.0f / 9.0f;
+			float nearClip = 0.1f;
+			if (proj[1][1] > 0.001f && proj[0][0] > 0.001f)
+			{
+				fovY = 2.0f * std::atan(1.0f / proj[1][1]);
+				aspect = proj[1][1] / proj[0][0];
+			}
+			if (std::abs(proj[2][2] - 1.0f) > 0.001f && std::abs(proj[3][2]) > 0.001f)
+			{
+				nearClip = std::abs(proj[3][2] / (proj[2][2] - 1.0f));
+				nearClip = std::max(0.05f, std::min(nearClip, 2.0f));
+			}
+
+			CSMConfig config;
+			config.CascadeCount = 4;
+			config.MaxShadowDistance = 200.0f;
+			config.SplitLambda = 0.85f;
+			config.ShadowResolution = Renderer3D::GetShadowMapSize() / 2;
+
+			const glm::vec3 lightDir = glm::normalize(glm::vec3(lightRig.Uniforms.Lights[0].DirectionRange));
+			std::array<CSMCascade, kMaxShadowCascades> cascades;
+			CSM::BuildCascades(fovY, aspect, nearClip, cameraTransform, lightDir, config, cascades);
+
+			const bool isVulkan = (Renderer::GetBackendName() == "vulkan");
+			glm::vec4 splits(cascades[0].SplitDistance, cascades[1].SplitDistance,
+							 cascades[2].SplitDistance, cascades[3].SplitDistance);
+			for (int i = 0; i < 4; ++i)
+			{
+				cascadeVP[i] = AdaptViewProjectionForOffscreen(cascades[i].ViewProjection, isVulkan);
+			}
+			Renderer3D::ApplyShadowCascades(lightRig, cascadeVP, splits);
+		}
+
+		m_LightBuffers[slot]->SetData(&lightRig.Uniforms, sizeof(lightRig.Uniforms));
+
+		// D8a:场景提交前后的 Renderer3D 计数器快照(单调累计)→ 差值即本帧增量。
+		const Renderer3D::Statistics statsBeforeScene = Renderer3D::GetStats();
+		m_CommandBuffers[slot]->Begin();
+		// D8b(2026-10-06):起始时间戳提前到**阴影通道之前**,这样阴影通道与 3D/2D 主通道
+		// 都被量到。仍写在渲染通道之外(vkCmdWriteTimestamp 不能落在 render pass 内);
+		// 阴影关闭时只覆盖主通道,与旧的"仅主通道"口径一致。
+		BeginGpuTiming(slot);
+
+		// D4:方向光阴影通道(本帧 3D 主通道**之前**,同一命令缓冲):
+		// 4 级 CSM 级联正交投影渲染至 2×2 Atlas 深度贴图。
+		// CPU 侧 steady_clock 计时进 Stats/日志("光照数量上限与耗时可见"验收条款)。
+		double shadowPassMilliseconds = 0.0;
+		if (lightRig.Uniforms.ShadowParams.x > 0.5f)
+		{
+			const auto shadowStart = std::chrono::steady_clock::now();
+			std::vector<Rhi::ClearValue> shadowClears(2);
+			shadowClears[1].IsDepthStencil = true;
+			shadowClears[1].DepthStencil.Depth = 1.0f;
+			m_CommandBuffers[slot]->BeginRenderPass(Renderer3D::GetShadowRenderPass(),
+				Renderer3D::GetShadowFramebuffer(), shadowClears);
+			// set0(相机 + 灯光 UBO):binding 2 提供 u_ShadowViewProjections;
+			// 阴影管线不用 set2(材质),调用方只绑 0/1。
+			m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
+
+			Renderer3D::BeginShadowPass(m_CommandBuffers[slot]);
+
+			const float fullSize = static_cast<float>(Renderer3D::GetShadowMapSize());
+			const float halfSize = fullSize * 0.5f;
+
+			for (uint32_t c = 0; c < 4; ++c)
+			{
+				const float quadX = static_cast<float>(c % 2) * halfSize;
+				const float quadY = static_cast<float>(c / 2) * halfSize;
+				m_CommandBuffers[slot]->SetViewport({ quadX, quadY, halfSize, halfSize, 0.0f, 1.0f });
+				m_CommandBuffers[slot]->SetScissor({ static_cast<int32_t>(quadX), static_cast<int32_t>(quadY),
+													 static_cast<uint32_t>(halfSize), static_cast<uint32_t>(halfSize) });
+				Renderer3D::SetShadowCascade(c);
+
+				std::vector<uint32_t> shadowDraws;
+				if (cullingEnabled)
+				{
+					const FrustumPlanes cascadeFrustum = ExtractFrustumPlanes(cascadeVP[c]);
+					shadowDraws.reserve(draws.size());
+					for (uint32_t index = 0; index < draws.size(); ++index)
+					{
+						const FrameMeshDraw& draw = draws[index];
+						if (culledEntities.find(static_cast<uint32_t>(draw.Entity)) != culledEntities.end())
+							continue;
+						if (AabbInFrustum(cascadeFrustum, draw.WorldMin, draw.WorldMax))
+							shadowDraws.push_back(index);
+					}
+				}
+				else
+				{
+					shadowDraws.reserve(draws.size());
+					for (uint32_t index = 0; index < draws.size(); ++index)
+					{
+						if (culledEntities.find(static_cast<uint32_t>(draws[index].Entity)) != culledEntities.end())
+							continue;
+						shadowDraws.push_back(index);
+					}
+				}
+				shadowCasters += static_cast<uint32_t>(shadowDraws.size());
+
+				// D8b-2:投影者按 (mesh, submesh) 分桶,桶内 ≥4 个实例才合批(阴影不看材质)。
+				std::map<std::pair<const Mesh*, uint32_t>, std::vector<uint32_t>> shadowBuckets;
+				if (RenderSettings::Get().Instancing)
+				{
+					for (const uint32_t drawIndex : shadowDraws)
+					{
+						const FrameMeshDraw& draw = draws[drawIndex];
+						// D5c-4a:蒙皮投影者不参与实例化合批(调色板逐物体,per-instance 通道里没有它)。
+						if (draw.Skinned)
+							continue;
+						shadowBuckets[{ draw.MeshAsset.get(), draw.SubmeshIndex }].push_back(drawIndex);
+					}
+				}
+				for (const uint32_t drawIndex : shadowDraws)
+				{
+					const FrameMeshDraw& draw = draws[drawIndex];
+					// D5c-4a:蒙皮投影者走蒙皮入口。无论是否挂载动画系统，布局 2 (64B) 绝不能进入 32B 静态阴影管线
+					const bool isSkinnedMeshShadow = draw.MeshAsset && (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned);
+					if (draw.Skinned || isSkinnedMeshShadow)
+					{
+						static const std::vector<glm::mat4> s_IdentityPalette(128, glm::mat4(1.0f));
+						const glm::mat4* palData = (draw.Palette && !draw.Palette->empty()) ? draw.Palette->data() : s_IdentityPalette.data();
+						const uint32_t palCount = (draw.Palette && !draw.Palette->empty()) ? static_cast<uint32_t>(draw.Palette->size()) : static_cast<uint32_t>(s_IdentityPalette.size());
+						Renderer3D::SubmitShadowSkinned(draw.MeshAsset, draw.SubmeshIndex, *draw.Model, palData, palCount);
+						continue;
+					}
+					const auto found = shadowBuckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex });
+					if (found != shadowBuckets.end() && found->second.size() >= 4)
+						continue;   // 交给下面的实例化提交
+					// D5:逐 submesh 提交(每条独立对象槽位),多材质模型的投影才完整。
+					if (draw.SubmeshIndex == UINT32_MAX)
+						Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
+					else
+						Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
+				}
+				std::vector<glm::mat4> shadowTransforms;
+				for (auto& [key, indices] : shadowBuckets)
+				{
+					if (indices.size() < 4)
+						continue;
+					shadowTransforms.clear();
+					shadowTransforms.reserve(indices.size());
+					for (const uint32_t drawIndex : indices)
+						shadowTransforms.push_back(*draws[drawIndex].Model);
+					const Ref<Mesh>& shadowMesh = draws[indices.front()].MeshAsset;
+					if (Renderer3D::SubmitShadowInstanced(shadowMesh, key.second, shadowTransforms.data(),
+						static_cast<uint32_t>(indices.size())) != 0)
+						continue;
+					// 回退:逐物体补交这一桶(与上面同一条路径)。
+					for (const uint32_t drawIndex : indices)
+					{
+						const FrameMeshDraw& draw = draws[drawIndex];
+						if (draw.SubmeshIndex == UINT32_MAX)
+							Renderer3D::SubmitShadow(draw.MeshAsset, *draw.Model);
+						else
+							Renderer3D::SubmitShadowSubmesh(draw.MeshAsset, draw.SubmeshIndex, *draw.Model);
+					}
+				}
+				if constexpr (Detail::IsCompleteType<TerrainComponent>::value)
+				{
+					if (m_ActiveScene)
+					{
+						auto terrainView = m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>();
+						for (auto entity : terrainView)
+						{
+							if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+								continue;
+							const auto& [transform, comp] = terrainView.get<TransformComponent, TerrainComponent>(entity);
+							if (comp.CastShadow == 0)
+								continue;
+							auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+							if (data)
+							{
+								TerrainRenderSettings settings;
+								settings.Transform = transform.GetLocalMatrix();
+								settings.ChunkResolution = comp.ChunkResolution;
+								settings.LodDistanceRatio = comp.LodDistanceRatio;
+								settings.CastShadow = true;
+								settings.HoleCutoutEnabled = (comp.HoleCutoutEnabled != 0);
+								settings.EntityId = static_cast<int32_t>(entity);
+								TerrainRenderer::RenderTerrainShadow(*data, settings, c);
+							}
+						}
+					}
+				}
+			}
+			Renderer3D::EndShadowPass();
+			m_CommandBuffers[slot]->EndRenderPass();
+			shadowPassMilliseconds = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - shadowStart).count();
+		}
+		WLD_TRACE_COUNTER("Scene.ShadowCasters", static_cast<int64_t>(shadowCasters));
+		Renderer3D::ReportLighting(lightRig, shadowPassMilliseconds);
+
+		glm::vec4 clearColor(0.1f, 0.1f, 0.1f, 1.0f);
+		if (m_ActiveScene)
+		{
+			for (auto entity : m_ActiveScene->m_Registry.view<WeatherSystemComponent>())
+			{
+				const auto& wc = m_ActiveScene->m_Registry.get<WeatherSystemComponent>(entity);
+				const auto params = WeatherSimulation::ComputeAtmosphereParams(wc);
+				clearColor = params.SkyClearColor;
+				break;
+			}
+		}
+
+		std::vector<Rhi::ClearValue> clears(3);
+		clears[0].Color = { clearColor.r, clearColor.g, clearColor.b, clearColor.a };
+		const int minusOne = -1;
+		std::memcpy(&clears[1].Color, &minusOne, sizeof(int));
+		clears[2].IsDepthStencil = true;
+		clears[2].DepthStencil.Depth = 1.0f;
+
+		m_CommandBuffers[slot]->BeginRenderPass(m_RenderPass, m_Framebuffer, clears);
+		m_CommandBuffers[slot]->SetViewport({ 0, 0, static_cast<float>(m_Width), static_cast<float>(m_Height) });
+		// 管线把视口/裁剪都设为动态状态,绑定后必须先设置再绘制
+		// (VUID-vkCmdDrawIndexed-None-07832:动态裁剪未设置时状态未定义)。
+		m_CommandBuffers[slot]->SetScissor({ 0, 0, m_Width, m_Height });
+		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
+
+		// 全动态全天候天球天体通道 (Celestial Atmosphere Pass: 太阳、月球、星空与动态云层)
+		if (m_ActiveScene)
+		{
+			for (auto entity : m_ActiveScene->m_Registry.view<WeatherSystemComponent>())
+			{
+				const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
+				const auto weatherParams = WeatherSystem::GetAtmosphereAt(*m_ActiveScene, cameraPos);
+				RenderSkyDome(slot, viewProjection, cameraPos, weatherParams);
+				break;
+			}
+		}
+
+
+		// 开发钩子:WLD_DEBUG_CUBE=1 时在同一渲染通道里提交一个 3D 立方体,
+		// 作为 3D 通道(Pipeline/深度/网格缓冲)在双后端下的冒烟基线(D2b)。
+		if (std::getenv("WLD_DEBUG_CUBE"))
+		{
+			if (!m_DebugCube)
+				m_DebugCube = Mesh::CreateUnitCube(1.0f);
+			if (m_DebugCube)
+			{
+				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
+				// 放在画面右上方,避免与 2D 精灵基线区域重叠(便于像素校验)。
+				const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.78f, 0.62f, 0.0f))
+					* glm::rotate(glm::mat4(1.0f), glm::radians(35.0f), glm::vec3(0.0f, 1.0f, 0.0f))
+					* glm::rotate(glm::mat4(1.0f), glm::radians(22.0f), glm::vec3(1.0f, 0.0f, 0.0f))
+					* glm::scale(glm::mat4(1.0f), glm::vec3(0.42f));
+				Renderer3D::Submit(m_DebugCube, model, { 1.0f, 0.55f, 0.12f, 1.0f });
+				Renderer3D::EndScene();
+			}
+		}
+
+		// 3D 网格通道(D2c/D3):MeshRendererComponent 实体用 Transform 作模型矩阵;
+		// 提交顺序:D3 材质排序要求"先不透明、后透明",否则透明面会遮挡其后的不透明物体。
+		// 收集阶段已在阴影通道之前完成(见上方的 `draws`)。
+		{
+			if (!draws.empty())
+			{
+
+				Renderer3D::BeginScene(viewProjection, m_CommandBuffers[slot]);
+				// D8b-2:不透明 draw 按"同网格 + 同 submesh + 同材质 + 同色"分桶,
+				// 桶内 ≥4 个实例才用实例化合批(一次 DrawIndexed 画完整桶);不够 4 个的
+				// 继续逐物体提交(状态切换更少)。透明物体一律走原路径(排序语义优先)。
+				struct BatchKey
+				{
+					const Mesh* MeshPtr = nullptr;
+					uint32_t Submesh = 0;
+					const Material* MaterialPtr = nullptr;
+					glm::vec4 Color { 1.0f };
+					bool operator<(const BatchKey& other) const
+					{
+						return std::tie(MeshPtr, Submesh, MaterialPtr, Color.x, Color.y, Color.z, Color.w)
+							< std::tie(other.MeshPtr, other.Submesh, other.MaterialPtr,
+								other.Color.x, other.Color.y, other.Color.z, other.Color.w);
+					}
+				};
+				constexpr size_t kMinBatchInstances = 4;
+				std::map<BatchKey, std::vector<uint32_t>> buckets;
+				if (RenderSettings::Get().Instancing)
+				{
+					for (const uint32_t drawIndex : visibleDraws)
+					{
+						const FrameMeshDraw& draw = draws[drawIndex];
+						// D5c-4a:蒙皮 draw 不进实例化桶(调色板逐物体,合批没有 per-instance 通道)。
+						if (draw.Transparent || draw.Skinned)
+							continue;
+						buckets[{ draw.MeshAsset.get(), draw.SubmeshIndex, draw.MaterialAsset.get(),
+							draw.Color }].push_back(drawIndex);
+					}
+				}
+				const auto batchEligible = [&buckets, kMinBatchInstances](const FrameMeshDraw& draw)
+				{
+					const auto found = buckets.find({ draw.MeshAsset.get(), draw.SubmeshIndex,
+						draw.MaterialAsset.get(), draw.Color });
+					return found != buckets.end() && found->second.size() >= kMinBatchInstances;
+				};
+				// 稳定分组:不透明按原顺序;**透明按"到相机距离从远到近"**(D8 收尾 ——
+				// 不排序时后画的近物体会被先画的远物体混合盖掉,画面随视角抖)。
+				std::vector<uint32_t> transparentOrder;
+				{
+					const glm::vec3 cameraPosition = glm::vec3(cameraTransform[3]);
+					std::vector<std::pair<float, uint32_t>> sorted;
+					for (const uint32_t drawIndex : visibleDraws)
+					{
+						const FrameMeshDraw& draw = draws[drawIndex];
+						if (!draw.Transparent)
+							continue;
+						const glm::vec3 center = (draw.WorldMin + draw.WorldMax) * 0.5f;
+						const glm::vec3 delta = center - cameraPosition;
+						sorted.emplace_back(glm::dot(delta, delta), drawIndex);
+					}
+					std::stable_sort(sorted.begin(), sorted.end(),
+						[](const std::pair<float, uint32_t>& left, const std::pair<float, uint32_t>& right)
+						{
+							return left.first > right.first;   // 远的先画
+						});
+					transparentOrder.reserve(sorted.size());
+					for (const auto& [distance, drawIndex] : sorted)
+						transparentOrder.push_back(drawIndex);
+				}
+				for (const bool transparentPass : { false, true })
+				{
+					for (const uint32_t drawIndex : (transparentPass ? transparentOrder : visibleDraws))
+					{
+						const FrameMeshDraw& draw = draws[drawIndex];
+						// D8b-2:属于合批桶的不透明 draw 交给下面的实例化提交(避免重复画)。
+						if (!draw.Transparent && batchEligible(draw))
+							continue;
+						if (draw.Transparent != transparentPass)
+							continue;
+						// D7-1c:把实体 id 一起提交,写进 entity-id 附件供视口点选读回。
+						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
+						// D5c-4a:蒙皮实体走蒙皮管线(透明材质本阶段被 SubmitSkinned 拒绝)。
+						// 防御性安全隔离: 凡是布局 2 (SkinnedVertex, stride 64B) 的网格，不论是否配置动画调色板，
+						// 绝对不可进入 32B 静态管线(否则奇数顶点读骨骼权重导致大面积撕裂爆碎)！
+						const bool isSkinnedMeshMain = draw.MeshAsset && (draw.MeshAsset->GetVertexLayoutId() == Mesh::kVertexLayoutSkinned);
+						if (draw.Skinned || isSkinnedMeshMain)
+						{
+							uint32_t submitted = UINT32_MAX;
+							static const std::vector<glm::mat4> s_IdentityPalette(128, glm::mat4(1.0f));
+							const glm::mat4* palData = (draw.Palette && !draw.Palette->empty()) ? draw.Palette->data() : s_IdentityPalette.data();
+							const uint32_t palCount = (draw.Palette && !draw.Palette->empty()) ? static_cast<uint32_t>(draw.Palette->size()) : static_cast<uint32_t>(s_IdentityPalette.size());
+
+							if (draw.MaterialAsset)
+							{
+								submitted = Renderer3D::SubmitSkinned(draw.MeshAsset, draw.SubmeshIndex,
+									draw.MaterialAsset, *draw.Model, palData, palCount, entityId);
+							}
+							else
+							{
+								submitted = Renderer3D::SubmitSkinned(draw.MeshAsset, draw.SubmeshIndex,
+									draw.Color, *draw.Model, palData, palCount, entityId);
+							}
+							if (submitted != UINT32_MAX)
+								continue;
+
+							if (isSkinnedMeshMain)
+							{
+								const std::string meshName = draw.MeshAsset->GetDesc().DebugName;
+								WarnOnce("skinned-draw:" + meshName, draw.Transparent
+									? ("透明材质的蒙皮网格本阶段不支持(跳过 '" + meshName + "')")
+									: ("蒙皮提交被拒绝(调色板/对象槽位/每帧配额;跳过 '" + meshName + "')"));
+								continue;
+							}
+						}
+						if (draw.SubmeshIndex == UINT32_MAX)
+						{
+							if (draw.MaterialAsset)
+								Renderer3D::Submit(draw.MeshAsset, draw.MaterialAsset, *draw.Model, entityId);
+							else
+								Renderer3D::Submit(draw.MeshAsset, *draw.Model, draw.Color, entityId);
+						}
+						else if (draw.MaterialAsset)
+							Renderer3D::SubmitSubmesh(draw.MeshAsset, draw.SubmeshIndex, draw.MaterialAsset,
+								*draw.Model, entityId);
+						else
+							Renderer3D::SubmitSubmesh(draw.MeshAsset, draw.SubmeshIndex, draw.Color,
+								*draw.Model, entityId);
+					}
+				}
+				// ② 合批桶整桶提交;失败(实例缓冲/对象槽位满)整桶回退逐物体,绝不丢物体。
+				std::vector<glm::mat4> batchTransforms;
+				std::vector<glm::vec4> batchColors;
+				std::vector<int32_t> batchEntityIds;
+				for (auto& [key, indices] : buckets)
+				{
+					if (indices.size() < kMinBatchInstances)
+						continue;
+					batchTransforms.clear();
+					batchColors.clear();
+					batchEntityIds.clear();
+					batchTransforms.reserve(indices.size());
+					batchColors.reserve(indices.size());
+					batchEntityIds.reserve(indices.size());
+					for (const uint32_t drawIndex : indices)
+					{
+						const FrameMeshDraw& draw = draws[drawIndex];
+						batchTransforms.push_back(*draw.Model);
+						batchColors.push_back(draw.Color);
+						batchEntityIds.push_back(static_cast<int32_t>(static_cast<uint32_t>(draw.Entity)));
+					}
+					const Ref<Mesh>& batchMesh = draws[indices.front()].MeshAsset;
+					const Ref<Material>& batchMaterial = draws[indices.front()].MaterialAsset;
+					const uint32_t submitted = Renderer3D::SubmitInstanced(batchMesh, key.Submesh, batchMaterial,
+						batchTransforms.data(), batchColors.data(), batchEntityIds.data(),
+						static_cast<uint32_t>(indices.size()));
+					if (submitted != 0)
+						continue;
+					for (const uint32_t drawIndex : indices)
+					{
+						const FrameMeshDraw& draw = draws[drawIndex];
+						const int32_t entityId = static_cast<int32_t>(static_cast<uint32_t>(draw.Entity));
+						if (draw.SubmeshIndex == UINT32_MAX)
+						{
+							if (draw.MaterialAsset)
+								Renderer3D::Submit(draw.MeshAsset, draw.MaterialAsset, *draw.Model, entityId);
+							else
+								Renderer3D::Submit(draw.MeshAsset, *draw.Model, draw.Color, entityId);
+						}
+						else if (draw.MaterialAsset)
+							Renderer3D::SubmitSubmesh(draw.MeshAsset, draw.SubmeshIndex, draw.MaterialAsset,
+								*draw.Model, entityId);
+						else
+							Renderer3D::SubmitSubmesh(draw.MeshAsset, draw.SubmeshIndex, draw.Color,
+								*draw.Model, entityId);
+					}
+				}
+				Renderer3D::EndScene();
+			}
+		}
+
+		const Lighting2D::Light2DUniforms light2D = Lighting2D::BuildSceneLight2DUniforms(m_ActiveScene);
+		Renderer2D::SetLight2DUniforms(&light2D, sizeof(light2D));
+		Renderer2D::StartBatch();
+		Renderer2D::BeginScene(camera, cameraTransform, m_CommandBuffers[slot]);
+
+		if (m_Options.ShowSelectionOutline && selectedEntity)
+		{
+			// 2D 精灵:描边就画在精灵本身的四边形上(与物体重合)。
+			// 3D 网格实体**不在这里画**:用实体 Transform 画出来的是一个 2D 方块 ——
+			// 在 3D 视口里既不是物体轮廓、位置也不对(用户 2026-09-16 反馈)。
+			// 3D 的选中框改由编辑器 UI 按"投影包围盒"画在场景图之上(D7-1c)。
+			if (selectedEntity.HasComponent<SpriteComponent>() &&
+				!selectedEntity.HasComponent<MeshRendererComponent>())
+			{
+				auto& transform = selectedEntity.GetComponent<TransformComponent>();
+				const auto& sprite = selectedEntity.GetComponent<SpriteComponent>();
+				glm::mat4 rectTr = transform.GetLocalMatrix();
+				if (sprite.Pivot.x != 0.5f || sprite.Pivot.y != 0.5f)
+				{
+					rectTr = glm::translate(rectTr, glm::vec3(0.5f - sprite.Pivot.x, 0.5f - sprite.Pivot.y, 0.0f));
+				}
+				Renderer2D::DrawRectCore(rectTr, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
+				const float crossSz = 0.08f * std::max(transform.Scale.x, 1.0f);
+				Renderer2D::DrawLineCore(transform.Location - glm::vec3(crossSz, 0.0f, 0.0f),
+					transform.Location + glm::vec3(crossSz, 0.0f, 0.0f), { 0.2f, 0.95f, 0.95f, 1.0f }, selectedEntity);
+				Renderer2D::DrawLineCore(transform.Location - glm::vec3(0.0f, crossSz, 0.0f),
+					transform.Location + glm::vec3(0.0f, crossSz, 0.0f), { 0.2f, 0.95f, 0.95f, 1.0f }, selectedEntity);
+			}
+			if (selectedEntity.HasComponent<TilemapComponent>() &&
+				!selectedEntity.HasComponent<MeshRendererComponent>())
+			{
+				auto& transform = selectedEntity.GetComponent<TransformComponent>();
+				const auto& tilemapComp = selectedEntity.GetComponent<TilemapComponent>();
+				std::shared_ptr<Tilemap> tm = nullptr;
+				if (tilemapComp.Tilemap.HasPath())
+				{
+					const std::string& tmPath = StringPool::Get().PathOf(tilemapComp.Tilemap.Path);
+					if (!tmPath.empty())
+						tm = Tilemap::GetOrLoad(tmPath);
+				}
+				const uint32_t tmW = tm ? tm->GetWidth() : 16u;
+				const uint32_t tmH = tm ? tm->GetHeight() : 16u;
+				const float cellW = tilemapComp.CellSize.x > 0.0f ? tilemapComp.CellSize.x : (tm ? tm->GetCellSize().x : 1.0f);
+				const float cellH = tilemapComp.CellSize.y > 0.0f ? tilemapComp.CellSize.y : (tm ? tm->GetCellSize().y : 1.0f);
+				const float mapW = static_cast<float>(tmW) * cellW;
+				const float mapH = static_cast<float>(tmH) * cellH;
+				const glm::mat4 baseTr = transform.GetLocalMatrix();
+				const glm::mat4 rectTr = baseTr * glm::scale(glm::mat4(1.0f), glm::vec3(mapW, mapH, 1.0f));
+				Renderer2D::DrawRectCore(rectTr, { 1.0f, 0.5f, 0.0f, 1.0f }, selectedEntity);
+				if (!tilemapComp.ShowGrid)
+				{
+					for (uint32_t gx = 1; gx < tmW; ++gx)
+					{
+						const float lx = -mapW * 0.5f + static_cast<float>(gx) * cellW;
+						const glm::vec3 p0 = glm::vec3(baseTr * glm::vec4(lx, -mapH * 0.5f, 0.0f, 1.0f));
+						const glm::vec3 p1 = glm::vec3(baseTr * glm::vec4(lx,  mapH * 0.5f, 0.0f, 1.0f));
+						Renderer2D::DrawLineCore(p0, p1, { 1.0f, 0.65f, 0.15f, 0.28f }, selectedEntity);
+					}
+					for (uint32_t gy = 1; gy < tmH; ++gy)
+					{
+						const float ly = -mapH * 0.5f + static_cast<float>(gy) * cellH;
+						const glm::vec3 p0 = glm::vec3(baseTr * glm::vec4(-mapW * 0.5f, ly, 0.0f, 1.0f));
+						const glm::vec3 p1 = glm::vec3(baseTr * glm::vec4( mapW * 0.5f, ly, 0.0f, 1.0f));
+						Renderer2D::DrawLineCore(p0, p1, { 1.0f, 0.65f, 0.15f, 0.28f }, selectedEntity);
+					}
+				}
+			}
+		}
+
+		if (m_Options.ShowDebugColliders || m_Options.ShowDebugLights)
+		{
+			RenderDebug(camera, cameraTransform);
+		}
+		RenderGroundGrid(camera, cameraTransform);
+		RenderTerrain(camera, cameraTransform);
+		RenderFoliage(camera, cameraTransform);
+		Render2DLighting(camera, cameraTransform);
+		RenderGeometry(camera, cameraTransform);
+		RenderDecals(camera, cameraTransform);
+		RenderParticles(camera, cameraTransform);
+
+		// 全动态降水视效通道 (Precipitation Pass: 遵循触发明确要求，实装雨雪物理视效)
+		if (m_ActiveScene && !m_ActiveScene->m_Registry.view<WeatherSystemComponent>().empty())
+		{
+			const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+			const auto localWeather = WeatherSystem::GetAtmosphereAt(*m_ActiveScene, camPos);
+			float sceneTime = static_cast<float>(m_ActiveScene->GetTime().ElapsedSeconds);
+			if (sceneTime <= 0.0001f)
+				sceneTime = m_WaterAccumulatedTime;
+			RenderPrecipitation(camera, cameraTransform, localWeather, sceneTime);
+		}
+
+		// M2: Fullscreen Post-Processing Passes (Flash White Overlay)
+		if (m_ActiveScene)
+		{
+			PostProcessUniforms pp = PostProcessPipeline::GetActiveUniforms(*m_ActiveScene);
+			if (pp.Enabled && pp.FlashWhiteIntensity > 0.001f)
+			{
+				const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+				const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
+				const glm::vec3 camUp = glm::normalize(glm::vec3(cameraTransform[1]));
+				const glm::vec3 camRight = glm::normalize(glm::vec3(cameraTransform[0]));
+
+				const bool isOrtho = (std::abs(camera.GetProjectionMatrix()[3][3] - 1.0f) < 1e-4f);
+				float h = 100.0f;
+				float w = 100.0f;
+				float dist = 1.0f;
+
+				if (isOrtho)
+				{
+					h = 2.0f / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[1][1]));
+					w = 2.0f / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[0][0]));
+				}
+				else
+				{
+					dist = 0.3f;
+					h = 2.0f * dist / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[1][1]));
+					w = 2.0f * dist / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[0][0]));
+				}
+
+				glm::mat4 quadTr(1.0f);
+				quadTr[0] = glm::vec4(camRight * (w * 2.5f), 0.0f);
+				quadTr[1] = glm::vec4(camUp * (h * 2.5f), 0.0f);
+				quadTr[2] = glm::vec4(-camForward, 0.0f);
+				quadTr[3] = glm::vec4(camPos + camForward * dist, 1.0f);
+
+				glm::vec4 flashColor(1.0f, 1.0f, 1.0f, std::min(1.0f, pp.FlashWhiteIntensity * 0.95f));
+				Renderer2D::DrawQuad(quadTr, nullptr, 1.0f, flashColor);
+			}
+		}
+
+		RenderNavMesh(camera, cameraTransform);
+
+		Renderer2D::EndScene();
+		m_CommandBuffers[slot]->EndRenderPass();
+		// D8b:结束时间戳写在渲染通道之外(vkCmdWriteTimestamp 不能在 render pass 内)。
+		// 起点已提前到阴影通道之前 ⇒ 阴影开启时这一段量的是"阴影 + 3D/2D 主通道"的 GPU
+		// 时间;阴影关闭时只覆盖主通道(口径见 SceneStatistics::GpuMilliseconds 注释)。
+		EndGpuTiming(slot);
+		// 场景颜色附件在命令缓冲内转为可采样布局:提交方无需再 WaitIdle 做外部转换,
+		// 同一队列上后续提交(UI)按顺序即可安全采样。
+		{
+			Rhi::ResourceBarrier barrier;
+			barrier.Texture = m_ColorTexture;
+			barrier.Before = Rhi::ResourceState::ColorAttachment;
+			barrier.After = Rhi::ResourceState::ShaderReadOnly;
+			m_CommandBuffers[slot]->PipelineBarrier({ barrier });
+		}
+		m_CommandBuffers[slot]->End();
+		Renderer::SubmitScene(m_CommandBuffers[slot], m_ColorTexture);
+
+		// D8a:场景统计(编辑器 Stats 面板 / AI `stats.scene` / 压力场景脚本读取)。
+		{
+			Renderer3D::SceneStatistics stats;
+			stats.Objects = static_cast<uint32_t>(draws.size());
+			stats.Submitted = static_cast<uint32_t>(visibleDraws.size());
+			stats.Culled = stats.Objects - stats.Submitted;
+			stats.ShadowCasters = shadowCasters;
+			const Renderer3D::Statistics statsNow = Renderer3D::GetStats();
+			stats.DrawCalls = statsNow.DrawCalls - statsBeforeScene.DrawCalls;
+			stats.Triangles = statsNow.Triangles - statsBeforeScene.Triangles;
+			stats.DroppedObjects = statsNow.DroppedObjects - statsBeforeScene.DroppedObjects;
+			stats.InstancedBatches = statsNow.InstancedBatches - statsBeforeScene.InstancedBatches;
+			stats.InstancedObjects = statsNow.InstancedObjects - statsBeforeScene.InstancedObjects;
+			stats.CullingEnabled = cullingEnabled;
+			stats.InstancingEnabled = RenderSettings::Get().Instancing;
+			stats.GpuMilliseconds = gpuMilliseconds;
+			stats.CullMilliseconds = cullMilliseconds;
+			stats.SceneMilliseconds = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - sceneStart).count();
+			Renderer3D::ReportSceneStatistics(stats);
+
+			// 渲染规模进 trace:此前这些数字只在编辑器 Stats 面板上,捕获文件里看不到,
+			// 于是"渲染慢是因为画得太多还是因为剔除没生效"无法事后分析。
+			// 与 SceneStatistics 同源(不是另算一份),键名与数据字典一致。
+			WLD_TRACE_COUNTER("Renderer.DrawCalls", static_cast<int64_t>(stats.DrawCalls));
+			WLD_TRACE_COUNTER("Renderer.Triangles", static_cast<int64_t>(stats.Triangles));
+			WLD_TRACE_COUNTER("Renderer.Submitted", static_cast<int64_t>(stats.Submitted));
+			WLD_TRACE_COUNTER("Renderer.Objects", static_cast<int64_t>(stats.Objects));
+			WLD_TRACE_COUNTER("Renderer.Culled", static_cast<int64_t>(stats.Culled));
+			WLD_TRACE_COUNTER("Renderer.DroppedObjects", static_cast<int64_t>(stats.DroppedObjects));
+			WLD_TRACE_COUNTER("Renderer.InstancedBatches", static_cast<int64_t>(stats.InstancedBatches));
+			WLD_TRACE_COUNTER("Renderer.Lights", static_cast<int64_t>(statsNow.Lights));
+			// 把 `Scene.Submit`(0.29ms/帧那种黑盒)拆开:主通道 = Submit − 阴影 − 剔除。
+			// 阴影/GPU 数字本来就有,只是过去只进 Renderer3D 统计、不进 trace。
+			WLD_TRACE_COUNTER("Renderer.ShadowMs", static_cast<int64_t>(statsNow.ShadowPassMilliseconds * 1000.0));
+			WLD_TRACE_COUNTER("Renderer.GpuUs", static_cast<int64_t>(stats.GpuMilliseconds * 1000.0));
+			WLD_TRACE_COUNTER("Renderer.SceneUs", static_cast<int64_t>(stats.SceneMilliseconds * 1000.0));
+		}
+	}
+
+	// P6:2D 精灵/圆形的渲染矩阵解析 —— 与 3D 路径同口径地吃物理插值。
+	// 插值开启时,`Scene::EnsureInterpolatedWorldTransforms` 已把"自身或祖先被插值"的实体的
+	// 渲染世界矩阵算进 FrameExtract;这里优先取它,否则回退权威 WorldTransformComponent
+	// (缺失时用 localMatrix —— 与旧 spriteMatrixOf 的兜底一致)。
+	const glm::mat4* SceneRenderer::ResolveSpriteRenderMatrix(const Scene& scene, entt::entity entity,
+		const glm::mat4& localMatrix)
+	{
+		if (scene.IsPhysicsInterpolationEnabled())
+		{
+			const FrameExtract& extract = scene.RenderExtract();
+			const auto found = extract.InterpolatedIndex.find(entity);
+			if (found != extract.InterpolatedIndex.end())
+				return &extract.InterpolatedModels[found->second];
+		}
+		if (const auto* world = scene.GetRegistry().try_get<WorldTransformComponent>(entity))
+			return &world->Matrix;
+		return &localMatrix;
+	}
+	Ref<Mesh> SceneRenderer::ResolveMeshAsset(const AssetRef& asset, std::string* error)
+	{
+		if (m_AssetRegistry)
+			return m_AssetRegistry->ResolveMesh(asset, error);
+		return Mesh::LoadWModel(asset.Path, error);
+	}
+
+	Ref<Material> SceneRenderer::ResolveMaterialAsset(const AssetRef& asset, std::string* error)
+	{
+		if (m_AssetRegistry)
+			return m_AssetRegistry->ResolveMaterial(asset, error);
+		return MaterialLibrary::Get().Load(asset.Path, error);
+	}
+
+	Rhi::Handle<Rhi::Texture> SceneRenderer::ResolveTextureAsset(const AssetRef& asset)
+	{
+		// 精灵贴图与 3D 材质贴图现在共用**同一个** GPU 驻留(TextureLibrary):
+		// 同一张贴图只解码一次、只占一份显存(收口前是 GL/RHI 两份,且 Vulkan 下每帧读回)。
+		if (m_AssetRegistry)
+			return m_AssetRegistry->ResolveTexture(asset);
+		return TextureLibrary::Get().Get(asset.Path, /*srgb*/ true);
+	}
+
+	void SceneRenderer::Render2DLighting(const Camera&, const glm::mat4&)
+	{
+		if (!m_ActiveScene)
+			return;
+
+		const auto freeformLights = Lighting2D::CollectFreeformLights2D(m_ActiveScene);
+		for (const auto& light : freeformLights)
+		{
+			const size_t n = light.WorldPolygon.size();
+			if (n < 3)
+				continue;
+
+			const uint32_t entityId = light.Entity != entt::null ? static_cast<uint32_t>(light.Entity) : 0u;
+			const glm::vec3 col(light.Color.r, light.Color.g, light.Color.b);
+			const float intensityNorm = std::clamp(light.Intensity, 0.0f, 1.0f);
+
+			// 1. Semi-transparent luminous polygon face
+			const glm::vec4 faceColor(col.r, col.g, col.b, 0.25f * intensityNorm);
+			glm::vec2 centroid(0.0f);
+			for (const auto& p : light.WorldPolygon)
+				centroid += p;
+			centroid /= static_cast<float>(n);
+
+			for (size_t i = 0; i < n; ++i)
+			{
+				const size_t next = (i + 1) % n;
+				const glm::vec3 pos[4] = {
+					glm::vec3(centroid.x, centroid.y, 0.0f),
+					glm::vec3(light.WorldPolygon[i].x, light.WorldPolygon[i].y, 0.0f),
+					glm::vec3(light.WorldPolygon[next].x, light.WorldPolygon[next].y, 0.0f),
+					glm::vec3(light.WorldPolygon[next].x, light.WorldPolygon[next].y, 0.0f)
+				};
+				Renderer2D::DrawQuadPositions(pos, nullptr, faceColor, nullptr, 1.0f, entityId);
+			}
+
+			// 2. Outer boundary wireframe line
+			const glm::vec4 wireColor(col.r, col.g, col.b, 0.90f * intensityNorm);
+			for (size_t i = 0; i < n; ++i)
+			{
+				const size_t next = (i + 1) % n;
+				const glm::vec3 p0(light.WorldPolygon[i].x, light.WorldPolygon[i].y, 0.0f);
+				const glm::vec3 p1(light.WorldPolygon[next].x, light.WorldPolygon[next].y, 0.0f);
+				Renderer2D::DrawLineCore(p0, p1, wireColor, entityId);
+			}
+
+			// 3. Inner feathered falloff edge
+			if (light.FalloffDistance > 0.01f)
+			{
+				const glm::vec4 featherColor(col.r, col.g, col.b, 0.45f * intensityNorm);
+				std::vector<glm::vec2> innerPts(n);
+				for (size_t i = 0; i < n; ++i)
+				{
+					const glm::vec2& pPrev = light.WorldPolygon[(i + n - 1) % n];
+					const glm::vec2& pCur = light.WorldPolygon[i];
+					const glm::vec2& pNext = light.WorldPolygon[(i + 1) % n];
+
+					glm::vec2 d1 = pCur - pPrev;
+					glm::vec2 d2 = pNext - pCur;
+					const float len1 = glm::length(d1);
+					const float len2 = glm::length(d2);
+					if (len1 > 1e-5f) d1 /= len1;
+					if (len2 > 1e-5f) d2 /= len2;
+
+					const glm::vec2 n1(-d1.y, d1.x);
+					const glm::vec2 n2(-d2.y, d2.x);
+					glm::vec2 avgN = n1 + n2;
+					const float avgLen = glm::length(avgN);
+					if (avgLen > 1e-5f)
+						avgN /= avgLen;
+					else
+						avgN = n1;
+
+					innerPts[i] = pCur + avgN * std::min(light.FalloffDistance, 0.8f);
+				}
+
+				for (size_t i = 0; i < n; ++i)
+				{
+					const size_t next = (i + 1) % n;
+					Renderer2D::DrawLineCore(
+						glm::vec3(innerPts[i].x, innerPts[i].y, 0.0f),
+						glm::vec3(innerPts[next].x, innerPts[next].y, 0.0f),
+						featherColor, entityId);
+
+					const glm::vec3 stripQuad[4] = {
+						glm::vec3(light.WorldPolygon[i].x, light.WorldPolygon[i].y, 0.0f),
+						glm::vec3(light.WorldPolygon[next].x, light.WorldPolygon[next].y, 0.0f),
+						glm::vec3(innerPts[next].x, innerPts[next].y, 0.0f),
+						glm::vec3(innerPts[i].x, innerPts[i].y, 0.0f)
+					};
+					const glm::vec4 stripColor(col.r, col.g, col.b, 0.15f * intensityNorm);
+					Renderer2D::DrawQuadPositions(stripQuad, nullptr, stripColor, nullptr, 1.0f, entityId);
+				}
+			}
+		}
+	}
+
+	void SceneRenderer::RenderGeometry(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		// B3:每实体的顶点变换(纯数学,不触碰批次状态机)按阈值并行;
+		// 批次写入仍按原顺序在主线程执行,绘制顺序与像素结果与串行版本一致。
+		constexpr size_t kParallelPrepThreshold = 64;
+		// 2D 精灵也要走层级世界矩阵:子实体跟随父实体。旧实现直接用子实体的**局部**矩阵,
+		// 表现为"移动父项、子项不动"(用户 2026-09-16 反馈,3D 网格路径早已用世界矩阵)。
+		//
+		// P6:2D 与 3D 必须同口径地吃物理插值 —— 插值开启时优先用
+		// Scene::EnsureInterpolatedWorldTransforms 算好的**渲染**世界矩阵(层级合成后的),
+		// 否则 2D 物理驱动的精灵在非 60Hz 刷新下会阶梯抖动(3D 网格路径早已修好)。
+		const auto spriteMatrixOf = [this](entt::entity entity,
+			const TransformComponent& transform) -> glm::mat4
+		{
+			const glm::mat4 local = transform.GetLocalMatrix();
+			return *ResolveSpriteRenderMatrix(*m_ActiveScene, entity, local);
+		};
+		const auto spriteTextureOf = [this](const SpriteComponent& sprite)
+		{
+			return ResolveTextureAsset(sprite.Texture);
+		};
+		{
+			auto group = m_ActiveScene->m_Registry.group<TransformComponent>(entt::get<SpriteComponent>);
+			struct SpriteSortItem
+			{
+				entt::entity entity;
+				int32_t sortingLayer;
+				int32_t orderInLayer;
+				float depthKey;
+				uint32_t entityId;
+			};
+			std::vector<SpriteSortItem> items;
+			items.reserve(group.size());
+			for (auto entity : group)
+			{
+				const auto& [transform, sprite] = group.get<TransformComponent, SpriteComponent>(entity);
+				float depthKey = 0.0f;
+				if (sprite.EnableYSort)
+				{
+					// Y-Sort: lower world Y (foot closer to screen bottom) renders later to occlude upper entities
+					depthKey = -(transform.Location.y + (0.5f - sprite.Pivot.y) * transform.Scale.y);
+				}
+				else
+				{
+					depthKey = -transform.Location.z;
+				}
+				items.push_back({ entity, sprite.SortingLayer, sprite.OrderInLayer, depthKey, static_cast<uint32_t>(entity) });
+			}
+
+			std::stable_sort(items.begin(), items.end(), [](const SpriteSortItem& a, const SpriteSortItem& b)
+			{
+				if (a.sortingLayer != b.sortingLayer)
+					return a.sortingLayer < b.sortingLayer;
+				if (a.orderInLayer != b.orderInLayer)
+					return a.orderInLayer < b.orderInLayer;
+				if (std::abs(a.depthKey - b.depthKey) > 1e-4f)
+					return a.depthKey < b.depthKey;
+				return a.entityId < b.entityId;
+			});
+
+			for (const auto& item : items)
+			{
+				auto [transform, sprite] = group.get<TransformComponent, SpriteComponent>(item.entity);
+				Rhi::Handle<Rhi::Texture> texture = ResolveTextureAsset(sprite.Texture);
+				const glm::vec2* texCoords = nullptr;
+				glm::vec2 resolvedCoords[4];
+
+				// If sprite.Texture is a .watlas asset, resolve the atlas sub-texture
+				std::shared_ptr<TextureAtlas> atlas = nullptr;
+				const SubTexture2D* sub = nullptr;
+				if (sprite.Texture.HasPath())
+				{
+					const std::string& path = StringPool::Get().PathOf(sprite.Texture.Path);
+					if (path.length() >= 7 && path.compare(path.length() - 7, 7, ".watlas") == 0)
+					{
+						atlas = TextureAtlas::GetOrLoad(path);
+						if (atlas)
+						{
+							if (!atlas->GetTexturePath().empty())
+							{
+								PathId atlasTexPath = StringPool::Get().InternPath(atlas->GetTexturePath());
+								texture = TextureLibrary::Get().Get(atlasTexPath, true);
+							}
+							if (sprite.SubTextureName.IsValid())
+								sub = atlas->FindSubTexture(sprite.SubTextureName);
+							else if (atlas->GetSubTextureCount() > 0)
+								sub = atlas->GetSubTexture(0);
+
+							if (sub)
+							{
+								std::memcpy(resolvedCoords, sub->TexCoords, sizeof(resolvedCoords));
+								texCoords = resolvedCoords;
+							}
+						}
+					}
+				}
+
+				// Handle FlipX and FlipY
+				if (sprite.FlipX || sprite.FlipY)
+				{
+					if (!texCoords)
+					{
+						constexpr glm::vec2 defCoords[4] = {
+							{ 0.0f, 1.0f }, // 0: Bottom-Left
+							{ 1.0f, 1.0f }, // 1: Bottom-Right
+							{ 1.0f, 0.0f }, // 2: Top-Right
+							{ 0.0f, 0.0f }  // 3: Top-Left
+						};
+						std::memcpy(resolvedCoords, defCoords, sizeof(resolvedCoords));
+						texCoords = resolvedCoords;
+					}
+					if (sprite.FlipX)
+					{
+						std::swap(resolvedCoords[0].x, resolvedCoords[1].x);
+						std::swap(resolvedCoords[3].x, resolvedCoords[2].x);
+					}
+					if (sprite.FlipY)
+					{
+						std::swap(resolvedCoords[0].y, resolvedCoords[3].y);
+						std::swap(resolvedCoords[1].y, resolvedCoords[2].y);
+					}
+				}
+
+				// Handle Pivot offset in local quad coordinates
+				glm::mat4 spriteMatrix = spriteMatrixOf(item.entity, transform);
+
+				// 视差多景深层位移计算 (Parallax Background Scrolling)
+				if (const auto* parallax = m_ActiveScene->m_Registry.try_get<ParallaxLayerComponent>(item.entity))
+				{
+					const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+					const glm::vec3 pOffset(
+						(camPos.x * (1.0f - parallax->ScrollFactor.x)) + parallax->Offset.x,
+						(camPos.y * (1.0f - parallax->ScrollFactor.y)) + parallax->Offset.y,
+						0.0f);
+					spriteMatrix = glm::translate(glm::mat4(1.0f), pOffset) * spriteMatrix;
+				}
+
+				if (sprite.Pivot.x != 0.5f || sprite.Pivot.y != 0.5f)
+				{
+					spriteMatrix = glm::translate(spriteMatrix, glm::vec3(0.5f - sprite.Pivot.x, 0.5f - sprite.Pivot.y, 0.0f));
+				}
+
+				// 9-Slice sliced sprite rendering
+				if (sprite.DrawMode == 1 && sub && (sub->Border.x > 0.0f || sub->Border.y > 0.0f || sub->Border.z > 0.0f || sub->Border.w > 0.0f) && atlas)
+				{
+					const float w = sub->PixelRect.z > 0.0f ? sub->PixelRect.z : 1.0f;
+					const float h = sub->PixelRect.w > 0.0f ? sub->PixelRect.w : 1.0f;
+					const float bL = sub->Border.x;
+					const float bR = sub->Border.y;
+					const float bT = sub->Border.z;
+					const float bB = sub->Border.w;
+					const float normL = std::min(bL / w, 0.49f);
+					const float normR = std::min(bR / w, 0.49f);
+					const float normT = std::min(bT / h, 0.49f);
+					const float normB = std::min(bB / h, 0.49f);
+
+					const float X[4] = { -0.5f, -0.5f + normL, 0.5f - normR, 0.5f };
+					const float Y[4] = { -0.5f, -0.5f + normB, 0.5f - normT, 0.5f };
+
+					const float rx = sub->PixelRect.x;
+					const float ry = sub->PixelRect.y;
+					const float aW = static_cast<float>(atlas->GetWidth());
+					const float aH = static_cast<float>(atlas->GetHeight());
+					float U[4] = { rx / aW, (rx + bL) / aW, (rx + w - bR) / aW, (rx + w) / aW };
+					float V[4] = { (ry + h) / aH, (ry + h - bB) / aH, (ry + bT) / aH, ry / aH };
+
+					if (sprite.FlipX) { std::swap(U[0], U[3]); std::swap(U[1], U[2]); }
+					if (sprite.FlipY) { std::swap(V[0], V[3]); std::swap(V[1], V[2]); }
+
+					for (int cx = 0; cx < 3; ++cx)
+					{
+						for (int cy = 0; cy < 3; ++cy)
+						{
+							const glm::vec3 cellCenter(0.5f * (X[cx] + X[cx + 1]), 0.5f * (Y[cy] + Y[cy + 1]), 0.0f);
+							const glm::vec3 cellSize(X[cx + 1] - X[cx], Y[cy + 1] - Y[cy], 1.0f);
+							const glm::mat4 cellMat = spriteMatrix * glm::translate(glm::mat4(1.0f), cellCenter) * glm::scale(glm::mat4(1.0f), cellSize);
+
+							const glm::vec2 cellUV[4] = {
+								{ U[cx], V[cy] },
+								{ U[cx + 1], V[cy] },
+								{ U[cx + 1], V[cy + 1] },
+								{ U[cx], V[cy + 1] }
+							};
+							Rhi::Handle<Rhi::Texture> normalTexture = nullptr;
+							if (sprite.NormalMap.IsValid())
+							{
+								const std::string& normName = StringPool::Get().NameOf(sprite.NormalMap);
+								if (!normName.empty())
+								{
+									PathId normPath = StringPool::Get().InternPath(normName);
+									normalTexture = TextureLibrary::Get().Get(normPath, false);
+								}
+							}
+							Renderer2D::DrawQuadCore(cellMat, texture, sprite.Color, cellUV, 1.0f, static_cast<uint32_t>(item.entity),
+								normalTexture, sprite.SortingLayer);
+						}
+					}
+				}
+				else
+				{
+					Rhi::Handle<Rhi::Texture> normalTexture = nullptr;
+					if (sprite.NormalMap.IsValid())
+					{
+						const std::string& normName = StringPool::Get().NameOf(sprite.NormalMap);
+						if (!normName.empty())
+						{
+							PathId normPath = StringPool::Get().InternPath(normName);
+							normalTexture = TextureLibrary::Get().Get(normPath, false);
+						}
+					}
+					Renderer2D::DrawQuadCore(spriteMatrix, texture, sprite.Color, texCoords,
+						sprite.TilingFactor, static_cast<uint32_t>(item.entity), normalTexture, sprite.SortingLayer);
+				}
+		}
+		}
+		{
+			auto tilemapView = m_ActiveScene->m_Registry.view<TransformComponent, TilemapComponent>();
+			struct TilemapSortItem
+			{
+				entt::entity entity;
+				int32_t sortingLayer;
+				int32_t orderInLayer;
+				float depthKey;
+				uint32_t entityId;
+			};
+			std::vector<TilemapSortItem> tmItems;
+			for (auto entity : tilemapView)
+			{
+				if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+					continue;
+				const auto& [transform, tilemapComp] = tilemapView.get<TransformComponent, TilemapComponent>(entity);
+				tmItems.push_back({
+					entity,
+					tilemapComp.SortingLayer,
+					tilemapComp.OrderInLayer,
+					-transform.Location.z,
+					static_cast<uint32_t>(entity)
+				});
+			}
+
+			std::stable_sort(tmItems.begin(), tmItems.end(), [](const TilemapSortItem& a, const TilemapSortItem& b)
+			{
+				if (a.sortingLayer != b.sortingLayer)
+					return a.sortingLayer < b.sortingLayer;
+				if (a.orderInLayer != b.orderInLayer)
+					return a.orderInLayer < b.orderInLayer;
+				if (std::abs(a.depthKey - b.depthKey) > 1e-4f)
+					return a.depthKey < b.depthKey;
+				return a.entityId < b.entityId;
+			});
+
+			for (const auto& tmItem : tmItems)
+			{
+				const auto& [transform, tilemapComp] = tilemapView.get<TransformComponent, TilemapComponent>(tmItem.entity);
+				const glm::mat4 baseMatrix = spriteMatrixOf(tmItem.entity, transform);
+
+				std::shared_ptr<Tilemap> tm = nullptr;
+				if (tilemapComp.Tilemap.HasPath())
+				{
+					const std::string& path = StringPool::Get().PathOf(tilemapComp.Tilemap.Path);
+					if (!path.empty())
+						tm = Tilemap::GetOrLoad(path);
+				}
+
+				const uint32_t width = tm ? tm->GetWidth() : 16u;
+				const uint32_t height = tm ? tm->GetHeight() : 16u;
+				const float cellW = tilemapComp.CellSize.x > 0.0f ? tilemapComp.CellSize.x : (tm ? tm->GetCellSize().x : 1.0f);
+				const float cellH = tilemapComp.CellSize.y > 0.0f ? tilemapComp.CellSize.y : (tm ? tm->GetCellSize().y : 1.0f);
+				const float mapW = static_cast<float>(width) * cellW;
+				const float mapH = static_cast<float>(height) * cellH;
+				const float originX = -mapW * 0.5f;
+				const float originY = -mapH * 0.5f;
+
+				if (tm)
+				{
+					std::shared_ptr<TextureAtlas> atlas = nullptr;
+					Rhi::Handle<Rhi::Texture> texture{};
+					if (!tm->GetAtlasPath().empty())
+					{
+						atlas = TextureAtlas::GetOrLoad(tm->GetAtlasPath());
+						if (atlas && !atlas->GetTexturePath().empty())
+						{
+							PathId atlasTexPid = StringPool::Get().InternPath(atlas->GetTexturePath());
+							texture = TextureLibrary::Get().Get(atlasTexPid, true);
+						}
+						else
+						{
+							PathId directTexPid = StringPool::Get().InternPath(tm->GetAtlasPath());
+							texture = TextureLibrary::Get().Get(directTexPid, true);
+						}
+					}
+
+					for (uint32_t y = 0; y < height; ++y)
+					{
+						for (uint32_t x = 0; x < width; ++x)
+						{
+							const uint16_t tileId = tm->GetTile(x, y);
+							if (tileId == 0)
+								continue;
+
+							const glm::vec2* texCoords = nullptr;
+							const size_t subIndex = static_cast<size_t>(tileId - 1);
+							if (atlas && subIndex < atlas->GetSubTextureCount())
+							{
+								if (const SubTexture2D* sub = atlas->GetSubTexture(subIndex))
+									texCoords = sub->TexCoords;
+							}
+
+							const TilemapGridType activeGridType = tilemapComp.GridType != 0
+								? static_cast<TilemapGridType>(tilemapComp.GridType)
+								: (tm ? tm->GetGridType() : TilemapGridType::Orthogonal);
+							const glm::vec2 localCenter = TilemapGridUtils::GridToLocal(
+								static_cast<int>(x), static_cast<int>(y), activeGridType, { cellW, cellH }, width, height);
+							const glm::vec3 cellOffset(localCenter.x, localCenter.y, 0.0f);
+							const glm::mat4 cellWorldMatrix = baseMatrix
+								* glm::translate(glm::mat4(1.0f), cellOffset)
+								* glm::scale(glm::mat4(1.0f), glm::vec3(cellW, cellH, 1.0f));
+
+							Renderer2D::DrawQuadCore(
+								cellWorldMatrix,
+								texture,
+								tilemapComp.TintColor,
+								texCoords,
+								1.0f,
+								static_cast<uint32_t>(tmItem.entity),
+								nullptr,
+								tilemapComp.SortingLayer);
+						}
+					}
+				}
+
+				if (tilemapComp.ShowGrid)
+				{
+					const TilemapGridType activeGridType = tilemapComp.GridType != 0
+						? static_cast<TilemapGridType>(tilemapComp.GridType)
+						: (tm ? tm->GetGridType() : TilemapGridType::Orthogonal);
+
+					if (activeGridType == TilemapGridType::Orthogonal)
+					{
+						const glm::mat4 borderTr = baseMatrix * glm::scale(glm::mat4(1.0f), glm::vec3(mapW, mapH, 1.0f));
+						Renderer2D::DrawRectCore(borderTr, { 0.35f, 0.75f, 0.95f, 0.65f }, static_cast<uint32_t>(tmItem.entity));
+						for (uint32_t gx = 1; gx < width; ++gx)
+						{
+							const float lx = originX + static_cast<float>(gx) * cellW;
+							const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(lx, originY, 0.0f, 1.0f));
+							const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(lx, originY + mapH, 0.0f, 1.0f));
+							Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.28f }, static_cast<uint32_t>(tmItem.entity));
+						}
+						for (uint32_t gy = 1; gy < height; ++gy)
+						{
+							const float ly = originY + static_cast<float>(gy) * cellH;
+							const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(originX, ly, 0.0f, 1.0f));
+							const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(originX + mapW, ly, 0.0f, 1.0f));
+							Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.28f }, static_cast<uint32_t>(tmItem.entity));
+						}
+					}
+					else
+					{
+						for (uint32_t gy = 0; gy < height; ++gy)
+						{
+							for (uint32_t gx = 0; gx < width; ++gx)
+							{
+								const auto poly = TilemapGridUtils::GetCellPolygon(
+									static_cast<int>(gx), static_cast<int>(gy), activeGridType, { cellW, cellH }, width, height);
+								for (size_t k = 0; k < poly.size(); ++k)
+								{
+									const size_t next = (k + 1) % poly.size();
+									const glm::vec3 p0 = glm::vec3(baseMatrix * glm::vec4(poly[k].x, poly[k].y, 0.0f, 1.0f));
+									const glm::vec3 p1 = glm::vec3(baseMatrix * glm::vec4(poly[next].x, poly[next].y, 0.0f, 1.0f));
+									Renderer2D::DrawLineCore(p0, p1, { 0.35f, 0.75f, 0.95f, 0.35f }, static_cast<uint32_t>(tmItem.entity));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		{
+			auto view = m_ActiveScene->m_Registry.view<TransformComponent, CircleRendererComponent>();
+			std::vector<entt::entity> entities;
+			for (auto entity : view)
+				entities.push_back(entity);
+			const size_t count = entities.size();
+			if (count >= kParallelPrepThreshold && JobSystem::IsRunning() && JobSystem::ParallelAllowed())
+			{
+				std::vector<glm::mat4> transforms(count);
+				std::vector<std::array<glm::vec3, 4>> positions(count);
+				for (size_t i = 0; i < count; i++)
+					transforms[i] = spriteMatrixOf(entities[i], view.get<TransformComponent>(entities[i]));
+				JobSystem::ParallelFor(static_cast<uint32_t>(count), 32, [&](uint32_t i)
+				{
+					Renderer2D::ComputeCirclePositions(transforms[i], positions[i].data());
+				});
+				for (size_t i = 0; i < count; i++)
+				{
+					const auto& circle = view.get<CircleRendererComponent>(entities[i]);
+					Renderer2D::DrawCirclePositions(positions[i].data(), circle.Color, circle.Thickness,
+						circle.Fade, static_cast<uint32_t>(entities[i]));
+				}
+			}
+			else
+			{
+				for (auto entity : entities)
+				{
+					auto& transform = view.get<TransformComponent>(entity);
+					const auto& circle = view.get<CircleRendererComponent>(entity);
+					Renderer2D::DrawCircleCore(spriteMatrixOf(entity, transform), circle.Color, circle.Thickness,
+						circle.Fade, static_cast<uint32_t>(entity));
+				}
+			}
+		}
+	}
+
+	void SceneRenderer::RenderDebug(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		auto view = m_ActiveScene->m_Registry.view<CircleCollider2DComponent>();
+		for (auto entity : view)
+		{
+			auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			auto& circleCollider = view.get<CircleCollider2DComponent>(entity);
+			if (!circleCollider.ShowCollider)
+				continue;
+			glm::mat4 colliderTransform = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation)
+				* glm::translate(glm::mat4(1.0f), glm::vec3(circleCollider.Offset.x, circleCollider.Offset.y, 0.0f))
+				* glm::scale(glm::mat4(1.0f), glm::vec3(transform.Scale.x * circleCollider.Radius * 2.0f,
+					transform.Scale.y * circleCollider.Radius * 2.0f, 1.0f));
+			Renderer2D::DrawCircleCore(colliderTransform, { 0.1f, 0.9f, 0.1f, 1.0f },
+				0.025f, 0.005f, static_cast<uint32_t>(entity));
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<CapsuleCollider2DComponent>())
+		{
+			auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			auto& cap = m_ActiveScene->m_Registry.get<CapsuleCollider2DComponent>(entity);
+			if (!cap.ShowCollider) continue;
+			const float halfLen = cap.Length * 0.5f;
+			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation)
+				* glm::translate(glm::mat4(1.0f), glm::vec3(cap.Offset.x, cap.Offset.y, 0.0f));
+
+			if (cap.Direction == 0) // Vertical
+			{
+				glm::vec3 c1 = glm::vec3(baseTr * glm::vec4(0.0f, -halfLen * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 c2 = glm::vec3(baseTr * glm::vec4(0.0f, halfLen * transform.Scale.y, 0.0f, 1.0f));
+				float rad = cap.Radius * transform.Scale.x;
+				glm::mat4 c1Tr = glm::translate(glm::mat4(1.0f), c1) * glm::scale(glm::mat4(1.0f), glm::vec3(rad * 2.0f, rad * 2.0f, 1.0f));
+				glm::mat4 c2Tr = glm::translate(glm::mat4(1.0f), c2) * glm::scale(glm::mat4(1.0f), glm::vec3(rad * 2.0f, rad * 2.0f, 1.0f));
+				Renderer2D::DrawCircleCore(c1Tr, { 0.1f, 0.9f, 0.1f, 1.0f }, 0.025f, 0.005f, static_cast<uint32_t>(entity));
+				Renderer2D::DrawCircleCore(c2Tr, { 0.1f, 0.9f, 0.1f, 1.0f }, 0.025f, 0.005f, static_cast<uint32_t>(entity));
+				glm::vec3 left1 = glm::vec3(baseTr * glm::vec4(-rad, -halfLen * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 left2 = glm::vec3(baseTr * glm::vec4(-rad, halfLen * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 right1 = glm::vec3(baseTr * glm::vec4(rad, -halfLen * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 right2 = glm::vec3(baseTr * glm::vec4(rad, halfLen * transform.Scale.y, 0.0f, 1.0f));
+				Renderer2D::DrawLineCore(left1, left2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+				Renderer2D::DrawLineCore(right1, right2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+			else // Horizontal
+			{
+				glm::vec3 c1 = glm::vec3(baseTr * glm::vec4(-halfLen * transform.Scale.x, 0.0f, 0.0f, 1.0f));
+				glm::vec3 c2 = glm::vec3(baseTr * glm::vec4(halfLen * transform.Scale.x, 0.0f, 0.0f, 1.0f));
+				float rad = cap.Radius * transform.Scale.y;
+				glm::mat4 c1Tr = glm::translate(glm::mat4(1.0f), c1) * glm::scale(glm::mat4(1.0f), glm::vec3(rad * 2.0f, rad * 2.0f, 1.0f));
+				glm::mat4 c2Tr = glm::translate(glm::mat4(1.0f), c2) * glm::scale(glm::mat4(1.0f), glm::vec3(rad * 2.0f, rad * 2.0f, 1.0f));
+				Renderer2D::DrawCircleCore(c1Tr, { 0.1f, 0.9f, 0.1f, 1.0f }, 0.025f, 0.005f, static_cast<uint32_t>(entity));
+				Renderer2D::DrawCircleCore(c2Tr, { 0.1f, 0.9f, 0.1f, 1.0f }, 0.025f, 0.005f, static_cast<uint32_t>(entity));
+				glm::vec3 top1 = glm::vec3(baseTr * glm::vec4(-halfLen * transform.Scale.x, rad, 0.0f, 1.0f));
+				glm::vec3 top2 = glm::vec3(baseTr * glm::vec4(halfLen * transform.Scale.x, rad, 0.0f, 1.0f));
+				glm::vec3 bot1 = glm::vec3(baseTr * glm::vec4(-halfLen * transform.Scale.x, -rad, 0.0f, 1.0f));
+				glm::vec3 bot2 = glm::vec3(baseTr * glm::vec4(halfLen * transform.Scale.x, -rad, 0.0f, 1.0f));
+				Renderer2D::DrawLineCore(top1, top2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+				Renderer2D::DrawLineCore(bot1, bot2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, PolygonCollider2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& poly = m_ActiveScene->m_Registry.get<PolygonCollider2DComponent>(entity);
+			if (!poly.ShowCollider) continue;
+			const auto pts = poly.GetPoints();
+			if (pts.size() < 3) continue;
+
+			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation)
+				* glm::translate(glm::mat4(1.0f), glm::vec3(poly.Offset.x, poly.Offset.y, 0.0f));
+
+			for (size_t i = 0; i < pts.size(); ++i)
+			{
+				size_t next = (i + 1) % pts.size();
+				glm::vec3 p1 = glm::vec3(baseTr * glm::vec4(pts[i].x * transform.Scale.x, pts[i].y * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 p2 = glm::vec3(baseTr * glm::vec4(pts[next].x * transform.Scale.x, pts[next].y * transform.Scale.y, 0.0f, 1.0f));
+				Renderer2D::DrawLineCore(p1, p2, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, ChainCollider2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& chain = m_ActiveScene->m_Registry.get<ChainCollider2DComponent>(entity);
+			if (!chain.ShowCollider) continue;
+			const auto pts = chain.GetPoints();
+			if (pts.size() < 2) continue;
+
+			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation)
+				* glm::translate(glm::mat4(1.0f), glm::vec3(chain.Offset.x, chain.Offset.y, 0.0f));
+
+			const size_t segmentCount = chain.Loop ? pts.size() : (pts.size() - 1);
+			for (size_t i = 0; i < segmentCount; ++i)
+			{
+				size_t next = (i + 1) % pts.size();
+				glm::vec3 p1 = glm::vec3(baseTr * glm::vec4(pts[i].x * transform.Scale.x, pts[i].y * transform.Scale.y, 0.0f, 1.0f));
+				glm::vec3 p2 = glm::vec3(baseTr * glm::vec4(pts[next].x * transform.Scale.x, pts[next].y * transform.Scale.y, 0.0f, 1.0f));
+				Renderer2D::DrawLineCore(p1, p2, { 0.2f, 0.9f, 0.8f, 1.0f }, static_cast<uint32_t>(entity));
+			}
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, PlatformEffector2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& effector = m_ActiveScene->m_Registry.get<PlatformEffector2DComponent>(entity);
+			if (!effector.OneWay) continue;
+
+			const float rotZ = transform.GetEulerAngles().z + glm::radians(effector.RotationalOffset);
+			const glm::vec3 center = transform.Location;
+			const glm::vec3 upDir = { -std::sin(rotZ), std::cos(rotZ), 0.0f };
+			const glm::vec3 rightDir = { std::cos(rotZ), std::sin(rotZ), 0.0f };
+
+			const glm::vec3 arrowTip = center + upDir * 0.7f;
+			Renderer2D::DrawLineCore(center, arrowTip, { 1.0f, 0.65f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+
+			const glm::vec3 wing1 = arrowTip - upDir * 0.18f + rightDir * 0.12f;
+			const glm::vec3 wing2 = arrowTip - upDir * 0.18f - rightDir * 0.12f;
+			Renderer2D::DrawLineCore(arrowTip, wing1, { 1.0f, 0.65f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+			Renderer2D::DrawLineCore(arrowTip, wing2, { 1.0f, 0.65f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, TilemapComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& tilemapComp = m_ActiveScene->m_Registry.get<TilemapComponent>(entity);
+			if (!tilemapComp.GenerateCollision || !tilemapComp.Tilemap.HasPath())
+				continue;
+
+			const std::string& tmPath = StringPool::Get().PathOf(tilemapComp.Tilemap.Path);
+			if (tmPath.empty())
+				continue;
+			auto tm = Tilemap::GetOrLoad(tmPath);
+			if (!tm)
+				continue;
+
+			const float cellW = (tilemapComp.CellSize.x > 0.0f ? tilemapComp.CellSize.x : tm->GetCellSize().x) * transform.Scale.x;
+			const float cellH = (tilemapComp.CellSize.y > 0.0f ? tilemapComp.CellSize.y : tm->GetCellSize().y) * transform.Scale.y;
+			const float mapW = static_cast<float>(tm->GetWidth()) * cellW;
+			const float mapH = static_cast<float>(tm->GetHeight()) * cellH;
+			const glm::mat4 baseTr = glm::translate(glm::mat4(1.0f), transform.Location)
+				* glm::mat4_cast(transform.Rotation);
+
+			if (tilemapComp.ColliderType == 1) // CompositeChain
+			{
+				const auto contours = tm->ComputeCompositeChainContours();
+				for (const auto& contour : contours)
+				{
+					if (contour.size() < 2) continue;
+					for (size_t i = 0; i < contour.size(); ++i)
+					{
+						const size_t next = (i + 1) % contour.size();
+						const float p0x = -mapW * 0.5f + (contour[i].x / tm->GetCellSize().x) * cellW;
+						const float p0y = +mapH * 0.5f - (contour[i].y / tm->GetCellSize().y) * cellH;
+						const float p1x = -mapW * 0.5f + (contour[next].x / tm->GetCellSize().x) * cellW;
+						const float p1y = +mapH * 0.5f - (contour[next].y / tm->GetCellSize().y) * cellH;
+						const glm::vec3 v0 = glm::vec3(baseTr * glm::vec4(p0x, p0y, 0.0f, 1.0f));
+						const glm::vec3 v1 = glm::vec3(baseTr * glm::vec4(p1x, p1y, 0.0f, 1.0f));
+						Renderer2D::DrawLineCore(v0, v1, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+					}
+				}
+			}
+			else if (tilemapComp.ColliderType == 0) // MergedBoxes
+			{
+				const auto rects = tm->ComputeMergedColliderRects();
+				for (const auto& r : rects)
+				{
+					const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
+					const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
+					const float rw = r.Width * cellW;
+					const float rh = r.Height * cellH;
+					const glm::mat4 rectTr = baseTr
+						* glm::translate(glm::mat4(1.0f), glm::vec3(cx, cy, 0.0f))
+						* glm::scale(glm::mat4(1.0f), glm::vec3(rw, rh, 1.0f));
+					Renderer2D::DrawRectCore(rectTr, { 0.1f, 0.9f, 0.1f, 1.0f }, static_cast<uint32_t>(entity));
+				}
+			}
+		}
+		// Phase 9: PointLight2D, GlobalLight2D & ShadowCaster2D debug wireframes
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, PointLight2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& pl = m_ActiveScene->m_Registry.get<PointLight2DComponent>(entity);
+			if (!pl.Enabled) continue;
+
+			const glm::vec3 center = transform.Location;
+			const glm::vec4 outerCol(pl.Color.r, pl.Color.g, pl.Color.b, 0.75f);
+			const glm::vec4 innerCol(1.0f, 0.95f, 0.55f, 0.45f);
+			constexpr int kSegs = 32;
+			const float outerR = std::max(0.05f, pl.OuterRadius);
+			const float innerR = std::clamp(pl.InnerRadius, 0.0f, outerR);
+
+			if (pl.OuterAngle >= 359.9f)
+			{
+				for (int i = 0; i < kSegs; ++i)
+				{
+					const float a0 = glm::two_pi<float>() * static_cast<float>(i) / static_cast<float>(kSegs);
+					const float a1 = glm::two_pi<float>() * static_cast<float>(i + 1) / static_cast<float>(kSegs);
+					const glm::vec3 d0(std::cos(a0), std::sin(a0), 0.0f);
+					const glm::vec3 d1(std::cos(a1), std::sin(a1), 0.0f);
+					Renderer2D::DrawLineCore(center + d0 * outerR, center + d1 * outerR, outerCol, static_cast<uint32_t>(entity));
+					if (innerR > 0.05f)
+						Renderer2D::DrawLineCore(center + d0 * innerR, center + d1 * innerR, innerCol, static_cast<uint32_t>(entity));
+				}
+			}
+			else
+			{
+				const float rotZ = transform.GetEulerAngles().z + glm::half_pi<float>();
+				const float halfOuter = glm::radians(glm::clamp(pl.OuterAngle, 1.0f, 360.0f) * 0.5f);
+				const glm::vec3 rayL(std::cos(rotZ + halfOuter), std::sin(rotZ + halfOuter), 0.0f);
+				const glm::vec3 rayR(std::cos(rotZ - halfOuter), std::sin(rotZ - halfOuter), 0.0f);
+				Renderer2D::DrawLineCore(center, center + rayL * outerR, outerCol, static_cast<uint32_t>(entity));
+				Renderer2D::DrawLineCore(center, center + rayR * outerR, outerCol, static_cast<uint32_t>(entity));
+				for (int i = 0; i < 16; ++i)
+				{
+					const float t0 = static_cast<float>(i) / 16.0f;
+					const float t1 = static_cast<float>(i + 1) / 16.0f;
+					const float a0 = (rotZ - halfOuter) + (2.0f * halfOuter) * t0;
+					const float a1 = (rotZ - halfOuter) + (2.0f * halfOuter) * t1;
+					Renderer2D::DrawLineCore(
+						center + glm::vec3(std::cos(a0), std::sin(a0), 0.0f) * outerR,
+						center + glm::vec3(std::cos(a1), std::sin(a1), 0.0f) * outerR,
+						outerCol, static_cast<uint32_t>(entity));
+				}
+			}
+		}
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, ShadowCaster2DComponent>())
+		{
+			const auto& transform = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& caster = m_ActiveScene->m_Registry.get<ShadowCaster2DComponent>(entity);
+			if (!caster.ShowGizmo || !caster.CastShadows) continue;
+
+			const auto poly = Lighting2D::ExtractWorldPolygon(transform, caster);
+			const size_t n = poly.size();
+			for (size_t i = 0; i < n; ++i)
+			{
+				const glm::vec2& p0 = poly[i];
+				const glm::vec2& p1 = poly[(i + 1) % n];
+				Renderer2D::DrawLineCore({ p0.x, p0.y, 0.0f }, { p1.x, p1.y, 0.0f },
+					{ 0.78f, 0.35f, 0.95f, 0.95f }, static_cast<uint32_t>(entity));
+			}
+
+			for (auto lightEntity : m_ActiveScene->m_Registry.view<TransformComponent, PointLight2DComponent>())
+			{
+				const auto& lTr = m_ActiveScene->m_Registry.get<TransformComponent>(lightEntity);
+				const auto& pl = m_ActiveScene->m_Registry.get<PointLight2DComponent>(lightEntity);
+				if (!pl.Enabled || !pl.CastShadows) continue;
+
+				std::vector<Lighting2D::ShadowQuad2D> shadowQuads;
+				Lighting2D::ExtrudeShadowPolygon(
+					{ lTr.Location.x, lTr.Location.y }, pl.OuterRadius, poly,
+					std::min(caster.ExtrusionLength, 6.0f), caster.ShadowIntensity, shadowQuads);
+				for (const auto& sq : shadowQuads)
+				{
+					Renderer2D::DrawLineCore({ sq.A.x, sq.A.y, 0.0f }, { sq.AExtruded.x, sq.AExtruded.y, 0.0f },
+						{ 0.55f, 0.25f, 0.85f, 0.42f }, static_cast<uint32_t>(entity));
+					Renderer2D::DrawLineCore({ sq.B.x, sq.B.y, 0.0f }, { sq.BExtruded.x, sq.BExtruded.y, 0.0f },
+						{ 0.55f, 0.25f, 0.85f, 0.42f }, static_cast<uint32_t>(entity));
+					Renderer2D::DrawLineCore({ sq.AExtruded.x, sq.AExtruded.y, 0.0f }, { sq.BExtruded.x, sq.BExtruded.y, 0.0f },
+						{ 0.55f, 0.25f, 0.85f, 0.30f }, static_cast<uint32_t>(entity));
+				}
+			}
+		}
+
+		// Phase 10: 2D Physics Joints debug wireframes
+		auto resolveWorldAnchor = [&](entt::entity ent, const glm::vec2& localAnchor) -> glm::vec3
+		{
+			if (!m_ActiveScene->m_Registry.valid(ent)) return { 0.0f, 0.0f, 0.0f };
+			const auto* tr = m_ActiveScene->m_Registry.try_get<TransformComponent>(ent);
+			if (!tr) return { 0.0f, 0.0f, 0.0f };
+			const glm::mat4 m = glm::translate(glm::mat4(1.0f), tr->Location) * glm::mat4_cast(tr->Rotation);
+			return glm::vec3(m * glm::vec4(localAnchor.x * tr->Scale.x, localAnchor.y * tr->Scale.y, 0.0f, 1.0f));
+		};
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, DistanceJoint2DComponent>())
+		{
+			const auto& joint = m_ActiveScene->m_Registry.get<DistanceJoint2DComponent>(entity);
+			entt::entity other = joint.ConnectedEntity;
+			if (!m_ActiveScene->m_Registry.valid(other)) continue;
+			const glm::vec3 pA = resolveWorldAnchor(entity, joint.AnchorSelf);
+			const glm::vec3 pB = resolveWorldAnchor(other, joint.AnchorOther);
+			Renderer2D::DrawLineCore(pA, pB, { 0.25f, 0.85f, 0.95f, 0.90f }, static_cast<uint32_t>(entity));
+			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pA) * glm::scale(glm::mat4(1.0f), glm::vec3(0.12f)), { 0.25f, 0.95f, 0.95f, 1.0f }, 0.25f, 0.005f, static_cast<uint32_t>(entity));
+			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pB) * glm::scale(glm::mat4(1.0f), glm::vec3(0.12f)), { 0.25f, 0.95f, 0.95f, 1.0f }, 0.25f, 0.005f, static_cast<uint32_t>(entity));
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, RevoluteJoint2DComponent>())
+		{
+			const auto& joint = m_ActiveScene->m_Registry.get<RevoluteJoint2DComponent>(entity);
+			const glm::vec3 pA = resolveWorldAnchor(entity, joint.AnchorSelf);
+			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pA) * glm::scale(glm::mat4(1.0f), glm::vec3(0.20f)), { 0.95f, 0.85f, 0.25f, 1.0f }, 0.25f, 0.005f, static_cast<uint32_t>(entity));
+			entt::entity other = joint.ConnectedEntity;
+			if (m_ActiveScene->m_Registry.valid(other))
+			{
+				const glm::vec3 pB = resolveWorldAnchor(other, joint.AnchorOther);
+				Renderer2D::DrawLineCore(pA, pB, { 0.95f, 0.85f, 0.25f, 0.70f }, static_cast<uint32_t>(entity));
+			}
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, PrismaticJoint2DComponent>())
+		{
+			const auto& joint = m_ActiveScene->m_Registry.get<PrismaticJoint2DComponent>(entity);
+			const glm::vec3 pA = resolveWorldAnchor(entity, joint.AnchorSelf);
+			const auto& tr = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const glm::vec2 localAxis = glm::length(joint.Axis) > 1e-5f ? glm::normalize(joint.Axis) : glm::vec2(1.0f, 0.0f);
+			const float rotZ = tr.GetEulerAngles().z;
+			const glm::vec2 worldAxis(
+				localAxis.x * std::cos(rotZ) - localAxis.y * std::sin(rotZ),
+				localAxis.x * std::sin(rotZ) + localAxis.y * std::cos(rotZ)
+			);
+			const float low = joint.EnableLimit ? joint.LowerTranslation : -2.0f;
+			const float high = joint.EnableLimit ? joint.UpperTranslation : 2.0f;
+			const glm::vec3 r0 = pA + glm::vec3(worldAxis * low, 0.0f);
+			const glm::vec3 r1 = pA + glm::vec3(worldAxis * high, 0.0f);
+			Renderer2D::DrawLineCore(r0, r1, { 0.95f, 0.45f, 0.25f, 0.90f }, static_cast<uint32_t>(entity));
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, WheelJoint2DComponent>())
+		{
+			const auto& joint = m_ActiveScene->m_Registry.get<WheelJoint2DComponent>(entity);
+			const glm::vec3 pA = resolveWorldAnchor(entity, joint.AnchorSelf);
+			entt::entity other = joint.ConnectedEntity;
+			const glm::vec3 pB = m_ActiveScene->m_Registry.valid(other) ? resolveWorldAnchor(other, joint.AnchorOther) : pA;
+			Renderer2D::DrawLineCore(pA, pB, { 0.85f, 0.35f, 0.85f, 0.90f }, static_cast<uint32_t>(entity));
+			Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), pB) * glm::scale(glm::mat4(1.0f), glm::vec3(0.35f)), { 0.85f, 0.35f, 0.85f, 0.90f }, 0.15f, 0.005f, static_cast<uint32_t>(entity));
+		}
+
+		// Phase 11: 2D Effectors debug wireframes
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, AreaEffector2DComponent>())
+		{
+			const auto& tr = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& area = m_ActiveScene->m_Registry.get<AreaEffector2DComponent>(entity);
+			if (!area.Enabled) continue;
+
+			const glm::vec3 center = tr.Location;
+			if (area.ForceMode == 0) // Directional wind arrow
+			{
+				glm::vec2 dir = area.ForceDirection;
+				if (!area.UseGlobalCoordinates)
+				{
+					const float rz = tr.GetEulerAngles().z;
+					dir = { dir.x * std::cos(rz) - dir.y * std::sin(rz), dir.x * std::sin(rz) + dir.y * std::cos(rz) };
+				}
+				if (glm::length(dir) > 1e-4f) dir = glm::normalize(dir);
+				const glm::vec3 tip = center + glm::vec3(dir * 0.9f, 0.0f);
+				Renderer2D::DrawLineCore(center, tip, { 0.25f, 0.95f, 0.45f, 0.95f }, static_cast<uint32_t>(entity));
+				const glm::vec3 wing1 = tip - glm::vec3(dir * 0.22f, 0.0f) + glm::vec3(-dir.y * 0.12f, dir.x * 0.12f, 0.0f);
+				const glm::vec3 wing2 = tip - glm::vec3(dir * 0.22f, 0.0f) - glm::vec3(-dir.y * 0.12f, dir.x * 0.12f, 0.0f);
+				Renderer2D::DrawLineCore(tip, wing1, { 0.25f, 0.95f, 0.45f, 0.95f }, static_cast<uint32_t>(entity));
+				Renderer2D::DrawLineCore(tip, wing2, { 0.25f, 0.95f, 0.45f, 0.95f }, static_cast<uint32_t>(entity));
+			}
+			else // Center ring for point attractor/repulsor
+			{
+				Renderer2D::DrawCircleCore(glm::translate(glm::mat4(1.0f), center) * glm::scale(glm::mat4(1.0f), glm::vec3(0.4f)),
+					{ 0.25f, 0.95f, 0.55f, 0.85f }, 0.2f, 0.005f, static_cast<uint32_t>(entity));
+			}
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, BuoyancyEffector2DComponent>())
+		{
+			const auto& tr = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& buoy = m_ActiveScene->m_Registry.get<BuoyancyEffector2DComponent>(entity);
+			if (!buoy.Enabled) continue;
+
+			const float waterY = tr.Location.y + buoy.SurfaceLevel;
+			const float halfW = 0.5f * std::max(tr.Scale.x, 1.0f);
+			const glm::vec3 p0(tr.Location.x - halfW, waterY, 0.0f);
+			const glm::vec3 p1(tr.Location.x + halfW, waterY, 0.0f);
+			Renderer2D::DrawLineCore(p0, p1, { 0.2f, 0.65f, 0.95f, 0.95f }, static_cast<uint32_t>(entity));
+		}
+
+		for (auto entity : m_ActiveScene->m_Registry.view<TransformComponent, SurfaceEffector2DComponent>())
+		{
+			const auto& tr = m_ActiveScene->m_Registry.get<TransformComponent>(entity);
+			const auto& surf = m_ActiveScene->m_Registry.get<SurfaceEffector2DComponent>(entity);
+			if (!surf.Enabled) continue;
+
+			const float halfW = 0.5f * std::max(tr.Scale.x, 1.0f);
+			const float sign = surf.Speed >= 0.0f ? 1.0f : -1.0f;
+			const glm::vec3 center = tr.Location;
+			Renderer2D::DrawLineCore(center - glm::vec3(halfW * 0.4f * sign, 0.0f, 0.0f),
+				center + glm::vec3(halfW * 0.4f * sign, 0.0f, 0.0f), { 0.95f, 0.85f, 0.2f, 0.9f }, static_cast<uint32_t>(entity));
+		}
+	}
+
+	void SceneRenderer::RenderParticles(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		WLD_TRACE_FUNCTION();
+		if (!m_ActiveScene) return;
+
+		auto& partSys = GetGlobalParticleSystem();
+
+		// 3D 相机对齐基准基底 (Billboard Basis)
+		const glm::vec3 camRight = glm::normalize(glm::vec3(cameraTransform[0]));
+		const glm::vec3 camUp = glm::normalize(glm::vec3(cameraTransform[1]));
+		const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
+
+		glm::mat4 billboardRot(1.0f);
+		billboardRot[0] = glm::vec4(camRight, 0.0f);
+		billboardRot[1] = glm::vec4(camUp, 0.0f);
+		billboardRot[2] = glm::vec4(-camForward, 0.0f);
+
+		for (auto entity : m_ActiveScene->m_Registry.view<VfxComponent>())
+		{
+			const auto& vfx = m_ActiveScene->m_Registry.get<VfxComponent>(entity);
+			if (vfx.PlaybackState == VfxPlaybackState::Stopped) continue;
+			if (!vfx.Effect.HasPath()) continue;
+
+			const std::string path = StringPool::Get().PathOf(vfx.Effect.Path);
+			const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
+			if (!asset) continue;
+
+			uint32_t entId = static_cast<uint32_t>(entity);
+			for (size_t i = 0; i < asset->Emitters.size(); ++i)
+			{
+				const auto& em = asset->Emitters[i];
+				if (!em.Enabled) continue;
+				uint32_t poolId = (entId << 8) | static_cast<uint32_t>(i);
+				if (!partSys.HasPoolForEntity(poolId)) continue;
+				auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
+				const auto& matSettings = pool.GetMaterialSettings();
+				Rhi::Handle<Rhi::Texture> particleTex = matSettings.TextureHandle;
+				if (!particleTex && !matSettings.TexturePath.empty())
+				{
+					const AssetRef texRef { StringPool::Get().InternPath(matSettings.TexturePath), AssetId() };
+					particleTex = ResolveTextureAsset(texRef);
+				}
+				const bool useSubUV = (matSettings.SubUVTilesX * matSettings.SubUVTilesY) > 1u;
+				const ParticleBlendMode blendMode = matSettings.BlendMode;
+				const bool isAdditive = (blendMode == ParticleBlendMode::Additive);
+
+				for (const auto& p : pool.GetParticles())
+				{
+					if (!p.Active) continue;
+					glm::vec4 drawColor = p.Color * vfx.TintColor;
+					if (blendMode == ParticleBlendMode::Opaque)
+					{
+						drawColor.a = 1.0f;
+					}
+
+					glm::mat4 quadTransform;
+					if (em.FacingMode == ParticleRenderMode::HorizontalQuad)
+					{
+						glm::vec3 pos = p.Position;
+						if (pos.y <= 0.001f) pos.y += 0.02f;
+						quadTransform = glm::translate(glm::mat4(1.0f), pos)
+							* glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f))
+							* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
+							* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
+					}
+					else if (em.FacingMode == ParticleRenderMode::StretchedVelocity)
+					{
+						glm::vec3 vel = p.Velocity;
+						float speed = glm::length(vel);
+						glm::vec3 velDir = (speed > 1e-4f) ? (vel / speed) : camForward;
+
+						glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+						glm::vec3 toCam = camPos - p.Position;
+						float toCamLen = glm::length(toCam);
+						toCam = (toCamLen > 1e-4f) ? (toCam / toCamLen) : -camForward;
+
+						glm::vec3 side = glm::cross(velDir, toCam);
+						float sideLen = glm::length(side);
+						if (sideLen > 1e-4f)
+							side /= sideLen;
+						else
+							side = camRight;
+
+						glm::vec3 facing = glm::cross(side, velDir);
+
+						float stretchLen = std::max(p.Size.y, p.Size.x * 2.5f);
+						if (speed > 0.5f)
+							stretchLen = std::max(stretchLen, speed * 0.12f);
+
+						quadTransform = glm::mat4(1.0f);
+						quadTransform[0] = glm::vec4(side * p.Size.x, 0.0f);
+						quadTransform[1] = glm::vec4(velDir * stretchLen, 0.0f);
+						quadTransform[2] = glm::vec4(facing, 0.0f);
+						quadTransform[3] = glm::vec4(p.Position, 1.0f);
+						quadTransform = quadTransform * glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+					}
+					else if (em.FacingMode == ParticleRenderMode::Quad2D)
+					{
+						quadTransform = glm::translate(glm::mat4(1.0f), p.Position)
+							* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
+							* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
+					}
+					else
+					{
+						// Default: Billboard facing 3D camera
+						quadTransform = glm::translate(glm::mat4(1.0f), p.Position)
+							* billboardRot
+							* glm::rotate(glm::mat4(1.0f), p.Rotation, glm::vec3(0.0f, 0.0f, 1.0f))
+							* glm::scale(glm::mat4(1.0f), glm::vec3(p.Size.x, p.Size.y, 1.0f));
+					}
+
+					// 传入 -60000 保证粒子保持自发光纯色，不被场景 2D 环境光衰减污染
+					if (particleTex || useSubUV)
+					{
+						const glm::vec4 uvRect = World::ComputeSubUVRect(
+							p.SubUVFrameIndex, matSettings.SubUVTilesX, matSettings.SubUVTilesY);
+						const glm::vec2 uvCoords[4] = {
+							{ uvRect.x, uvRect.y },
+							{ uvRect.z, uvRect.y },
+							{ uvRect.z, uvRect.w },
+							{ uvRect.x, uvRect.w }
+						};
+						Renderer2D::DrawQuadCore(quadTransform, particleTex, drawColor, uvCoords, 1.0f, static_cast<int>(entId), nullptr, -60000, isAdditive);
+					}
+					else
+					{
+						Renderer2D::DrawQuadCore(quadTransform, nullptr, drawColor, nullptr, 1.0f, static_cast<int>(entId), nullptr, -60000, isAdditive);
+					}
+				}
+			}
+		}
+	}
+
+
+	void SceneRenderer::RenderPrecipitation(
+		const Camera& camera,
+		const glm::mat4& cameraTransform,
+		const WeatherAtmosphereParams& weather,
+		float sceneTime)
+	{
+		if (weather.PrecipitationIntensity <= 0.01f || weather.PrecipitationType == 0)
+			return;
+
+		WLD_TRACE_FUNCTION();
+		const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+
+		// 降水局部环绕盒：以相机为中心 [24m x 16m x 24m]
+		const float boxExtentXZ = 24.0f;
+		const float boxExtentY = 16.0f;
+
+		const int baseCount = (weather.PrecipitationType == 2) ? 400 : 700;
+		const int count = std::clamp(static_cast<int>(baseCount * weather.PrecipitationIntensity), 10, 1500);
+
+		auto hash = [](uint32_t x) -> float {
+			x = ((x >> 16) ^ x) * 0x45d9f3b;
+			x = ((x >> 16) ^ x) * 0x45d9f3b;
+			x = (x >> 16) ^ x;
+			return static_cast<float>(x & 0x00FFFFFF) / 16777216.0f;
+		};
+
+		if (weather.PrecipitationType == 1 || weather.PrecipitationType == 3) // Rain / Storm
+		{
+			const float fallSpeed = (weather.PrecipitationType == 3) ? 28.0f : 22.0f;
+			const glm::vec3 windDrift = weather.WindVelocity * 0.45f;
+			const glm::vec3 fallVelocity = glm::vec3(windDrift.x, -fallSpeed, windDrift.z);
+			const glm::vec3 fallDir = glm::normalize(fallVelocity);
+			const float streakLen = (weather.PrecipitationType == 3 ? 0.65f : 0.45f);
+
+			const float alpha = std::clamp(weather.PrecipitationIntensity * 0.45f, 0.08f, 0.85f);
+			const glm::vec4 rainColor(0.72f, 0.82f, 0.95f, alpha);
+
+			for (int i = 0; i < count; ++i)
+			{
+				const float hx = hash(static_cast<uint32_t>(i * 3 + 1));
+				const float hy = hash(static_cast<uint32_t>(i * 3 + 2));
+				const float hz = hash(static_cast<uint32_t>(i * 3 + 3));
+
+				const float t = sceneTime + hx * 50.0f;
+				float rx = std::fmod(hx * boxExtentXZ + fallVelocity.x * t, boxExtentXZ);
+			if (rx < 0.0f) rx += boxExtentXZ;
+			rx -= boxExtentXZ * 0.5f;
+
+				float ry = std::fmod(hy * boxExtentY + fallVelocity.y * t, boxExtentY);
+			if (ry < 0.0f) ry += boxExtentY;
+			ry -= boxExtentY * 0.5f;
+
+				float rz = std::fmod(hz * boxExtentXZ + fallVelocity.z * t, boxExtentXZ);
+			if (rz < 0.0f) rz += boxExtentXZ;
+			rz -= boxExtentXZ * 0.5f;
+
+				const glm::vec3 p0 = camPos + glm::vec3(rx, ry, rz);
+				const glm::vec3 p1 = p0 - fallDir * (streakLen * (0.8f + 0.4f * hz));
+
+				Renderer2D::DrawLineCore(p0, p1, rainColor);
+			}
+		}
+		else if (weather.PrecipitationType == 2) // Snow
+		{
+			const float alpha = std::clamp(weather.PrecipitationIntensity * 0.80f, 0.15f, 0.95f);
+			const glm::vec4 snowColor(0.95f, 0.97f, 1.0f, alpha);
+
+			for (int i = 0; i < count; ++i)
+			{
+				const float hx = hash(static_cast<uint32_t>(i * 3 + 1));
+				const float hy = hash(static_cast<uint32_t>(i * 3 + 2));
+				const float hz = hash(static_cast<uint32_t>(i * 3 + 3));
+
+				const float t = sceneTime * 1.5f + hx * 20.0f;
+				const float flutterX = std::sin(t * 2.2f + hy * 6.28f) * 0.5f;
+				const float flutterZ = std::cos(t * 1.8f + hz * 6.28f) * 0.5f;
+
+				const glm::vec3 fallVelocity = glm::vec3(
+					weather.WindVelocity.x * 0.15f + flutterX,
+					-2.4f,
+					weather.WindVelocity.z * 0.15f + flutterZ);
+
+				float rx = std::fmod(hx * boxExtentXZ + fallVelocity.x * t, boxExtentXZ);
+			if (rx < 0.0f) rx += boxExtentXZ;
+			rx -= boxExtentXZ * 0.5f;
+
+				float ry = std::fmod(hy * boxExtentY + fallVelocity.y * t, boxExtentY);
+			if (ry < 0.0f) ry += boxExtentY;
+			ry -= boxExtentY * 0.5f;
+
+				float rz = std::fmod(hz * boxExtentXZ + fallVelocity.z * t, boxExtentXZ);
+			if (rz < 0.0f) rz += boxExtentXZ;
+			rz -= boxExtentXZ * 0.5f;
+
+				const glm::vec3 flakePos = camPos + glm::vec3(rx, ry, rz);
+				const float sz = 0.045f + 0.035f * hy;
+
+				Renderer2D::DrawLineCore(flakePos - glm::vec3(sz, 0, 0), flakePos + glm::vec3(sz, 0, 0), snowColor);
+				Renderer2D::DrawLineCore(flakePos - glm::vec3(0, sz, 0), flakePos + glm::vec3(0, sz, 0), snowColor);
+				Renderer2D::DrawLineCore(flakePos - glm::vec3(0, 0, sz), flakePos + glm::vec3(0, 0, sz), snowColor);
+			}
+		}
+	}
+
+	void SceneRenderer::OnResize(uint32_t width, uint32_t height)
+	{
+		// P4-3:宿主传进来的是**请求/显示尺寸**(编辑器视口/运行时窗口)。渲染目标按
+		// rendering.render_scale 换算;窗口尺寸、WUI/UI 与视口在屏幕上的占位都不受影响
+		// —— 视口照旧把这张纹理拉伸显示(与显示任意尺寸目标同一条路径)。
+		m_RequestedWidth = std::max(1u, width);
+		m_RequestedHeight = std::max(1u, height);
+		ApplyRenderScale();
+	}
+
+	void SceneRenderer::CaptureFrame(const std::filesystem::path& path) const
+	{
+		// 走后端无关的 RHI 读回:GL 的延迟命令列表与 Vulkan 的呈现路径下,
+		// 旧的 glReadPixels 版本分别只能抓到清屏色与全黑。
+		Renderer::CaptureTexture(path, m_ColorTexture, m_Width, m_Height);
+		// 诊断/验证(D7-1c):WLD_CAPTURE_ENTITY=<路径> 时把 entity-id 附件一起读回。
+		// 附件是 R32_SINT:0xFFFFFFFF(-1)读成白色 = 该像素没有实体,其它值就是实体句柄。
+		if (const char* entityPath = std::getenv("WLD_CAPTURE_ENTITY"))
+			Renderer::CaptureTexture(entityPath, m_EntityTexture, m_Width, m_Height);
+	}
+
+	// D7-1c:视口点选的后端无关读回。entity-id 附件是 R32_SINT 颜色附件,一帧结束停在
+	// ColorAttachment(见 Init() 里 RenderPassAttachment::FinalLayout)。这里复用截图那条
+	// RHI 通路(CopyTextureToBuffer + Map):整张附件拷到 host-visible buffer 后取目标像素。
+	// 旧实现走 Framebuffer::ReadPixel(glReadPixels),Vulkan 下读不到东西。
+	// 点击是低频操作,因此接受一次 WaitIdle + 全附件拷贝的代价。
+	// 整张 entity-id 附件的读回(显示朝向:第 0 行 = 画面顶部,见 ReadEntityIdAt 的说明)。
+	// 自动化自检用它扫描可见实体,再逐点走 ReadEntityIdAt 验证拾取路径。
+	bool SceneRenderer::ReadEntityIdBuffer(std::vector<int32_t>& outIds)
+	{
+		if (!m_Device || !m_EntityTexture || m_Width == 0 || m_Height == 0)
+			return false;
+
+		Rhi::BufferDesc readbackDesc;
+		readbackDesc.Size = static_cast<uint64_t>(m_Width) * m_Height * 4;
+		readbackDesc.Usage = Rhi::BufferUsageTransferDst;
+		readbackDesc.Memory = Rhi::MemoryHint::HostVisible;
+		readbackDesc.DebugName = "PickReadback";
+		Rhi::Handle<Rhi::Buffer> readback = m_Device->CreateBuffer(readbackDesc);
+		if (!readback)
+		{
+			WLD_CORE_ERROR("[pick] failed to create readback buffer");
+			return false;
+		}
+		// 与截图同样复用队列:每次点选都建队列会泄漏后端对象。
+		static Rhi::Handle<Rhi::CommandQueue> s_PickQueue;
+		if (!s_PickQueue)
+			s_PickQueue = m_Device->CreateQueue("Pick");
+		if (!s_PickQueue)
+			return false;
+		// 先等干净:保证读到的是点击前最后一次提交的附件内容。
+		m_Device->WaitIdle();
+
+		s_PickQueue->ExecuteImmediate([&](Rhi::CommandBuffer& cmd)
+		{
+			Rhi::ResourceBarrier toCopy;
+			toCopy.Texture = m_EntityTexture;
+			toCopy.Before = Rhi::ResourceState::ColorAttachment;
+			toCopy.After = Rhi::ResourceState::CopySrc;
+			cmd.PipelineBarrier({ toCopy });
+			cmd.CopyTextureToBuffer(m_EntityTexture, readback, 0);
+			Rhi::ResourceBarrier back;
+			back.Texture = m_EntityTexture;
+			back.Before = Rhi::ResourceState::CopySrc;
+			back.After = Rhi::ResourceState::ColorAttachment;
+			cmd.PipelineBarrier({ back });
+		});
+
+		const int32_t* pixels = static_cast<const int32_t*>(readback->Map());
+		if (!pixels)
+		{
+			WLD_CORE_ERROR("[pick] readback buffer is not mappable on this backend");
+			return false;
+		}
+		// 行序:必须和**显示**一致。场景纹理由 WUI 以 UV {0,1,1,-1} 贴到视口(上下翻转,
+		// 见 ViewportPanel 的 m_SceneImage->Uv),因此视口局部坐标 y 对应的是附件里的
+		// 第 (Height-1-y) 行 —— 两个后端都是这个约定(实测 GL/Vulkan 附件逐像素一致)。
+		// 不翻行的话可点区域就是画面上物体的**上下镜像**(用户 2026-09-16 反馈:
+		// "点方块任意位置应该选中,而且方形区域位置不对")。
+		outIds.resize(static_cast<size_t>(m_Width) * m_Height);
+		for (uint32_t row = 0; row < m_Height; ++row)
+		{
+			const size_t sourceRow = m_Height - 1 - row;
+			std::memcpy(outIds.data() + static_cast<size_t>(row) * m_Width,
+				pixels + sourceRow * m_Width, static_cast<size_t>(m_Width) * sizeof(int32_t));
+		}
+		readback->Unmap();
+		return true;
+	}
+
+	int32_t SceneRenderer::ReadEntityIdAt(int32_t x, int32_t y)
+	{
+		if (x < 0 || y < 0 || x >= static_cast<int32_t>(m_Width) || y >= static_cast<int32_t>(m_Height))
+			return -1;
+		std::vector<int32_t> ids;
+		if (!ReadEntityIdBuffer(ids))
+			return -1;
+		const int32_t id = ids[static_cast<size_t>(y) * m_Width + static_cast<uint32_t>(x)];
+		if (std::getenv("WLD_TRACE_UI"))
+			WLD_CORE_INFO("[pick] readback {0}x{1} at({2},{3}) id={4}", m_Width, m_Height, x, y, id);
+		return id;
+	}
+
+	void SceneRenderer::WarnOnce(const std::string& key, const std::string& message)
+	{
+		if (m_WarnedPaths.insert(key).second)
+			WLD_CORE_WARN("{0}", message);
+	}
+
+	void SceneRenderer::RenderGroundGrid(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		if (!m_Options.ShowGrid)
+			return;
+
+		const glm::vec3 camPos = glm::vec3(cameraTransform[3]);
+		const glm::vec3 camForward = -glm::normalize(glm::vec3(cameraTransform[2]));
+
+		const bool isOrtho = (std::abs(camera.GetProjectionMatrix()[3][3] - 1.0f) < 1e-4f);
+		const float orthoHeight = isOrtho
+			? (2.0f / std::max(1e-5f, std::abs(camera.GetProjectionMatrix()[1][1])))
+			: 0.0f;
+
+		// 正交立面视图 (Front/Back 看 XY 平面，或 Right/Left 看 ZY 平面): 自适应绘制对应立面网格
+		// (Top/Bottom 俯仰视看 XZ 平面，自然落入下方通用 XZ 地面网格)
+		if (isOrtho && (std::abs(camForward.z) > 0.85f || std::abs(camForward.x) > 0.85f))
+		{
+			const bool isXY = std::abs(camForward.z) > 0.85f;
+			const float viewSpan = std::clamp(orthoHeight * 1.5f, 20.0f, 1500.0f);
+			const float centerH = isXY ? camPos.x : camPos.z;
+			const float centerV = camPos.y;
+			const float startH = std::floor((centerH - viewSpan) / 10.0f) * 10.0f;
+			const float endH = std::ceil((centerH + viewSpan) / 10.0f) * 10.0f;
+			const float startV = std::floor((centerV - viewSpan) / 10.0f) * 10.0f;
+			const float endV = std::ceil((centerV + viewSpan) / 10.0f) * 10.0f;
+
+			const auto pt = [isXY](float h, float v) -> glm::vec3 {
+				return isXY ? glm::vec3(h, v, 0.0f) : glm::vec3(0.0f, v, h);
+			};
+
+			// 10m 主网格
+			const glm::vec4 majorCol { 0.45f, 0.55f, 0.65f, 0.35f };
+			for (float h = startH; h <= endH + 0.01f; h += 10.0f)
+			{
+				if (std::abs(h) < 0.01f) continue;
+				Renderer2D::DrawLineCore(pt(h, startV), pt(h, endV), majorCol);
+			}
+			for (float v = startV; v <= endV + 0.01f; v += 10.0f)
+			{
+				if (std::abs(v) < 0.01f) continue;
+				Renderer2D::DrawLineCore(pt(startH, v), pt(endH, v), majorCol);
+			}
+
+			// 1m 次网格 (近距离平滑浮现)
+			if (orthoHeight < 80.0f)
+			{
+				const float alpha = std::clamp(1.0f - (orthoHeight - 25.0f) / 55.0f, 0.0f, 1.0f) * 0.18f;
+				const glm::vec4 minorCol { 0.45f, 0.55f, 0.65f, alpha };
+				const float mStartH = std::floor((centerH - viewSpan) / 1.0f) * 1.0f;
+				const float mEndH = std::ceil((centerH + viewSpan) / 1.0f) * 1.0f;
+				const float mStartV = std::floor((centerV - viewSpan) / 1.0f) * 1.0f;
+				const float mEndV = std::ceil((centerV + viewSpan) / 1.0f) * 1.0f;
+				for (float h = mStartH; h <= mEndH + 0.01f; h += 1.0f)
+				{
+					if (std::fmod(std::abs(h), 10.0f) < 0.01f) continue;
+					Renderer2D::DrawLineCore(pt(h, mStartV), pt(h, mEndV), minorCol);
+				}
+				for (float v = mStartV; v <= mEndV + 0.01f; v += 1.0f)
+				{
+					if (std::fmod(std::abs(v), 10.0f) < 0.01f) continue;
+					Renderer2D::DrawLineCore(pt(mStartH, v), pt(mEndH, v), minorCol);
+				}
+			}
+
+			// 横轴基准线 (XY下为X轴红线, ZY下为Z轴蓝线) 与 纵轴基准线 (Y轴绿线)
+			const glm::vec4 hAxisCol = isXY ? glm::vec4(0.78f, 0.32f, 0.32f, 0.70f) : glm::vec4(0.32f, 0.52f, 0.85f, 0.70f);
+			Renderer2D::DrawLineCore(pt(startH, 0.0f), pt(endH, 0.0f), hAxisCol);
+			Renderer2D::DrawLineCore(pt(0.0f, startV), pt(0.0f, endV), { 0.32f, 0.78f, 0.38f, 0.70f });
+			return;
+		}
+
+		// 1. 动态自适应视场覆盖: 随视距/高度自适应扩展，保证正交与透视拉远时绝不半截截断
+		const float camHeight = std::abs(camPos.y);
+		const float groundDist = std::max(camHeight, std::sqrt(camPos.x * camPos.x + camPos.z * camPos.z));
+		const float dynamicRadius = std::clamp(800.0f + groundDist * 5.0f, 1000.0f, 4000.0f);
+
+		// 2. 视线前推重心: 确保平视或俯视时，视线前方地平线深处完全被地网铺满
+		const glm::vec2 horizForward = glm::length(glm::vec2(camForward.x, camForward.z)) > 1e-4f
+			? glm::normalize(glm::vec2(camForward.x, camForward.z))
+			: glm::vec2(0.0f, -1.0f);
+		const float forwardBias = dynamicRadius * 0.40f;
+		const glm::vec2 gridCenter = glm::vec2(camPos.x, camPos.z) + horizForward * forwardBias;
+
+		// 3. 真实物理距离驱动的 LOD 门禁因子:
+		// - 距离地面 <= 60m 时，1m 细网格在相机与焦点周围自然浮现，近距离观察特效细节精致生动
+		const float camDistToGround = std::max(camHeight, groundDist);
+		const float minorLodWeight = std::clamp(1.0f - (camDistToGround - 15.0f) / 35.0f, 0.0f, 1.0f);
+
+		// - 中景 10m 网格随极远视距平滑过渡
+		const float majorLodWeight = (camDistToGround > 600.0f)
+			? std::clamp(1.0f - (camDistToGround - 600.0f) / 400.0f, 0.0f, 1.0f)
+			: 1.0f;
+
+		// 检查场景是否存在 3D 地貌实体：若存在，地网在起伏地貌区域由地貌本身充当基准，裁剪地表穿插以消灭破面虚线
+		bool hasTerrain = false;
+		glm::vec2 terrainMin(0.0f), terrainMax(0.0f);
+		if (m_ActiveScene)
+		{
+			for (auto [handle, trans, comp] : m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>().each())
+			{
+				if (m_ActiveScene->IsEntityInActiveDataLayers(handle))
+				{
+					hasTerrain = true;
+					const auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+					const float w = data ? data->GetWorldWidth() : 512.0f;
+					const float h = data ? data->GetWorldHeight() : 512.0f;
+					terrainMin = glm::vec2(trans.Location.x, trans.Location.z);
+					terrainMax = terrainMin + glm::vec2(w, h);
+					break;
+				}
+			}
+		}
+
+		constexpr float gridY = -0.05f;
+		const auto drawGridLineX = [&](float x, float z0, float z1, const glm::vec4& col) {
+			if (hasTerrain && x >= terrainMin.x && x <= terrainMax.x)
+			{
+				if (z0 < terrainMin.y)
+					Renderer2D::DrawLineCore(glm::vec3(x, gridY, z0), glm::vec3(x, gridY, std::min(z1, terrainMin.y)), col);
+				if (z1 > terrainMax.y)
+					Renderer2D::DrawLineCore(glm::vec3(x, gridY, std::max(z0, terrainMax.y)), glm::vec3(x, gridY, z1), col);
+			}
+			else
+			{
+				Renderer2D::DrawLineCore(glm::vec3(x, gridY, z0), glm::vec3(x, gridY, z1), col);
+			}
+		};
+
+		const auto drawGridLineZ = [&](float z, float x0, float x1, const glm::vec4& col) {
+			if (hasTerrain && z >= terrainMin.y && z <= terrainMax.y)
+			{
+				if (x0 < terrainMin.x)
+					Renderer2D::DrawLineCore(glm::vec3(x0, gridY, z), glm::vec3(std::min(x1, terrainMin.x), gridY, z), col);
+				if (x1 > terrainMax.x)
+					Renderer2D::DrawLineCore(glm::vec3(std::max(x0, terrainMax.x), gridY, z), glm::vec3(x1, gridY, z), col);
+			}
+			else
+			{
+				Renderer2D::DrawLineCore(glm::vec3(x0, gridY, z), glm::vec3(x1, gridY, z), col);
+			}
+		};
+
+		const float macroStep = (dynamicRadius > 1200.0f) ? 100.0f : 50.0f;
+		constexpr float kMajorStep = 10.0f;
+		constexpr float kMinorStep = 1.0f;
+
+		// ------------------ LOD 2: 宏观大网格 (覆盖至地平线 1500m~3500m 极深远视域) ------------------
+		{
+			const float startX = std::floor((gridCenter.x - dynamicRadius) / macroStep) * macroStep;
+			const float endX = std::ceil((gridCenter.x + dynamicRadius) / macroStep) * macroStep;
+			const float startZ = std::floor((gridCenter.y - dynamicRadius) / macroStep) * macroStep;
+			const float endZ = std::ceil((gridCenter.y + dynamicRadius) / macroStep) * macroStep;
+
+			for (float x = startX; x <= endX + 0.01f; x += macroStep)
+			{
+				const float dist = std::abs(x - gridCenter.x);
+				const float normDist = dist / dynamicRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.28f;
+				if (alpha <= 0.01f) continue;
+				const bool isZAxis = (std::abs(x) < 0.01f);
+				const glm::vec4 color = isZAxis
+					? glm::vec4(0.38f, 0.48f, 0.70f, 0.65f) // Z 轴微弱暗蓝
+					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
+				drawGridLineX(x, startZ, endZ, color);
+			}
+			for (float z = startZ; z <= endZ + 0.01f; z += macroStep)
+			{
+				const float dist = std::abs(z - gridCenter.y);
+				const float normDist = dist / dynamicRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.28f;
+				if (alpha <= 0.01f) continue;
+				const bool isXAxis = (std::abs(z) < 0.01f);
+				const glm::vec4 color = isXAxis
+					? glm::vec4(0.68f, 0.38f, 0.38f, 0.65f) // X 轴微弱暗红
+					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
+				drawGridLineZ(z, startX, endX, color);
+			}
+		}
+
+		// ------------------ LOD 1: 中景 10m 主网格 (以视线前推重心扩展至 800m+ 范围，完全铺满视面上半部) ------------------
+		if (majorLodWeight > 0.01f)
+		{
+			const float midRadius = std::min(dynamicRadius * 0.85f, 900.0f);
+			const float startX = std::floor((gridCenter.x - midRadius) / kMajorStep) * kMajorStep;
+			const float endX = std::ceil((gridCenter.x + midRadius) / kMajorStep) * kMajorStep;
+			const float startZ = std::floor((gridCenter.y - midRadius) / kMajorStep) * kMajorStep;
+			const float endZ = std::ceil((gridCenter.y + midRadius) / kMajorStep) * kMajorStep;
+
+			for (float x = startX; x <= endX + 0.01f; x += kMajorStep)
+			{
+				if (std::fmod(std::abs(x), macroStep) < 0.01f) continue; // 避免与大线重叠
+				const float dist = std::abs(x - gridCenter.x);
+				const float normDist = dist / midRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.26f * majorLodWeight;
+				if (alpha <= 0.01f) continue;
+				const bool isZAxis = (std::abs(x) < 0.01f);
+				const glm::vec4 color = isZAxis
+					? glm::vec4(0.38f, 0.48f, 0.70f, 0.60f)
+					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
+				drawGridLineX(x, startZ, endZ, color);
+			}
+			for (float z = startZ; z <= endZ + 0.01f; z += kMajorStep)
+			{
+				if (std::fmod(std::abs(z), macroStep) < 0.01f) continue;
+				const float dist = std::abs(z - gridCenter.y);
+				const float normDist = dist / midRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.26f * majorLodWeight;
+				if (alpha <= 0.01f) continue;
+				const bool isXAxis = (std::abs(z) < 0.01f);
+				const glm::vec4 color = isXAxis
+					? glm::vec4(0.68f, 0.38f, 0.38f, 0.60f)
+					: glm::vec4(0.50f, 0.58f, 0.68f, alpha);
+				drawGridLineZ(z, startX, endX, color);
+			}
+		}
+
+		// ------------------ LOD 0: 近景 1m 细网格 (在观察焦点与相机近处精致平滑呈现) ------------------
+		if (minorLodWeight > 0.01f)
+		{
+			constexpr float kMinorRadius = 60.0f;
+			const float startX = std::floor((camPos.x - kMinorRadius) / kMinorStep) * kMinorStep;
+			const float endX = std::ceil((camPos.x + kMinorRadius) / kMinorStep) * kMinorStep;
+			const float startZ = std::floor((camPos.z - kMinorRadius) / kMinorStep) * kMinorStep;
+			const float endZ = std::ceil((camPos.z + kMinorRadius) / kMinorStep) * kMinorStep;
+
+			for (float x = startX; x <= endX + 0.01f; x += kMinorStep)
+			{
+				if (std::fmod(std::abs(x), kMajorStep) < 0.01f) continue;
+				const float dist = std::abs(x - camPos.x);
+				const float normDist = dist / kMinorRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.18f * minorLodWeight;
+				if (alpha <= 0.01f) continue;
+				drawGridLineX(x, startZ, endZ, glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+			}
+			for (float z = startZ; z <= endZ + 0.01f; z += kMinorStep)
+			{
+				if (std::fmod(std::abs(z), kMajorStep) < 0.01f) continue;
+				const float dist = std::abs(z - camPos.z);
+				const float normDist = dist / kMinorRadius;
+				const float alpha = std::clamp(1.0f - normDist * normDist, 0.0f, 1.0f) * 0.18f * minorLodWeight;
+				if (alpha <= 0.01f) continue;
+				drawGridLineZ(z, startX, endZ, glm::vec4(0.42f, 0.50f, 0.60f, alpha));
+			}
+		}
+	}
+
+
+
+	void SceneRenderer::RenderTerrain(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		if (!m_ActiveScene)
+			return;
+
+		const uint32_t slot = FrameSlot();
+		TerrainRenderer::SetContext(m_CommandBuffers[slot], m_GlobalDescriptorSets[slot]);
+
+		if constexpr (Detail::IsCompleteType<TerrainComponent>::value)
+		{
+			auto terrainView = m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>();
+			for (auto entity : terrainView)
+			{
+				if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+					continue;
+
+				const auto& [transform, comp] = terrainView.get<TransformComponent, TerrainComponent>(entity);
+				auto data = TerrainRenderer::GetOrCreateTerrainData(comp.TerrainAsset, comp.CellSize, comp.HeightScale);
+				if (data)
+				{
+					TerrainRenderSettings settings;
+					settings.Transform = transform.GetLocalMatrix();
+					settings.ChunkResolution = comp.ChunkResolution;
+					settings.LodDistanceRatio = comp.LodDistanceRatio;
+					settings.CastShadow = (comp.CastShadow != 0);
+					settings.ReceiveShadow = (comp.ReceiveShadow != 0);
+					settings.HoleCutoutEnabled = (comp.HoleCutoutEnabled != 0);
+					settings.EntityId = static_cast<int32_t>(entity);
+
+					TerrainRenderer::RenderTerrain(*data, settings, camera, cameraTransform);
+				}
+			}
+		}
+	}
+
+
+	void SceneRenderer::RenderFoliage(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		if (!m_ActiveScene)
+			return;
+
+		const uint32_t slot = FrameSlot();
+		FoliageRenderer::SetContext(m_CommandBuffers[slot], m_GlobalDescriptorSets[slot]);
+
+		// Collect active local wind sources from scene entities
+		FoliageRenderer::ClearLocalWinds();
+		auto windView = m_ActiveScene->m_Registry.view<TransformComponent, LocalWindComponent>();
+		for (auto entity : windView)
+		{
+			const auto& [xform, wind] = windView.get<TransformComponent, LocalWindComponent>(entity);
+			glm::mat4 modelMat = xform.GetLocalMatrix();
+			if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
+				modelMat = world->Matrix;
+			const glm::vec3 worldPos = glm::vec3(modelMat[3]);
+			const glm::vec3 worldDir = glm::normalize(glm::mat3(modelMat) * wind.Direction);
+			FoliageRenderer::AddLocalWind(worldPos, wind.Radius, wind.Strength, wind.Speed, wind.Decay, wind.Type, worldDir);
+		}
+
+		auto interactView = m_ActiveScene->m_Registry.view<TransformComponent, FoliageInteractionComponent>();
+		FoliageInteractionSystem::BeginFrame(0.016f);
+		for (auto entity : interactView)
+		{
+			const auto& [xform, interact] = interactView.get<TransformComponent, FoliageInteractionComponent>(entity);
+			glm::mat4 modelMat = xform.GetLocalMatrix();
+			if (const auto* world = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(entity))
+				modelMat = world->Matrix;
+			const glm::vec3 worldPos = glm::vec3(modelMat[3]);
+			const float scaleXZ = std::max(glm::length(glm::vec3(modelMat[0])), glm::length(glm::vec3(modelMat[2])));
+
+			FoliageInteractorSource src;
+			src.SourceId = static_cast<uint64_t>(static_cast<uint32_t>(entity));
+			src.Position = worldPos;
+			src.PushRadius = interact.PushRadius * std::max(1.0f, scaleXZ);
+			src.PushStrength = interact.PushStrength;
+			src.RecoverySpeed = interact.RecoverySpeed;
+			src.LeaveTracks = (interact.LeaveTracks != 0);
+			FoliageInteractionSystem::SubmitInteractor(src);
+		}
+		FoliageInteractionSystem::StepSimulation(0.016f);
+
+		auto foliageView = m_ActiveScene->m_Registry.view<TransformComponent, FoliageComponent>();
+		static float s_FoliageTime = 0.0f;
+		s_FoliageTime += 0.016f;
+
+		const glm::vec3 cameraPos = glm::vec3(cameraTransform[3]);
+		const glm::mat4 viewProj = camera.GetProjectionMatrix() * glm::inverse(cameraTransform);
+
+		for (auto entity : foliageView)
+		{
+			if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+				continue;
+
+			const auto& [transform, comp] = foliageView.get<TransformComponent, FoliageComponent>(entity);
+			auto data = FoliageRenderer::GetOrCreateFoliageData(comp.FoliageAsset);
+			if (data)
+			{
+				FoliageRenderer::RenderFoliage(*data, comp, cameraPos, viewProj, s_FoliageTime);
+			}
+		}
+	}
+
+
+
+	void SceneRenderer::RenderDecals(const Camera&, const glm::mat4&)
+	{
+		WLD_TRACE_FUNCTION();
+		if (!m_ActiveScene)
+			return;
+
+		auto decalView = m_ActiveScene->m_Registry.view<TransformComponent, DecalComponent>();
+		for (auto entity : decalView)
+		{
+			if (!m_ActiveScene->IsEntityInActiveDataLayers(entity))
+				continue;
+
+			const auto& [transform, decal] = decalView.get<TransformComponent, DecalComponent>(entity);
+			if (decal.FadeFactor <= 0.001f)
+				continue;
+
+			// 计算层级世界矩阵
+			const glm::mat4 localMat = transform.GetLocalMatrix();
+			const glm::mat4* worldMatPtr = ResolveSpriteRenderMatrix(*m_ActiveScene, entity, localMat);
+			const glm::mat4 worldMat = worldMatPtr ? *worldMatPtr : localMat;
+
+			// 贴花投影局部盒体按 Extents 缩放
+			const glm::mat4 decalModel = glm::scale(worldMat, glm::max(glm::vec3(0.01f), decal.Extents));
+			const glm::mat4 invDecalModel = glm::inverse(decalModel);
+
+			// 贴花投射方向 (局部 -Y 轴朝向世界空间投影)
+			const glm::vec3 decalDir = glm::normalize(glm::vec3(decalModel * glm::vec4(0.0f, -1.0f, 0.0f, 0.0f)));
+
+			// 获取贴花纹理 (无资产时自动优雅回退为内置高对比度贴花纹理)
+			Rhi::Handle<Rhi::Texture> texture;
+			if (decal.DecalMaterial.HasPath())
+				texture = ResolveTextureAsset(decal.DecalMaterial);
+			if (!texture)
+				texture = DecalRenderer::GetDefaultDecalTexture();
+			if (!texture)
+				continue;
+
+			// 1. 投射到地形/地面表面 (AffectTerrain)
+			if (decal.AffectTerrain)
+			{
+				glm::vec3 groundPoint(decalModel[3].x, 0.0f, decalModel[3].z);
+				glm::vec3 groundNormal(0.0f, 1.0f, 0.0f);
+
+				// 若场景中存在地形，采样地形实际高度
+				if constexpr (Detail::IsCompleteType<TerrainComponent>::value)
+				{
+				auto terrainView = m_ActiveScene->m_Registry.view<TransformComponent, TerrainComponent>();
+				for (auto tEntity : terrainView)
+				{
+					const auto& [tXform, tComp] = terrainView.get<TransformComponent, TerrainComponent>(tEntity);
+					auto tData = TerrainRenderer::GetOrCreateTerrainData(tComp.TerrainAsset, tComp.CellSize, tComp.HeightScale);
+					if (tData)
+					{
+						groundPoint.y = tXform.Location.y;
+					}
+					break;
+				}
+				}
+
+				glm::vec3 quadPositions[4];
+				glm::vec2 quadUVs[4];
+				float fade = 1.0f;
+
+				if (DecalProjector::ProjectToPlane(
+						decalModel, invDecalModel,
+						groundPoint, groundNormal, decalDir,
+						decal.NormalAngleCutoff,
+						quadPositions, quadUVs, fade))
+				{
+					const float totalAlpha = std::clamp(fade * decal.FadeFactor, 0.0f, 1.0f);
+					if (totalAlpha > 0.01f)
+					{
+						const glm::vec4 tintColor(1.0f, 1.0f, 1.0f, totalAlpha);
+						Renderer2D::DrawQuadPositions(
+							quadPositions, texture, tintColor, quadUVs, 1.0f,
+							static_cast<int>(entity));
+					}
+				}
+			}
+
+			// 2. 投射到静态网格表面 (AffectMeshes)
+			if (decal.AffectMeshes)
+			{
+				auto meshView = m_ActiveScene->m_Registry.view<TransformComponent, MeshRendererComponent>();
+				for (auto mEntity : meshView)
+				{
+					if (mEntity == entity)
+						continue;
+
+					const auto& [mTransform, mMesh] = meshView.get<TransformComponent, MeshRendererComponent>(mEntity);
+					const glm::vec3 meshPos = mTransform.Location;
+
+					// 检查网格与贴花局部空间的包围盒相交性
+					const glm::vec4 localMeshPos4 = invDecalModel * glm::vec4(meshPos, 1.0f);
+					const glm::vec3 localMeshPos = glm::vec3(localMeshPos4);
+					if (std::abs(localMeshPos.x) > 1.2f || std::abs(localMeshPos.y) > 1.2f || std::abs(localMeshPos.z) > 1.2f)
+						continue;
+
+					const glm::vec3 surfaceNormal = -decalDir;
+					glm::vec3 quadPositions[4];
+					glm::vec2 quadUVs[4];
+					float fade = 1.0f;
+
+					if (DecalProjector::ProjectToPlane(
+							decalModel, invDecalModel,
+							meshPos, surfaceNormal, decalDir,
+							decal.NormalAngleCutoff,
+							quadPositions, quadUVs, fade))
+					{
+						const float totalAlpha = std::clamp(fade * decal.FadeFactor, 0.0f, 1.0f);
+						if (totalAlpha > 0.01f)
+						{
+							const glm::vec4 tintColor(1.0f, 1.0f, 1.0f, totalAlpha);
+							Renderer2D::DrawQuadPositions(
+								quadPositions, texture, tintColor, quadUVs, 1.0f,
+								static_cast<int>(entity));
+						}
+					}
+				}
+			}
+		}
+	}
+
+
+	Ref<Mesh> SceneRenderer::GetOrCreateWhiteboxMesh(const WhiteboxComponent& comp)
+	{
+		WhiteboxCacheKey key;
+		key.Shape = static_cast<uint8_t>(comp.Shape);
+		key.Subdivisions = comp.Subdivisions;
+		key.Steps = comp.Steps;
+		key.Dimensions[0] = comp.Dimensions.x;
+		key.Dimensions[1] = comp.Dimensions.y;
+		key.Dimensions[2] = comp.Dimensions.z;
+		key.BevelSize = comp.BevelSize;
+
+		auto it = m_WhiteboxMeshCache.find(key);
+		if (it != m_WhiteboxMeshCache.end() && it->second)
+			return it->second;
+
+		WhiteboxMesh wbMesh;
+		switch (static_cast<WhiteboxComponent::ShapeType>(comp.Shape))
+		{
+		case WhiteboxComponent::ShapeType::Box:
+			WhiteboxBuilder::BuildBox(comp.Dimensions, comp.BevelSize, wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Cylinder:
+			WhiteboxBuilder::BuildCylinder(comp.Dimensions.x * 0.5f, comp.Dimensions.y, std::max(6u, static_cast<uint32_t>(comp.Subdivisions * 8)), wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Sphere:
+			WhiteboxBuilder::BuildSphere(comp.Dimensions.x * 0.5f, std::max(6u, static_cast<uint32_t>(comp.Subdivisions * 8)), std::max(4u, static_cast<uint32_t>(comp.Subdivisions * 4)), wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Stairs:
+			WhiteboxBuilder::BuildStairs(comp.Dimensions, comp.Steps, wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Wedge:
+			WhiteboxBuilder::BuildWedge(comp.Dimensions, wbMesh);
+			break;
+		case WhiteboxComponent::ShapeType::Arch:
+			WhiteboxBuilder::BuildArch(comp.Dimensions, comp.Dimensions.x * 0.25f, wbMesh);
+			break;
+		}
+
+		Ref<Mesh> mesh = CreateMeshFromWhitebox(wbMesh, "WhiteboxMesh");
+		if (mesh)
+			m_WhiteboxMeshCache[key] = mesh;
+		return mesh;
+	}
+
+	Ref<Mesh> SceneRenderer::GetOrCreateSplineMesh(Scene& scene, entt::entity entity, const SplineComponent& comp)
+	{
+		std::vector<glm::vec3> knots;
+		const auto& children = Hierarchy::ChildrenOf(scene.m_Registry, entity);
+		for (const auto h : children)
+		{
+			if (scene.m_Registry.all_of<TransformComponent>(h))
+				knots.push_back(scene.m_Registry.get<TransformComponent>(h).Location);
+		}
+		// 若暂无显式子节点控制点，自动提供 4 局部平滑控制点，确保样条线道路实体开箱即见、真实可见
+		if (knots.size() < 2)
+		{
+			knots.push_back({ -15.0f, 0.05f, -6.0f });
+			knots.push_back({  -5.0f, 0.25f,  4.0f });
+			knots.push_back({   5.0f, 0.35f, -3.0f });
+			knots.push_back({  15.0f, 0.10f,  6.0f });
+		}
+
+		Spline3D spline;
+		spline.SetMode(comp.Mode == 1 ? SplineMode::Bezier : SplineMode::CatmullRom);
+		spline.SetClosedLoop(comp.ClosedLoop == 1);
+		for (const auto& pt : knots)
+			spline.AddPoint(pt);
+
+		WhiteboxMesh wbMesh;
+		const float step = (comp.MeshSpacing > 0.05f) ? comp.MeshSpacing : 1.0f;
+		const float width = (comp.RoadWidth > 0.1f) ? comp.RoadWidth : 3.0f;
+		spline.GenerateRoadMesh(width, step, wbMesh.Vertices, wbMesh.Normals, wbMesh.UVs, wbMesh.Indices);
+		return CreateMeshFromWhitebox(wbMesh, "SplineRoadMesh");
+	}
+	void SceneRenderer::EnsureSkyDomeResources()
+	{
+		if (m_SkyDomePipeline && m_SkyDescriptorSetLayout && m_SkyVertexBuffer && m_SkyIndexBuffer)
+			return;
+
+		if (!m_SkyVertexBuffer || !m_SkyIndexBuffer)
+		{
+			struct QuadVertex
+			{
+				glm::vec3 Position;
+				glm::vec3 Normal;
+				glm::vec2 TexCoord;
+			};
+			const QuadVertex vertices[4] = {
+				{ { -1.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f } },
+				{ {  1.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f } },
+				{ {  1.0f,  1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 1.0f, 1.0f } },
+				{ { -1.0f,  1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } }
+			};
+			const uint32_t indices[6] = { 0, 1, 2, 2, 3, 0 };
+
+			Rhi::BufferDesc vbDesc;
+			vbDesc.Size = sizeof(vertices);
+			vbDesc.Usage = Rhi::BufferUsageVertex;
+			vbDesc.InitialData = vertices;
+			vbDesc.DebugName = "SkyDome.VB";
+			m_SkyVertexBuffer = m_Device->CreateBuffer(vbDesc);
+
+			Rhi::BufferDesc ibDesc;
+			ibDesc.Size = sizeof(indices);
+			ibDesc.Usage = Rhi::BufferUsageIndex;
+			ibDesc.InitialData = indices;
+			ibDesc.DebugName = "SkyDome.IB";
+			m_SkyIndexBuffer = m_Device->CreateBuffer(ibDesc);
+		}
+
+		if (!m_SkyDescriptorSetLayout)
+		{
+			Rhi::DescriptorSetLayoutDesc skyLayoutDesc;
+			skyLayoutDesc.Bindings.push_back({ 0, Rhi::DescriptorType::UniformBuffer,
+				Rhi::ShaderStageFlag(Rhi::ShaderStage::Vertex) | Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+			skyLayoutDesc.DebugName = "SceneRenderer.SkyDomeLayout";
+			m_SkyDescriptorSetLayout = m_Device->CreateDescriptorSetLayout(skyLayoutDesc);
+
+			Rhi::BufferDesc uboDesc;
+			uboDesc.Size = sizeof(SkyDomeUniforms);
+			uboDesc.Usage = Rhi::BufferUsageUniform;
+			uboDesc.Memory = Rhi::MemoryHint::HostVisible;
+			uboDesc.DebugName = "SceneRenderer.SkyUBO";
+
+			for (uint32_t s = 0; s < kFramesInFlight; ++s)
+			{
+				m_SkyUniformBuffers[s] = m_Device->CreateBuffer(uboDesc);
+				m_SkyDescriptorSets[s] = m_Device->CreateDescriptorSet(m_SkyDescriptorSetLayout);
+
+				Rhi::DescriptorWrite write;
+				write.Binding = 0;
+				write.Type = Rhi::DescriptorType::UniformBuffer;
+				write.Buffer = m_SkyUniformBuffers[s];
+				m_SkyDescriptorSets[s]->Update({ write });
+			}
+		}
+
+		if (!m_SkyDomePipeline)
+		{
+			const MeshVertexLayout meshLayout = Mesh::MakeStandardLayout();
+			Rhi::PipelineDesc pipeDesc;
+			pipeDesc.DebugName = "SceneRenderer.SkyDomePipeline";
+			pipeDesc.RenderPass = m_RenderPass;
+			pipeDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), m_SkyDescriptorSetLayout };
+			pipeDesc.VertexBindings = meshLayout.Bindings;
+			pipeDesc.VertexAttributes = meshLayout.Attributes;
+			pipeDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
+			pipeDesc.Cull = Rhi::CullMode::None;
+			pipeDesc.DepthStencil.DepthTest = true;
+			pipeDesc.DepthStencil.DepthWrite = false;
+			pipeDesc.DepthStencil.DepthCompare = Rhi::CompareOp::LessOrEqual;
+			pipeDesc.Samples = static_cast<Rhi::SampleCount>(RenderSettings::Msaa());
+
+			Rhi::ShaderDesc shaderDesc;
+			shaderDesc.DebugName = "SkyDome-Shader";
+			shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Vertex, "assets/shaders/SkyDome.slang", "VSMain", "vs_6_0"));
+			shaderDesc.Stages.push_back(ShaderCompiler::CompileStage(Rhi::ShaderStage::Fragment, "assets/shaders/SkyDome.slang", "PSMain", "ps_6_0"));
+			pipeDesc.Shader = m_Device->CreateShader(shaderDesc);
+
+			Rhi::BlendAttachmentState colorBlend;
+			colorBlend.BlendEnable = false;
+			Rhi::BlendAttachmentState idBlend;
+			idBlend.BlendEnable = false;
+			pipeDesc.Blends = { colorBlend, idBlend };
+
+			m_SkyDomePipeline = m_Device->CreatePipeline(pipeDesc);
+		}
+	}
+
+	void SceneRenderer::RenderSkyDome(uint32_t slot, const glm::mat4& viewProjection, const glm::vec3& cameraPos, const WeatherAtmosphereParams& weather)
+	{
+		EnsureSkyDomeResources();
+		if (!m_SkyDomePipeline || !m_SkyVertexBuffer || !m_SkyIndexBuffer)
+			return;
+
+		SkyDomeUniforms uniforms;
+		uniforms.InvViewProjection = glm::inverse(viewProjection);
+		uniforms.SkyZenithColor = weather.SkyZenithColor;
+		uniforms.SkyHorizonColor = weather.SkyHorizonColor;
+		uniforms.SkyGroundColor = weather.SkyGroundColor;
+		uniforms.SunDirectionIntensity = glm::vec4(weather.SunDirection, weather.SunLightIntensity);
+		uniforms.SunColorDisc = glm::vec4(weather.SunLightColor, weather.SunDiscSize);
+		uniforms.MoonDirectionIntensity = glm::vec4(weather.MoonDirection, weather.MoonLightIntensity);
+		uniforms.MoonColorDisc = glm::vec4(weather.MoonLightColor, weather.MoonDiscSize);
+		uniforms.CloudParams = glm::vec4(weather.CloudCoverage, weather.CloudDensity, weather.CloudScale, weather.CloudSoftness);
+		uniforms.CloudColor = weather.CloudColor;
+		uniforms.WindDriftTime = glm::vec4(weather.CloudDriftOffset, m_WaterAccumulatedTime, weather.StarVisibility);
+		uniforms.CameraPosition = glm::vec4(cameraPos, 1.0f);
+
+		m_SkyUniformBuffers[slot]->SetData(&uniforms, sizeof(SkyDomeUniforms));
+
+		m_CommandBuffers[slot]->BindPipeline(m_SkyDomePipeline);
+		m_CommandBuffers[slot]->BindDescriptorSet(m_GlobalDescriptorSets[slot], 0);
+		m_CommandBuffers[slot]->BindDescriptorSet(m_SkyDescriptorSets[slot], 1);
+		m_CommandBuffers[slot]->BindVertexBuffer(0, m_SkyVertexBuffer);
+		m_CommandBuffers[slot]->BindIndexBuffer(m_SkyIndexBuffer);
+		m_CommandBuffers[slot]->DrawIndexed(6, 1, 0);
+	}
+
+
+	void SceneRenderer::RenderNavMesh(const Camera& camera, const glm::mat4& cameraTransform)
+	{
+		if (!m_Options.ShowNavMesh || !m_ActiveScene)
+			return;
+
+		const std::shared_ptr<NavMesh>& navMesh = m_ActiveScene->GetNavMesh();
+		if (!navMesh || navMesh->GetPolygonCount() == 0)
+			return;
+
+		const uint32_t polyCount = static_cast<uint32_t>(navMesh->GetPolygonCount());
+
+		// 1. 3D 导航多边形半透明填充面与边界/内轮廓线 (GPU 硬件深度测试通道，对标 UE5)
+		if (m_Options.ShowNavPolygons)
+		{
+			for (uint32_t p = 0; p < polyCount; ++p)
+			{
+				const auto& poly = navMesh->GetPolygon(p);
+				if (poly.Blocked && !m_Options.ShowNavObstacles)
+					continue;
+				const size_t vertCount = poly.VertexIndices.size();
+				if (vertCount < 3)
+					continue;
+
+				const bool isCovered = (poly.Clearance > 0.0f && poly.Clearance <= 2.6f);
+				glm::vec4 polyColor = poly.Blocked
+					? glm::vec4(0.95f, 0.25f, 0.25f, 0.95f)
+					: (isCovered
+						? glm::vec4(0.20f, 0.75f, 1.00f, 0.95f)
+						: glm::vec4(0.18f, 0.90f, 0.48f, 0.85f));
+
+				glm::vec4 fillColor = poly.Blocked
+					? glm::vec4(0.95f, 0.20f, 0.20f, 0.35f)
+					: (isCovered
+						? glm::vec4(0.15f, 0.55f, 0.90f, 0.32f)
+						: glm::vec4(0.12f, 0.82f, 0.42f, 0.26f));
+
+				if (m_Options.ShowNavAreaCosts && !poly.Blocked)
+				{
+					if (poly.AreaType == 1)      { polyColor = { 0.35f, 0.95f, 0.35f, 0.90f }; fillColor = { 0.30f, 0.95f, 0.30f, 0.35f }; }
+					else if (poly.AreaType == 2) { polyColor = { 0.65f, 0.35f, 0.95f, 0.90f }; fillColor = { 0.65f, 0.35f, 0.95f, 0.35f }; }
+					else if (poly.AreaType == 3) { polyColor = { 0.95f, 0.40f, 0.15f, 0.90f }; fillColor = { 0.95f, 0.40f, 0.15f, 0.40f }; }
+					else if (poly.AreaType == 5) { polyColor = { 0.15f, 0.85f, 0.95f, 0.90f }; fillColor = { 0.15f, 0.85f, 0.95f, 0.40f }; }
+				}
+
+				// 0.06m 地表法线偏置，彻底避免与地表发生 Z-Fighting，且能被地上障碍物精准遮挡
+				constexpr float kHeightOffset = 0.06f;
+				std::vector<glm::vec3> verts(vertCount);
+				for (size_t i = 0; i < vertCount; ++i)
+				{
+					verts[i] = navMesh->GetVertex(poly.VertexIndices[i]) + glm::vec3(0.0f, kHeightOffset, 0.0f);
+				}
+
+				// A. 填充多边形半透明表面 (Hardware Depth-Tested via Renderer2D::DrawNavMeshQuadPositions)
+				if (m_Options.FillNavPolygons)
+				{
+					if (vertCount == 3)
+					{
+						const glm::vec3 quad[4] = { verts[0], verts[1], verts[2], verts[2] };
+						Renderer2D::DrawNavMeshQuadPositions(quad, fillColor);
+					}
+					else if (vertCount == 4)
+					{
+						const glm::vec3 quad[4] = { verts[0], verts[1], verts[2], verts[3] };
+						Renderer2D::DrawNavMeshQuadPositions(quad, fillColor);
+					}
+					else
+					{
+						for (size_t s = 1; s + 1 < vertCount; ++s)
+						{
+							const glm::vec3 quad[4] = { verts[0], verts[s], verts[s + 1], verts[s + 1] };
+							Renderer2D::DrawNavMeshQuadPositions(quad, fillColor);
+						}
+					}
+				}
+
+				// B. 绘制多边形边界轮廓线与共享内边 (Hardware Depth-Tested via Renderer2D::DrawLineCore)
+				for (size_t i = 0; i < vertCount; ++i)
+				{
+					const int32_t nbr = (i < poly.Neighbors.size()) ? poly.Neighbors[i] : -1;
+					const bool isBoundary = (nbr == -1 || (nbr >= 0 && static_cast<uint32_t>(nbr) < polyCount && navMesh->GetPolygon(static_cast<uint32_t>(nbr)).Blocked != poly.Blocked));
+
+					if (isBoundary)
+					{
+						Renderer2D::DrawLineCore(verts[i], verts[(i + 1) % vertCount], polyColor);
+					}
+					else if (static_cast<int32_t>(p) < nbr)
+					{
+						const glm::vec4 innerColor(polyColor.r, polyColor.g, polyColor.b, 0.22f);
+						Renderer2D::DrawLineCore(verts[i], verts[(i + 1) % vertCount], innerColor);
+					}
+				}
+			}
+		}
+
+		// 2. 动态导航障碍物 (NavMeshObstacleComponent) 3D 立体线框盒
+		if (m_Options.ShowNavObstacles)
+		{
+			const glm::vec4 obsColor(1.0f, 0.55f, 0.15f, 0.85f);
+			for (auto [handle, obs] : m_ActiveScene->m_Registry.view<NavMeshObstacleComponent>().each())
+			{
+				glm::mat4 world(1.0f);
+				if (const auto* wt = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(handle))
+					world = wt->Matrix;
+				else if (const auto* xform = m_ActiveScene->m_Registry.try_get<TransformComponent>(handle))
+					world = xform->GetLocalMatrix();
+
+				const glm::vec3 localCorners[8] = {
+					glm::vec3(-obs.Extents.x, -obs.Extents.y, -obs.Extents.z),
+					glm::vec3( obs.Extents.x, -obs.Extents.y, -obs.Extents.z),
+					glm::vec3( obs.Extents.x, -obs.Extents.y,  obs.Extents.z),
+					glm::vec3(-obs.Extents.x, -obs.Extents.y,  obs.Extents.z),
+					glm::vec3(-obs.Extents.x,  obs.Extents.y, -obs.Extents.z),
+					glm::vec3( obs.Extents.x,  obs.Extents.y, -obs.Extents.z),
+					glm::vec3( obs.Extents.x,  obs.Extents.y,  obs.Extents.z),
+					glm::vec3(-obs.Extents.x,  obs.Extents.y, -obs.Extents.z)
+				};
+				glm::vec3 worldCorners[8];
+				for (int i = 0; i < 8; ++i)
+					worldCorners[i] = glm::vec3(world * glm::vec4(localCorners[i], 1.0f));
+
+				constexpr int edges[12][2] = {
+					{0,1}, {1,2}, {2,3}, {3,0},
+					{4,5}, {5,6}, {6,7}, {7,4},
+					{0,4}, {1,5}, {2,6}, {3,7}
+				};
+				for (int e = 0; e < 12; ++e)
+				{
+					Renderer2D::DrawLineCore(worldCorners[edges[e][0]], worldCorners[edges[e][1]], obsColor);
+				}
+			}
+		}
+
+		// 3. 寻路代理 (NavMeshAgentComponent) 圆柱体、目标点与路径折线
+		if (m_Options.ShowNavPaths)
+		{
+			for (auto [handle, agent] : m_ActiveScene->m_Registry.view<NavMeshAgentComponent>().each())
+			{
+				glm::vec3 center(0.0f);
+				if (const auto* xform = m_ActiveScene->m_Registry.try_get<TransformComponent>(handle))
+					center = xform->Location;
+
+				const float r = std::max(0.1f, agent.AgentRadius);
+				const float h = std::max(0.2f, agent.GetEffectiveHeight());
+				const glm::vec4 agentColor = agent.Crouching
+					? glm::vec4(0.35f, 0.75f, 0.95f, 0.95f)
+					: glm::vec4(0.15f, 0.90f, 0.85f, 0.95f);
+
+				constexpr int kSegs = 16;
+				constexpr float kTwoPi = 6.28318530718f;
+				glm::vec3 prevBot = center + glm::vec3(r, 0.0f, 0.0f);
+				glm::vec3 prevTop = center + glm::vec3(r, h, 0.0f);
+				for (int i = 1; i <= kSegs; ++i)
+				{
+					const float a = kTwoPi * static_cast<float>(i) / static_cast<float>(kSegs);
+					const glm::vec3 currBot = center + glm::vec3(std::cos(a) * r, 0.0f, std::sin(a) * r);
+					const glm::vec3 currTop = center + glm::vec3(std::cos(a) * r, h, std::sin(a) * r);
+					Renderer2D::DrawLineCore(prevBot, currBot, agentColor);
+					Renderer2D::DrawLineCore(prevTop, currTop, agentColor);
+					if (i % 4 == 0)
+						Renderer2D::DrawLineCore(currBot, currTop, agentColor);
+					prevBot = currBot;
+					prevTop = currTop;
+				}
+
+				// 目标点地面旗帜
+				const glm::vec4 destColor(1.0f, 0.85f, 0.2f, 0.90f);
+				Renderer2D::DrawLineCore(agent.Destination, agent.Destination + glm::vec3(0.0f, 1.2f, 0.0f), destColor);
+				Renderer2D::DrawLineCore(agent.Destination + glm::vec3(0.0f, 1.2f, 0.0f), agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), destColor);
+				Renderer2D::DrawLineCore(agent.Destination + glm::vec3(0.35f, 1.0f, 0.0f), agent.Destination + glm::vec3(0.0f, 0.8f, 0.0f), destColor);
+
+				// 寻路路径折线
+				std::vector<glm::vec3> path;
+				NavQueryFilter filter;
+				filter.AgentHeight = agent.GetEffectiveHeight();
+				filter.AgentRadius = agent.AgentRadius;
+				filter.AreaMask = agent.AreaMask;
+				if (navMesh->FindPath(center, agent.Destination, path, filter) && path.size() >= 2)
+				{
+					const glm::vec4 pathColor(1.0f, 0.85f, 0.2f, 0.90f);
+					for (size_t i = 0; i < path.size() - 1; ++i)
+					{
+						Renderer2D::DrawLineCore(path[i] + glm::vec3(0.0f, 0.1f, 0.0f),
+							path[i + 1] + glm::vec3(0.0f, 0.1f, 0.0f), pathColor);
+					}
+				}
+			}
+		}
+
+		// 4. 区域代价修饰区 (NavMeshAreaModifierComponent) 立体线框盒
+		if (m_Options.ShowNavAreaCosts)
+		{
+			for (auto [handle, areaComp] : m_ActiveScene->m_Registry.view<NavMeshAreaModifierComponent>().each())
+			{
+				glm::mat4 world(1.0f);
+				if (const auto* wt = m_ActiveScene->m_Registry.try_get<WorldTransformComponent>(handle))
+					world = wt->Matrix;
+				else if (const auto* xform = m_ActiveScene->m_Registry.try_get<TransformComponent>(handle))
+					world = xform->GetLocalMatrix();
+
+				glm::vec4 areaColor(0.35f, 0.95f, 0.35f, 0.70f);
+				if (areaComp.AreaType == 2) areaColor = glm::vec4(0.70f, 0.35f, 0.95f, 0.70f);
+				else if (areaComp.AreaType == 3) areaColor = glm::vec4(0.95f, 0.45f, 0.20f, 0.70f);
+				else if (areaComp.AreaType == 5) areaColor = glm::vec4(0.20f, 0.85f, 0.95f, 0.70f);
+
+				const glm::vec3 localCorners[8] = {
+					glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
+					glm::vec3( areaComp.Extents.x, -areaComp.Extents.y, -areaComp.Extents.z),
+					glm::vec3( areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z),
+					glm::vec3(-areaComp.Extents.x, -areaComp.Extents.y,  areaComp.Extents.z),
+					glm::vec3(-areaComp.Extents.x,  areaComp.Extents.y, -areaComp.Extents.z),
+					glm::vec3( areaComp.Extents.x,  areaComp.Extents.y, -areaComp.Extents.z),
+					glm::vec3( areaComp.Extents.x,  areaComp.Extents.y,  areaComp.Extents.z),
+					glm::vec3(-areaComp.Extents.x,  areaComp.Extents.y,  areaComp.Extents.z)
+				};
+				glm::vec3 worldCorners[8];
+				for (int i = 0; i < 8; ++i)
+					worldCorners[i] = glm::vec3(world * glm::vec4(localCorners[i], 1.0f));
+
+				constexpr int edges[12][2] = {
+					{0,1}, {1,2}, {2,3}, {3,0},
+					{4,5}, {5,6}, {6,7}, {7,4},
+					{0,4}, {1,5}, {2,6}, {3,7}
+				};
+				for (int e = 0; e < 12; ++e)
+				{
+					Renderer2D::DrawLineCore(worldCorners[edges[e][0]], worldCorners[edges[e][1]], areaColor);
+				}
+			}
+		}
+
+		// 5. 跨网格跳跃点 (NavMeshOffMeshLinkComponent) 抛物线弧线
+		if (m_Options.ShowNavOffMeshLinks)
+		{
+			const glm::vec4 linkColor(0.25f, 0.90f, 0.95f, 0.85f);
+			for (auto [handle, linkComp] : m_ActiveScene->m_Registry.view<NavMeshOffMeshLinkComponent>().each())
+			{
+				glm::vec3 startPos(0.0f);
+				if (const auto* xform = m_ActiveScene->m_Registry.try_get<TransformComponent>(handle))
+					startPos = xform->Location;
+				const glm::vec3 endPos = linkComp.TargetLocation;
+				const float dist = glm::distance(startPos, endPos);
+				const float arcH = std::clamp(dist * 0.20f, 0.6f, 2.2f);
+				constexpr int kArcSegs = 24;
+				glm::vec3 prevPt = startPos;
+				for (int s = 1; s <= kArcSegs; ++s)
+				{
+					const float t = static_cast<float>(s) / static_cast<float>(kArcSegs);
+					const glm::vec3 horiz = glm::mix(startPos, endPos, t);
+					const float parabola = 4.0f * arcH * t * (1.0f - t);
+					const glm::vec3 currPt = horiz + glm::vec3(0.0f, parabola, 0.0f);
+					Renderer2D::DrawLineCore(prevPt, currPt, linkColor);
+					prevPt = currPt;
+				}
+			}
+		}
+	}
+
+}

@@ -1,0 +1,69 @@
+FormatVersion: 1
+AssetType: EQSQuery
+Name: DefaultTacticalCover
+Generator:
+  Type: ProjectedGrid
+  Radius: 20
+  Spacing: 1.5
+  InnerRadius: 5
+  OuterRadius: 25
+  StepDistance: 1.5
+  WallOffset: 0.75
+  IncludeGrid: true
+  ProjectToTerrain: true
+Tests:
+  - Name: Overlap Filter
+    Type: Overlap
+    Context: Querier
+    Purpose: FilterOnly
+    Curve: Linear
+    Weight: 0
+    FilterMin: 0
+    FilterMax: 100
+    IdealValue: 8
+    GaussianSigma: 1.25
+    Enabled: true
+  - Name: Trace LOS
+    Type: Trace
+    Context: Threat
+    Purpose: FilterAndScore
+    Curve: Linear
+    Weight: 1.8
+    FilterMin: 0
+    FilterMax: 1
+    IdealValue: 1
+    GaussianSigma: 1.25
+    Enabled: true
+  - Name: Wall Proximity
+    Type: WallProximity
+    Context: Querier
+    Purpose: ScoreOnly
+    Curve: ClampedGaussian
+    Weight: 1.2
+    FilterMin: 0
+    FilterMax: 100
+    IdealValue: 0.85
+    GaussianSigma: 0.4
+    Enabled: true
+  - Name: Distance
+    Type: Distance
+    Context: Querier
+    Purpose: ScoreOnly
+    Curve: Inverse
+    Weight: 0.7
+    FilterMin: 0
+    FilterMax: 20
+    IdealValue: 8
+    GaussianSigma: 1.25
+    Enabled: true
+  - Name: Friendly Avoidance
+    Type: FriendlyPenalty
+    Context: AllAllies
+    Purpose: ScoreOnly
+    Curve: Inverse
+    Weight: 1
+    FilterMin: 0
+    FilterMax: 3
+    IdealValue: 3
+    GaussianSigma: 1
+    Enabled: true

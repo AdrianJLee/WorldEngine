@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "worldengine": {
+      "command": "E:\\WorldEngine\\tools\\we-mcp\\bin\\we-mcp.exe",
+      "args": [
+        "--project=E:\\WorldEngine\\projects\\default",
+        "--port=8089",
+        "--role=producer"
+      ]
+    }
+  }
+}

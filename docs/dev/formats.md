@@ -1,0 +1,26 @@
+# 引擎自有文件格式登记表
+
+> 规则:新增引擎自有格式**先登记再使用**;扩展名带 `w`/`we` 前缀;路径写法见
+> [`naming.md`](naming.md) §5。
+
+| 扩展名 | 名称 | 谁读/写 | 版本字段 | 备注 |
+| --- | --- | --- | --- | --- |
+| `.we.yaml` | 项目清单 / 场景级清单 | `Engine`(ProjectManifest 等) | 有(清单内版本) | 默认 `projects/<名>/project.we.yaml` |
+| `.wmat` | 材质**实例** | `Engine`(MaterialLibrary) | `FormatVersion: 3`(单一版本) | `AssetId:` + 覆盖值 + 贴图 + `Shader:` 引用;父级继承 |
+| `.wmodel` | 模型资产 | `Engine`(ModelIO/导入器) | 有 | 由 glTF 导入器生成(入库策略见 `.gitignore`) |
+| `.welevel` | 关卡 | `Engine`(Level) | 有 | 例:`templates/project-example/levels.welevel`(项目里的同名文件) |
+| `.slang` | **材质着色器(材质本身)/ 引擎着色器源**(Slang 源) | 用户 + `Engine`(MaterialSurfaceCompiler / ShaderCompiler) | 契约版本在缓存键里 | `//! param` 注解 = 参数事实源;HLSL 语法是 Slang 的子集 |
+| `.hlsli` | 引擎着色器**共享头片段**(Slang / C++ 共用,非独立翻译单元) | `Engine` | 同契约版本 | 如 `MaterialSurfaceContract.hlsli` |
+| `.luau` | 脚本 / 生成存根 | `Engine`(Luau VM) + 编辑器 | — | 存根:工程 `assets/scripts/intermediate/**`,有漂移门禁 |
+| `.wui.json`(历史) | 编辑器窗口布局/浏览器/偏好 | 编辑器 | — | **已迁移**为 `local/*.json`(不入库) |
+| `.wlevel` | 关卡入口(manifest:Id / Name / GridCellSize / World / DataLayers) | `Engine`(Level) | 由 `Id` 键标识;入口文件名必须等于 `Id` |
+| `.entity` | 单实体文档(一实体一文件,`ChunkID` + `Entity` 两个顶层键) | `Engine`(Level) | 与 `.wprefab` 的实体块同形;实例根携带 `Prefab:` 块(内联子实体覆写) |
+| `.wprefab` | 预制体模板(实体子树模板资产,含固化 `PrefabLocalId` 的单根场景文档) | `Engine`(Gameplay/Prefab) | `FormatVersion: 2` | 创作期复用模板;实例放入关卡时以 `EntityMapping` + 内联覆写落盘,未解包子实体 0 文件落盘 |
+
+## 待补清单
+
+- 场景文件扩展名与版本策略;
+- 关卡 `.welevel` 与场景的关系;
+- 资产 `.meta`(若存在)的字段与生成规则;
+- 打包清单(`EditorCooker` 产物)格式与版本。
+

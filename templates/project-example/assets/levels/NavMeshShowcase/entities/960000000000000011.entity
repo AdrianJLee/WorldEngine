@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000011
+  World::TagComponent:
+    Tag: "Rocky Outpost Pedestal"
+  World::TransformComponent:
+    Location: [48, 2.7, 32]
+    Rotation: [0, 0, 0]
+    Scale: [0.6, 0.8, 0.6]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.25, 0.28, 0.35, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

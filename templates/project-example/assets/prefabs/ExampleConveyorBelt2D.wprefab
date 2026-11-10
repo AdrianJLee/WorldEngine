@@ -1,0 +1,36 @@
+FormatVersion: 2
+Scene: ExampleConveyorBelt2D
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000308
+    World::TagComponent:
+      Tag: Conveyor Belt 2D
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [4, 0.5, 1]
+    World::SpriteComponent:
+      Color: [0.95, 0.55, 0.15, 1]
+      Texture: "assets/textures/Icon.wtex"
+      TilingFactor: 1
+      SortingLayer: 0
+      OrderInLayer: 1
+    World::RigidBody2DComponent:
+      Type: Static
+      FixedRotation: true
+      Ccd: false
+      Layer: 1
+      Mask: 65535
+    World::BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1.0
+      Friction: 0.8
+      Restitution: 0.0
+      ShowCollider: true
+      IsSensor: false
+    World::SurfaceEffector2DComponent:
+      Speed: 4.0
+      ForceScale: 1.0
+      Enabled: true

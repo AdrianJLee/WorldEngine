@@ -1,0 +1,47 @@
+﻿ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 983000000000000010
+  World::TagComponent:
+    Tag: "AI Tactical Defender (EQS Cover + BT)"
+  World::TransformComponent:
+    Location: [12.0, 0.9, 4.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::EQSComponent:
+    QueryCenter: [12.0, 0.9, 4.0]
+    QueryRadius: 22.0
+    GridSpacing: 1.5
+    BestCoverFound: 1
+    QueryMode: 0
+    GeneratorMode: 2
+    IncludeCrouchCover: 1
+    ThreatEntityHint: 7
+    OptimalDistance: 8.0
+  World::BehaviorTreeComponent:
+    BlackboardTargetPos: [0.2, 0.9, 4.0]
+    ExecutionTimer: 0.0
+    BlackboardValue: 2.95
+    TreeAssetId: 1
+    TargetEntity: 7
+    BlackboardTag: 88
+    CurrentNodeIndex: 0
+    Status: 1
+    Enabled: 1
+    StateMachineState: 1
+  World::WhiteboxComponent:
+    Shape: 1
+    Subdivisions: 1
+    Steps: 12
+    Dimensions: [0.8, 1.8, 0.8]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.20, 0.68, 0.98, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

@@ -1,0 +1,18 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 900000000000000008
+  World::TagComponent:
+    Tag: Mesh:Cube Glass (transparent, behind textured)
+  World::TransformComponent:
+    Location: [-1.2, 1.2, -1.0]
+    Rotation: [0, 0, 0]
+    Scale: [2.2, 2.2, 2.2]
+  World::MeshRendererComponent:
+    Primitive: 0
+    Color: [1, 1, 1, 1]
+    Mesh: ""
+    Material: "materials/glass_red.wmat"
+  World::LevelEntityComponent:
+    DataLayerMask: 4

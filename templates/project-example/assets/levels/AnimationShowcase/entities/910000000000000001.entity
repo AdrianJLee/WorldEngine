@@ -1,0 +1,40 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 910000000000000001
+  World::TagComponent:
+    Tag: "Mannequin Character"
+  World::TransformComponent:
+    Location: [0, 0, 0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::SkinnedMeshRendererComponent:
+    Mesh: "engine/models/characters/mannequin.wmodel"
+    MeshIndex: 0
+    Material: ""
+    CastShadow: true
+  World::AnimGraphComponent:
+    AnimGraphAsset: "engine/animation/mannequin_locomotion.wanimgraph"
+    PlaybackSpeed: 1.0
+    RootMotionMode: 0
+    RootMotionScale: 1.0
+    CurrentStateHash: 0
+  World::FootIkComponent:
+    Weight: 1.0
+    FootOffset: 0.0
+    MaxPelvisDrop: 0.35
+    Enabled: 1
+  World::CharacterControllerComponent:
+    Velocity: [0, 0, 0]
+    StepOffset: 0.35
+    SlopeLimitDeg: 50.0
+    SkinWidth: 0.02
+    CoyoteDuration: 0.12
+    JumpBufferDuration: 0.10
+    GravityScale: 1.0
+    Grounded: true
+    IsSliding: false
+    LockZPlane: false
+  World::LevelEntityComponent:
+    DataLayerMask: 1

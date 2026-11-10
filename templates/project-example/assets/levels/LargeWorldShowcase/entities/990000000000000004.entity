@@ -1,0 +1,18 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000004
+  World::TagComponent:
+    Tag: "World Partition Volume - Downtown Core (16m Dense Cell)"
+  World::TransformComponent:
+    Location: [0.0, 15.0, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::PartitionVolumeComponent:
+    HalfExtents: [48.0, 25.0, 48.0]
+    OverrideCellSize: 16
+    OverrideStreamingRadius: 80.0
+    Active: true
+  World::LevelEntityComponent:
+    DataLayerMask: 4

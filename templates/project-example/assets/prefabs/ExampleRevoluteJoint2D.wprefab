@@ -1,0 +1,43 @@
+FormatVersion: 2
+Scene: ExampleRevoluteJoint2D
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000304
+    World::TagComponent:
+      Tag: Revolute Joint Pendulum
+    World::TransformComponent:
+      Location: [0, 2, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [1, 1, 1]
+    World::SpriteComponent:
+      Color: [0.35, 0.65, 0.95, 1]
+      Texture: "assets/textures/Icon.wtex"
+      TilingFactor: 1
+      SortingLayer: 0
+      OrderInLayer: 2
+    World::RigidBody2DComponent:
+      Type: Dynamic
+      FixedRotation: false
+      Ccd: false
+      Layer: 1
+      Mask: 65535
+    World::CircleCollider2DComponent:
+      Offset: [0, 0]
+      Radius: 0.4
+      Density: 1.0
+      Friction: 0.3
+      Restitution: 0.2
+      ShowCollider: true
+      IsSensor: false
+    World::RevoluteJoint2DComponent:
+      ConnectedEntity: 0
+      AnchorSelf: [0, 1.5]
+      AnchorOther: [0, 0]
+      LowerAngle: -75.0
+      UpperAngle: 75.0
+      MotorSpeed: 0.0
+      MaxMotorTorque: 20.0
+      EnableLimit: false
+      EnableMotor: false
+      EnableCollision: false

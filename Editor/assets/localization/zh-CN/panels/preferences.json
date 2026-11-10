@@ -1,0 +1,33 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "editor",
+  "$language": "zh-CN",
+  "$owns": [
+    "prefs."
+  ],
+  "prefs.group.general": "常规",
+  "prefs.category.general": "常规",
+  "prefs.category.appearance": "外观",
+  "prefs.category.about": "关于",
+  "prefs.language": "界面语言",
+  "prefs.language.en": "English",
+  "prefs.language.zh": "简体中文",
+  "prefs.language.note": "立即生效",
+  "prefs.term_hints": "显示英文术语",
+  "prefs.term_hints.note": "仅当界面语言不是英文时显示",
+  "prefs.theme": "主题",
+  "prefs.theme.dark": "暗色",
+  "prefs.theme.light": "浅色",
+  "prefs.theme.system": "跟随系统",
+  "prefs.ui_scale": "界面缩放",
+  "prefs.ui_scale.note": "只缩放文字",
+  "prefs.autosave": "所有修改立即生效并自动保存",
+  "prefs.path": "偏好文件",
+  "prefs.about.hint": "编辑器偏好是用户级设置,不随项目提交。",
+  "prefs.category.editor": "编辑器",
+  "prefs.category.workflow": "工作流",
+  "prefs.category.automation": "自动化",
+  "prefs.category.diagnostics": "诊断",
+  "prefs.about.environment": "环境变量(WLD_LANG / WLD_UI_THEME / WLD_UI_SCALE / WLD_UI_TERM_HINTS)优先于该文件。",
+  "prefs.category.viewport": "视口"
+}

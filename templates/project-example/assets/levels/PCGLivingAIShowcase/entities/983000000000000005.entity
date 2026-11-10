@@ -1,0 +1,20 @@
+﻿ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 983000000000000005
+  World::TagComponent:
+    Tag: "Road Knot K1"
+  World::TransformComponent:
+    Location: [0.0, 1.2, -12.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::HierarchyComponent:
+    Parent: 983000000000000003
+    InheritTransform: true
+  World::RelationshipComponent:
+    Parent: 983000000000000003
+    PrevSibling: 983000000000000004
+    NextSibling: 983000000000000006
+  World::LevelEntityComponent:
+    DataLayerMask: 8

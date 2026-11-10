@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 981000000000000003
+  World::TagComponent:
+    Tag: "Dynamic Weather Controller"
+  World::TransformComponent:
+    Location: [0.0, 0.0, 0.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WeatherSystemComponent:
+    PrecipitationIntensity: 0.0
+    CloudCoverage: 0.25
+    CloudDensity: 1.0
+    Wetness: 0.0
+    WindSpeed: 8.5
+    WindDirection: [1.0, 0.0, 0.25]
+    TimeOfDay: 14.5
+    FogDensity: 0.001
+    DayCycleSpeed: 0.05
+    AutoCycleTime: 1
+    EnableVolumetricCloud: 1
+    EnablePuddles: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 4

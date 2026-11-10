@@ -1,0 +1,22 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000003
+  World::TagComponent:
+    Tag: GlobalPostProcessVolume
+  World::TransformComponent:
+    Location: [0, 0, 0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::PostProcessComponent:
+    OutlineColor: [1, 0.85, 0.2, 1]
+    FlashWhiteIntensity: 0
+    FlashWhiteDecay: 5
+    OutlineWidth: 2.5
+    DissolveProgress: 0
+    BloomIntensity: 1.5
+    BloomThreshold: 0.8
+    VignetteIntensity: 0.35
+  World::LevelEntityComponent:
+    DataLayerMask: 1

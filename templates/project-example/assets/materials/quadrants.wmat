@@ -1,0 +1,12 @@
+# WorldEngine 材质资产(D3)。颜色为 sRGB 空间取值。
+FormatVersion: 3
+AssetId: 0xC7742C195428DE10
+Name: "Quadrants"
+BaseColor: [1, 1, 1, 1]
+Metallic: 0
+Roughness: 0.65
+Emissive: [0, 0, 0]
+AlbedoTexture: "textures/quadrants.wtex"
+NormalTexture: "textures/flat_normal.wtex"
+BlendMode: Opaque
+DoubleSided: false

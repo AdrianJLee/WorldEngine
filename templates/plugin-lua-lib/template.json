@@ -1,0 +1,8 @@
+{
+  "id": "lua-lib",
+  "name": "Lua Library Plugin",
+  "description": "Plugin that exposes a global Luau function library (script.library): registers a namespaced script function through WeHostApi::RegisterScriptFunction, so scripts can call it directly from Luau.",
+  "order": 6,
+  "scopes": ["engine", "project"],
+  "requires": "none"
+}

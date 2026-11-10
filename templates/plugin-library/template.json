@@ -1,0 +1,8 @@
+{
+  "id": "library",
+  "name": "C++ Library Plugin",
+  "description": "Plugin that exports a C++ function table (provides: cxx.exports) other plugins and the host can query by name.",
+  "order": 2,
+  "scopes": ["engine", "project"],
+  "requires": "none"
+}

@@ -1,0 +1,32 @@
+FormatVersion: 2
+Scene: ExampleOneWayPlatform
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000301
+    World::TagComponent:
+      Tag: OneWay Platform
+    World::TransformComponent:
+      Location: [0, 2, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [3, 0.4, 1]
+    World::SpriteComponent:
+      Color: [0.9, 0.7, 0.2, 1]
+      Texture: "assets/textures/Icon.wtex"
+      TilingFactor: 1
+      SortingLayer: 0
+      OrderInLayer: 1
+    World::BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1.0
+      Friction: 0.5
+      Restitution: 0.0
+      ShowCollider: true
+      IsSensor: false
+    World::PlatformEffector2DComponent:
+      SurfaceArc: 180.0
+      RotationalOffset: 0.0
+      OneWay: true
+      UseSideFriction: false
+      UseSideBounce: false

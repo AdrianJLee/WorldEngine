@@ -1,7 +1,15 @@
 # Directories
 .vs/
+# 构建产物目录:任何层级都挡(历史出现过 in-source 构建,如 Engine/vendor/Glad/bin)。
 bin/
 bin-int/
+# 例外:第三方 CLI 工具目录允许自带 bin/(见 vendor/README.md 的"工具 vs 源码"判据)。
+!vendor/tools/**/bin/
+# 实验性第三方包整包不入库(体积大):采纳时按 vendor/README.md 落"pin + FETCH"或小 CLI 子集
+# (先例:vendor/tools/slang 的 CLI 子集,2026-09-30 经用户批准入库)。
+vendor/slang/
+# slangc 运行时在自身 bin/ 目录生成的 GLSL 模块缓存(上游发布包不含;删除后自动重建)。
+vendor/tools/slang/bin/*.bin
 
 # Files
 *.user
@@ -9,3 +17,51 @@ build
 *.vcxproj
 *.filters
 .github
+.codex
+.vscode
+.cursor
+.luau-lsp
+docs
+# 只忽略**根级** tools/(过程层与本机工具面);不要用裸目录名——裸名会在任意深度命中
+# (历史:`World/tools/` 这类同名声明的目录会被静默吞掉;2026-09-23 修;模块目录已改名 Engine/)。
+/tools/*
+AGENTS.md
+# 本机状态(编辑器偏好/布局/窗口/最近使用组件):不入库;整个目录可删,删后自动重建。
+/local/
+# 本地工程容器目录:整目录不入库(用户项目在任意位置通过向导创建或本地放置)。
+/projects/
+# glTF 导入产物(.wmodel / .wmat / 贴图)由导入器生成:夹具只提交 .gltf,
+# 导入结果由测试/编辑器首次导入时重建(2026-09-20 误提交过一次,已改回忽略)。
+
+
+# 编辑器把任意项目目录当内容根时会生成这两处(脚本存根 + LSP 配置)。
+# templates/ 下的示例项目在仓库内,验证脚本一旦把内容根指向它就会产生这些文件
+# (2026-10-06 GameUI 验证实测),属生成物、不入库。`tests/fixtures/...` 的同名文件是
+# 夹具,仍然入库 —— 所以规则只针对 templates/。
+templates/*/assets/.luau-lsp/
+templates/*/assets/scripts/intermediate/
+
+
+# W8:编辑器脚本工作区脚手架(create-if-missing 生成;用户改过的配置不入库即保留)。
+# 上面的 `.vscode` 忽略规则会连带排除父目录;PROJ-7 起引擎内不再有内置项目,
+# 项目里的 `.vscode/`/`.luau-lsp/` 由编辑器在**项目目录**生成(仓库外,不需要放行规则)。
+# 2026-09-22:docs/ 随仓库走,但只放**公开**文档(做游戏的人 docs/user/** + 改引擎的公开部分 docs/dev/**);
+# 内部知识(不变量/契约/决策/陷阱/验证口径/术语/工作流数据)不在本仓库里。
+# 父目录先解忽略,子项才能被重新包含。
+!docs/
+!docs/**
+
+# 例外:编辑器源码目录 `Editor/src/Build/` 与裸 `build` 规则同名(裸名在任意深度命中,
+# 会静默吞掉这两个源文件);构建产物仍由 apply_patch 之外的规则/路径约定排除。
+!Editor/src/Build/
+!Editor/src/Build/**
+
+# 构建残留(MSVC 在仓库根生成的程序数据库),不入库
+/vc140.pdb
+tmp
+
+# Verification artifacts
+/artifacts/
+
+# 临时探针与本地日志（AGENTS.md L2）
+/scratch/

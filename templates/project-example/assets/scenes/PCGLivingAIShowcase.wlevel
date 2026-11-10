@@ -1,0 +1,29 @@
+﻿Id: PCGLivingAIShowcase
+Name: PCG Biome Rules, Tactical EQS Cover & Interactive Foliage Showcase
+GridCellSize: 64
+DataLayers:
+  - Mask: 1
+    Name: Environment_PCG
+    DefaultActive: true
+  - Mask: 2
+    Name: Tactical_EQS_Cover
+    DefaultActive: true
+  - Mask: 4
+    Name: Interactive_Foliage
+    DefaultActive: true
+  - Mask: 8
+    Name: Spline_Roads
+    DefaultActive: true
+Entities:
+  - 983000000000000001
+  - 983000000000000002
+  - 983000000000000003
+  - 983000000000000004
+  - 983000000000000005
+  - 983000000000000006
+  - 983000000000000007
+  - 983000000000000008
+  - 983000000000000009
+  - 983000000000000010
+  - 983000000000000011
+  - 983000000000000012

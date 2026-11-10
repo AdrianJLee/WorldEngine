@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000010
+  World::TagComponent:
+    Tag: "Rocky Outpost Beacon"
+  World::TransformComponent:
+    Location: [48, 3.5, 32]
+    Rotation: [0, 0, 0]
+    Scale: [1.2, 1.2, 1.2]
+  World::MeshRendererComponent:
+    Primitive: 1
+    MeshIndex: 0
+    Color: [1, 0.72, 0.15, 1]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

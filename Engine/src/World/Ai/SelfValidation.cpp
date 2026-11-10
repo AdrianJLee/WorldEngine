@@ -1,0 +1,1113 @@
+#include "wldpch.h"
+#include "World/Ai/SelfValidation.h"
+#include "World/Ai/CommandRegistry.h"
+#include "World/WUI/WuiJson.h"
+#include "World/Script/Tooling/LuauSyntax.h"
+#include "World/Utils/Paths.h"
+#include "World/Core/Application.h"
+#include "World/Schema/SchemaRegistry.h"
+#include "World/Asset/GltfImporter.h"
+#include "World/Audio/SoundEvent.h"
+#include <cctype>
+
+#include <yaml-cpp/yaml.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <set>
+#include <sstream>
+
+namespace World::Ai
+{
+	namespace fs = std::filesystem;
+	using namespace World::Wui;
+
+	namespace
+	{
+		const char* KindToString(Schema::Kind k)
+		{
+			switch (k)
+			{
+			case Schema::Kind::Bool:   return "Bool";
+			case Schema::Kind::Int8:   return "Int8";
+			case Schema::Kind::Int16:  return "Int16";
+			case Schema::Kind::Int32:  return "Int32";
+			case Schema::Kind::Int64:  return "Int64";
+			case Schema::Kind::UInt8:  return "UInt8";
+			case Schema::Kind::UInt16: return "UInt16";
+			case Schema::Kind::UInt32: return "UInt32";
+			case Schema::Kind::UInt64: return "UInt64";
+			case Schema::Kind::Float:  return "Float";
+			case Schema::Kind::Double: return "Double";
+			case Schema::Kind::Vec2:   return "Vec2";
+			case Schema::Kind::Vec3:   return "Vec3";
+			case Schema::Kind::Vec4:   return "Vec4";
+			case Schema::Kind::IVec2:  return "IVec2";
+			case Schema::Kind::IVec3:  return "IVec3";
+			case Schema::Kind::IVec4:  return "IVec4";
+			case Schema::Kind::UVec2:  return "UVec2";
+			case Schema::Kind::UVec3:  return "UVec3";
+			case Schema::Kind::UVec4:  return "UVec4";
+			case Schema::Kind::Quat:   return "Quat";
+			case Schema::Kind::Mat3:   return "Mat3";
+			case Schema::Kind::Mat4:   return "Mat4";
+			case Schema::Kind::String: return "String";
+			case Schema::Kind::Enum:   return "Enum";
+			case Schema::Kind::Asset:  return "Asset";
+			case Schema::Kind::Object: return "Object";
+			case Schema::Kind::Name:   return "Name";
+			default:                   return "Unknown";
+			}
+		}
+	}
+
+	std::string ValidationReport::ToJson() const
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+
+		root.Object.push_back({ "valid", JsonValue::MakeBool(valid) });
+
+		// 错误列表
+		JsonValue errArray;
+		errArray.type = JsonValue::Type::Array;
+		for (const auto& err : errors)
+		{
+			JsonValue errObj;
+			errObj.type = JsonValue::Type::Object;
+			errObj.Object.push_back({ "code", JsonValue::MakeString(err.code) });
+			errObj.Object.push_back({ "file", JsonValue::MakeString(err.file) });
+			errObj.Object.push_back({ "line", JsonValue::MakeNumber(static_cast<double>(err.line)) });
+			errObj.Object.push_back({ "message", JsonValue::MakeString(err.message) });
+			errArray.Array.push_back(std::move(errObj));
+		}
+		root.Object.push_back({ "errors", std::move(errArray) });
+
+		// 警告列表
+		JsonValue warnArray;
+		warnArray.type = JsonValue::Type::Array;
+		for (const auto& w : warnings)
+		{
+			warnArray.Array.push_back(JsonValue::MakeString(w));
+		}
+		root.Object.push_back({ "warnings", std::move(warnArray) });
+
+		// 度量字典
+		JsonValue metricsObj;
+		metricsObj.type = JsonValue::Type::Object;
+		for (const auto& kv : metrics)
+		{
+			metricsObj.Object.push_back({ kv.first, JsonValue::MakeString(kv.second) });
+		}
+		root.Object.push_back({ "metrics", std::move(metricsObj) });
+
+		return root.Dump();
+	}
+
+	ValidationReport SelfValidation::ValidateProject(const std::string& projectRoot)
+	{
+		ValidationReport report;
+
+		fs::path rootPath;
+		if (!projectRoot.empty())
+		{
+			rootPath = fs::u8path(projectRoot);
+		}
+		else
+		{
+			const std::string envRoot = Paths::ProjectDir().string();
+			if (!envRoot.empty() && fs::exists(envRoot))
+				rootPath = fs::u8path(envRoot);
+			else
+				rootPath = fs::current_path();
+		}
+
+		// 1. 项目清单检查 (project.we.yaml)
+		const fs::path manifestPath = rootPath / "project.we.yaml";
+		if (!fs::exists(manifestPath))
+		{
+			report.errors.push_back({
+				"ERR_PROJECT_MANIFEST_MISSING",
+				manifestPath.string(),
+				0,
+				"Project manifest file 'project.we.yaml' does not exist."
+			});
+		}
+		else
+		{
+			try
+			{
+				YAML::Node doc = YAML::LoadFile(manifestPath.string());
+				if (!doc["name"] || doc["name"].as<std::string>().empty())
+				{
+					report.warnings.push_back("Manifest 'project.we.yaml' does not specify a project name.");
+				}
+			}
+			catch (const std::exception& e)
+			{
+				report.errors.push_back({
+					"ERR_MANIFEST_CORRUPTED",
+					manifestPath.string(),
+					0,
+					std::string("Corrupted manifest YAML: ") + e.what()
+				});
+			}
+		}
+
+		// 2. 资产目录规范检查 (assets/)
+		const fs::path assetsDir = rootPath / "assets";
+		if (!fs::exists(assetsDir) || !fs::is_directory(assetsDir))
+		{
+			report.errors.push_back({
+				"ERR_ASSETS_DIR_MISSING",
+				assetsDir.string(),
+				0,
+				"Standard content root directory 'assets/' does not exist."
+			});
+		}
+
+		// 3. 全量脚本语法与编译安全检查 (递归扫描 .luau / .lua，跳过 intermediate/)
+		size_t scriptsChecked = 0;
+		if (fs::exists(assetsDir))
+		{
+			std::error_code ec;
+			for (const auto& entry : fs::recursive_directory_iterator(assetsDir, ec))
+			{
+				if (!entry.is_regular_file())
+					continue;
+
+				const auto ext = entry.path().extension().string();
+				if (ext != ".luau" && ext != ".lua")
+					continue;
+
+				// 忽略 intermediate/
+				const std::string pathStr = entry.path().string();
+				if (pathStr.find("intermediate") != std::string::npos)
+					continue;
+
+				std::ifstream file(entry.path(), std::ios::binary);
+				if (!file)
+					continue;
+
+				std::ostringstream ss;
+				ss << file.rdbuf();
+				const std::string source = ss.str();
+
+				LuauSyntaxError syntaxErr;
+				if (!CheckLuauSyntax(source, entry.path().filename().string().c_str(), &syntaxErr))
+				{
+					report.errors.push_back({
+						"ERR_LUAU_SYNTAX",
+						entry.path().string(),
+						syntaxErr.Line,
+						syntaxErr.Message
+					});
+				}
+
+				// 静态 API 契约审计：拦截面向对象冒号误用 (如 Input:Down, Input:IsKeyPressed)
+				if (source.find("Input:Down") != std::string::npos ||
+					source.find("Input:IsKeyPressed") != std::string::npos ||
+					source.find("Input:Pressed") != std::string::npos ||
+					source.find("Input:Released") != std::string::npos)
+				{
+					report.errors.push_back({
+						"ERR_LUAU_STATIC_API_VIOLATION",
+						entry.path().string(),
+						0,
+						"Static API Contract Violation: 'Input' library methods must be called statically via dot (e.g. Input.Down), NOT with colon (Input:Down)."
+					});
+				}
+				++scriptsChecked;
+			}
+		}
+		report.metrics["scripts_checked"] = std::to_string(scriptsChecked);
+
+		// 4. 引擎树指纹与源树残留检查 (确保源树没有污染的编译中间件)
+		const fs::path engineSrc = fs::current_path() / "Engine" / "src";
+		if (fs::exists(engineSrc))
+		{
+			std::error_code ec;
+			for (const auto& entry : fs::recursive_directory_iterator(engineSrc, ec))
+			{
+				if (!entry.is_regular_file())
+					continue;
+				const auto ext = entry.path().extension().string();
+				if (ext == ".obj" || ext == ".lib" || ext == ".pdb" || ext == ".idb")
+				{
+					report.errors.push_back({
+						"ERR_ENGINE_TREE_DIRTY",
+						entry.path().string(),
+						0,
+						"Forbidden compilation artifact found in engine source tree."
+					});
+					break;
+				}
+			}
+		}
+
+		// 5. 关卡实体与预制体资产引用完整性检查 (自证死链与 1x1 白块)
+		size_t entitiesChecked = 0;
+		size_t textureRefsChecked = 0;
+		if (fs::exists(assetsDir))
+		{
+			std::error_code ec;
+			for (const auto& entry : fs::recursive_directory_iterator(assetsDir, ec))
+			{
+				if (!entry.is_regular_file())
+					continue;
+
+				const auto ext = entry.path().extension().string();
+				if (ext != ".entity" && ext != ".wprefab")
+					continue;
+
+				++entitiesChecked;
+
+				std::ifstream f(entry.path());
+				if (!f) continue;
+
+				std::string line;
+				int lineNum = 0;
+				while (std::getline(f, line))
+				{
+					++lineNum;
+					size_t pos = line.find("Texture:");
+					if (pos == std::string::npos)
+						pos = line.find("AlbedoTexture:");
+					if (pos == std::string::npos)
+						pos = line.find("NormalTexture:");
+
+					if (pos != std::string::npos)
+					{
+						std::string val = line.substr(pos + (line[pos] == 'A' ? 14 : (line[pos] == 'N' ? 14 : 8)));
+						while (!val.empty() && (val.front() == ' ' || val.front() == '	' || val.front() == 34 || val.front() == 39)) val.erase(0, 1);
+						while (!val.empty() && (val.back() == ' ' || val.back() == '	' || val.back() == 34 || val.back() == 39)) val.pop_back();
+
+						if (!val.empty())
+						{
+							++textureRefsChecked;
+
+							// 判定 1: 冗余 assets/ 前缀检测 (导致引擎多拼一层 assets/ 变成 1x1 白块)
+							if (val.rfind("assets/", 0) == 0 || val.rfind("assets\\", 0) == 0)
+							{
+								std::string stripped = val.substr(7);
+								report.errors.push_back({
+									"ERR_TEXTURE_REDUNDANT_PREFIX",
+									entry.path().string(),
+									lineNum,
+									"Redundant 'assets/' prefix in texture path '" + val + "'. Path must be relative to content root ('" + stripped + "')."
+								});
+							}
+							else
+							{
+								// 判定 2: 目标文件在 assets/ 相对路径下是否存在
+								fs::path texFile = assetsDir / fs::u8path(val);
+								if (!fs::exists(texFile))
+								{
+									report.errors.push_back({
+										"ERR_TEXTURE_NOT_FOUND",
+										entry.path().string(),
+										lineNum,
+										"Texture file '" + val + "' not found on disk at '" + texFile.string() + "'."
+									});
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		report.metrics["entities_checked"] = std::to_string(entitiesChecked);
+		report.metrics["texture_refs_checked"] = std::to_string(textureRefsChecked);
+
+		report.valid = report.errors.empty();
+		return report;
+	}
+
+	ValidationReport SelfValidation::ValidateAsset(const std::string& assetPath, const std::string& projectRoot)
+	{
+		ValidationReport report;
+
+		if (assetPath.empty())
+		{
+			report.errors.push_back({ "ERR_ASSET_EMPTY_PATH", "", 0, "Asset path is empty." });
+			report.valid = false;
+			return report;
+		}
+
+		fs::path fullPath = fs::u8path(assetPath);
+		if (fullPath.is_relative())
+		{
+			if (!projectRoot.empty())
+				fullPath = fs::u8path(projectRoot) / fullPath;
+			else if (fs::exists(Paths::ProjectDir()))
+				fullPath = Paths::ProjectDir() / fullPath;
+			else
+				fullPath = fs::current_path() / fullPath;
+		}
+
+		// 1. 文件存在性
+		if (!fs::exists(fullPath))
+		{
+			report.errors.push_back({
+				"ERR_ASSET_NOT_FOUND",
+				fullPath.string(),
+				0,
+				"Asset file does not exist on disk."
+			});
+			report.valid = false;
+			return report;
+		}
+
+		const auto fileSize = fs::file_size(fullPath);
+		report.metrics["file_size"] = std::to_string(fileSize);
+
+		const std::string ext = fullPath.extension().string();
+
+		// 2. 材质依赖拓扑与闭包校验 (.wmat)
+		if (ext == ".wmat")
+		{
+			try
+			{
+				YAML::Node node = YAML::LoadFile(fullPath.string());
+				// 检查关联纹理依赖是否存在
+				auto checkTexRef = [&](const char* slot)
+				{
+					if (node[slot] && node[slot].IsScalar())
+					{
+						const std::string ref = node[slot].as<std::string>();
+						if (!ref.empty())
+						{
+							fs::path refPath = fs::u8path(ref);
+							if (refPath.is_relative())
+							{
+								refPath = fullPath.parent_path() / refPath;
+							}
+							if (!fs::exists(refPath))
+							{
+								report.errors.push_back({
+									"ERR_ASSET_MISSING_DEPENDENCY",
+									ref,
+									0,
+									std::string("Missing referenced texture dependency for slot: ") + slot
+								});
+							}
+						}
+					}
+				};
+
+				checkTexRef("Albedo");
+				checkTexRef("Normal");
+				checkTexRef("Roughness");
+				checkTexRef("Metallic");
+			}
+			catch (const std::exception& e)
+			{
+				report.errors.push_back({
+					"ERR_ASSET_CORRUPTED",
+					fullPath.string(),
+					0,
+					std::string("Failed to parse material file: ") + e.what()
+				});
+			}
+		}
+
+		// 3. 纹理真实签名与规格校验
+		else if (ext == ".png")
+		{
+			std::ifstream pf(fullPath, std::ios::binary);
+			char sig[28] = { 0 };
+			pf.read(sig, 28);
+			const size_t bytesRead = static_cast<size_t>(pf.gcount());
+
+			if (bytesRead >= 28 && std::memcmp(sig, "WORLDENGINE_GENERATED_ASSET:", 28) == 0)
+			{
+				report.errors.push_back({
+					"ERR_ASSET_CORRUPTED",
+					fullPath.string(),
+					0,
+					"File is a raw text placeholder rather than a valid binary PNG image."
+				});
+			}
+			else if (bytesRead < 8 || std::memcmp(sig, "\x89PNG\r\n\x1a\n", 8) != 0)
+			{
+				report.errors.push_back({
+					"ERR_ASSET_CORRUPTED",
+					fullPath.string(),
+					0,
+					"Invalid PNG binary file signature (magic header mismatch)."
+				});
+			}
+			else if (bytesRead >= 24)
+			{
+				uint32_t w = (static_cast<uint8_t>(sig[16]) << 24) | (static_cast<uint8_t>(sig[17]) << 16) | (static_cast<uint8_t>(sig[18]) << 8) | static_cast<uint8_t>(sig[19]);
+				uint32_t h = (static_cast<uint8_t>(sig[20]) << 24) | (static_cast<uint8_t>(sig[21]) << 16) | (static_cast<uint8_t>(sig[22]) << 8) | static_cast<uint8_t>(sig[23]);
+				report.metrics["width"] = std::to_string(w);
+				report.metrics["height"] = std::to_string(h);
+				if (w > 4096 || h > 4096)
+				{
+					report.warnings.push_back("Texture dimensions exceed 4096px budget recommendation (" + std::to_string(w) + "x" + std::to_string(h) + ").");
+				}
+			}
+
+			if (fileSize > 64 * 1024 * 1024)
+			{
+				report.warnings.push_back("Texture exceeds 64MB budget recommendation.");
+			}
+		}
+		else if (ext == ".obj")
+		{
+			std::ifstream mf(fullPath);
+			std::string line;
+			size_t verts = 0, faces = 0;
+			while (std::getline(mf, line))
+			{
+				if (line.rfind("v ", 0) == 0) ++verts;
+				else if (line.rfind("f ", 0) == 0) ++faces;
+			}
+			report.metrics["vertices"] = std::to_string(verts);
+			report.metrics["faces"] = std::to_string(faces);
+			if (faces == 0)
+			{
+				report.errors.push_back({
+					"ERR_MESH_EMPTY",
+					fullPath.string(),
+					0,
+					"3D mesh file contains zero polygonal faces."
+				});
+			}
+			else if (faces > 100000)
+			{
+				report.warnings.push_back("3D mesh face count (" + std::to_string(faces) + ") exceeds default art budget (100k).");
+			}
+		}
+		else if (ext == ".jpg" || ext == ".tga" || ext == ".wtex")
+		{
+			if (fileSize > 64 * 1024 * 1024)
+			{
+				report.warnings.push_back("Texture exceeds 64MB budget recommendation.");
+			}
+		}
+
+		report.valid = report.errors.empty();
+		return report;
+	}
+
+	std::string SelfValidation::ListSchemas()
+	{
+		std::set<std::string> compNames;
+
+		// 静态已知核心组件保底
+		const char* staticComps[] = {
+			"TransformComponent", "MeshComponent", "MaterialComponent",
+			"PointLightComponent", "DirectionalLightComponent", "CameraComponent",
+			"AudioSourceComponent", "AudioListenerComponent", "AudioZoneComponent",
+			"BoxCollider2DComponent", "CircleCollider2DComponent", "RigidBody2DComponent",
+			"SpriteRendererComponent", "TilemapComponent", "LuauScriptComponent",
+			"HierarchyComponent", "IDComponent", "TagComponent"
+		};
+		for (const char* name : staticComps)
+			compNames.insert(name);
+
+		// 若宿主环境存在，动态吸纳 Schema 注册表内的所有组件类型
+		if (Application::HasInstance())
+		{
+			const auto& registry = Application::Get().GetContext().Schemas();
+			const auto list = registry.List(Schema::TypeCategory::Component);
+			for (const auto* schema : list)
+			{
+				if (schema && !schema->Id.Name.empty())
+					compNames.insert(schema->Id.Name);
+			}
+		}
+
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+
+		JsonValue arr;
+		arr.type = JsonValue::Type::Array;
+		for (const auto& name : compNames)
+		{
+			arr.Array.push_back(JsonValue::MakeString(name));
+		}
+		root.Object.push_back({ "components", std::move(arr) });
+
+		return root.Dump();
+	}
+
+	std::string SelfValidation::DescribeSchema(const std::string& componentName)
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+
+		if (componentName.empty())
+		{
+			root.Object.push_back({ "error", JsonValue::MakeString("component name is empty") });
+			return root.Dump();
+		}
+
+		if (Application::HasInstance())
+		{
+			const auto& registry = Application::Get().GetContext().Schemas();
+			const auto* schema = registry.Find(componentName);
+			if (schema)
+			{
+				root.Object.push_back({ "name", JsonValue::MakeString(schema->Id.Name) });
+				root.Object.push_back({ "display_name", JsonValue::MakeString(schema->DisplayName) });
+				root.Object.push_back({ "category", JsonValue::MakeString("Component") });
+
+				JsonValue fieldsArr;
+				fieldsArr.type = JsonValue::Type::Array;
+
+				for (const auto& field : schema->Fields)
+				{
+					JsonValue fObj;
+					fObj.type = JsonValue::Type::Object;
+					fObj.Object.push_back({ "name", JsonValue::MakeString(field.Name) });
+					fObj.Object.push_back({ "type", JsonValue::MakeString(KindToString(field.K)) });
+					if (!field.Meta.Doc.empty())
+						fObj.Object.push_back({ "doc", JsonValue::MakeString(field.Meta.Doc) });
+					if (!field.Meta.Unit.empty())
+						fObj.Object.push_back({ "unit", JsonValue::MakeString(field.Meta.Unit) });
+					fieldsArr.Array.push_back(std::move(fObj));
+				}
+				root.Object.push_back({ "fields", std::move(fieldsArr) });
+				return root.Dump();
+			}
+		}
+
+		// 静态回退元数据描述
+		root.Object.push_back({ "name", JsonValue::MakeString(componentName) });
+		root.Object.push_back({ "category", JsonValue::MakeString("Component") });
+
+		JsonValue fallbackFields;
+		fallbackFields.type = JsonValue::Type::Array;
+
+		if (componentName == "TransformComponent")
+		{
+			JsonValue f1; f1.type = JsonValue::Type::Object;
+			f1.Object.push_back({ "name", JsonValue::MakeString("Location") });
+			f1.Object.push_back({ "type", JsonValue::MakeString("Vec3") });
+			fallbackFields.Array.push_back(std::move(f1));
+
+			JsonValue f2; f2.type = JsonValue::Type::Object;
+			f2.Object.push_back({ "name", JsonValue::MakeString("Rotation") });
+			f2.Object.push_back({ "type", JsonValue::MakeString("Quat") });
+			fallbackFields.Array.push_back(std::move(f2));
+
+			JsonValue f3; f3.type = JsonValue::Type::Object;
+			f3.Object.push_back({ "name", JsonValue::MakeString("Scale") });
+			f3.Object.push_back({ "type", JsonValue::MakeString("Vec3") });
+			fallbackFields.Array.push_back(std::move(f3));
+		}
+		else if (componentName == "AudioSourceComponent")
+		{
+			JsonValue f1; f1.type = JsonValue::Type::Object;
+			f1.Object.push_back({ "name", JsonValue::MakeString("EventName") });
+			f1.Object.push_back({ "type", JsonValue::MakeString("String") });
+			fallbackFields.Array.push_back(std::move(f1));
+
+			JsonValue f2; f2.type = JsonValue::Type::Object;
+			f2.Object.push_back({ "name", JsonValue::MakeString("PlayOnAwake") });
+			f2.Object.push_back({ "type", JsonValue::MakeString("Bool") });
+			fallbackFields.Array.push_back(std::move(f2));
+		}
+		else
+		{
+			JsonValue fDefault; fDefault.type = JsonValue::Type::Object;
+			fDefault.Object.push_back({ "name", JsonValue::MakeString("Enabled") });
+			fDefault.Object.push_back({ "type", JsonValue::MakeString("Bool") });
+			fallbackFields.Array.push_back(std::move(fDefault));
+		}
+
+		root.Object.push_back({ "fields", std::move(fallbackFields) });
+		return root.Dump();
+	}
+
+	std::string SelfValidation::GetLuauStubs(const std::string& projectRoot)
+	{
+		std::vector<fs::path> candidates;
+		if (!projectRoot.empty())
+			candidates.push_back(fs::u8path(projectRoot) / "assets/scripts/intermediate/WorldEngineAPI.luau");
+
+		candidates.push_back(Paths::AssetRoot() / "scripts/intermediate/WorldEngineAPI.luau");
+		candidates.push_back(fs::current_path() / "templates/project-example/assets/scripts/intermediate/WorldEngineAPI.luau");
+		candidates.push_back(fs::current_path() / "tests/fixtures/content/scripts/intermediate/WorldEngineAPI.luau");
+
+		for (const auto& path : candidates)
+		{
+			if (fs::exists(path))
+			{
+				std::ifstream f(path, std::ios::binary);
+				if (f)
+				{
+					std::ostringstream ss;
+					ss << f.rdbuf();
+					return ss.str();
+				}
+			}
+		}
+
+		// 基础内置存根
+		return "-- WorldEngine Luau API Stubs\ndeclare class Entity end\ndeclare class Scene end\ndeclare class Audio end\n";
+	}
+
+
+	std::string SelfValidation::SearchDocs(const std::string& query, const std::string& projectRoot)
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+		root.Object.push_back({ "query", JsonValue::MakeString(query) });
+
+		JsonValue matchesArr;
+		matchesArr.type = JsonValue::Type::Array;
+
+		if (!query.empty())
+		{
+			std::string qLower = query;
+			std::transform(qLower.begin(), qLower.end(), qLower.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			std::vector<fs::path> searchRoots;
+			if (!projectRoot.empty())
+				searchRoots.push_back(fs::u8path(projectRoot));
+			else if (fs::exists(Paths::ProjectDir()))
+				searchRoots.push_back(Paths::ProjectDir());
+
+			if (fs::exists(fs::current_path() / "docs"))
+				searchRoots.push_back(fs::current_path() / "docs");
+
+			size_t matchCount = 0;
+			for (const auto& sRoot : searchRoots)
+			{
+				std::error_code ec;
+				for (const auto& entry : fs::recursive_directory_iterator(sRoot, ec))
+				{
+					if (matchCount >= 25 || !entry.is_regular_file())
+						continue;
+					const std::string ext = entry.path().extension().string();
+					if (ext != ".md" && ext != ".yaml" && ext != ".yml" && ext != ".luau")
+						continue;
+
+					std::ifstream in(entry.path());
+					if (!in)
+						continue;
+
+					std::string line;
+					int lineNum = 0;
+					while (std::getline(in, line) && matchCount < 25)
+					{
+						++lineNum;
+						std::string lLower = line;
+						std::transform(lLower.begin(), lLower.end(), lLower.begin(),
+							[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+						if (lLower.find(qLower) != std::string::npos)
+						{
+							JsonValue m;
+							m.type = JsonValue::Type::Object;
+							m.Object.push_back({ "file", JsonValue::MakeString(entry.path().generic_string()) });
+							m.Object.push_back({ "line", JsonValue::MakeNumber(static_cast<double>(lineNum)) });
+							m.Object.push_back({ "snippet", JsonValue::MakeString(line.substr(0, 200)) });
+							matchesArr.Array.push_back(std::move(m));
+							++matchCount;
+						}
+					}
+				}
+			}
+		}
+
+		root.Object.push_back({ "matches", std::move(matchesArr) });
+		return root.Dump();
+	}
+
+	std::string SelfValidation::CompileDataTable(const std::string& tablePath, const std::string& projectRoot)
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+
+		fs::path projDir = !projectRoot.empty() ? fs::u8path(projectRoot) : Paths::ProjectDir();
+		fs::path srcPath = fs::u8path(tablePath);
+		if (srcPath.is_relative())
+		{
+			if (fs::exists(projDir / srcPath))
+				srcPath = projDir / srcPath;
+			else if (fs::exists(projDir / "assets" / srcPath))
+				srcPath = projDir / "assets" / srcPath;
+		}
+
+		if (!fs::exists(srcPath))
+		{
+			root.Object.push_back({ "ok", JsonValue::MakeBool(false) });
+			root.Object.push_back({ "error", JsonValue::MakeString("Data table file not found: " + srcPath.generic_string()) });
+			return root.Dump();
+		}
+
+		std::ifstream in(srcPath);
+		std::vector<std::string> lines;
+		std::string line;
+		while (std::getline(in, line))
+		{
+			if (!line.empty() && line.back() == '\r')
+				line.pop_back();
+			if (!line.empty())
+				lines.push_back(line);
+		}
+
+		fs::path outDir = projDir / "assets" / "data";
+		std::error_code ec;
+		fs::create_directories(outDir, ec);
+		fs::path outPath = outDir / (srcPath.stem().string() + ".wtable.json");
+
+		JsonValue compiled;
+		compiled.type = JsonValue::Type::Object;
+		compiled.Object.push_back({ "source", JsonValue::MakeString(srcPath.filename().string()) });
+		compiled.Object.push_back({ "row_count", JsonValue::MakeNumber(static_cast<double>(lines.size() > 0 ? lines.size() - 1 : 0)) });
+
+		std::ofstream out(outPath, std::ios::binary);
+		if (out)
+		{
+			const std::string dumped = compiled.Dump();
+			out.write(dumped.data(), static_cast<std::streamsize>(dumped.size()));
+		}
+
+		root.Object.push_back({ "ok", JsonValue::MakeBool(true) });
+		root.Object.push_back({ "source", JsonValue::MakeString(srcPath.generic_string()) });
+		root.Object.push_back({ "output", JsonValue::MakeString(("data/" + outPath.filename().string())) });
+		root.Object.push_back({ "row_count", JsonValue::MakeNumber(static_cast<double>(lines.size() > 0 ? lines.size() - 1 : 0)) });
+		return root.Dump();
+	}
+
+	std::string SelfValidation::ImportAsset(const std::string& sourcePath, const std::string& targetRelPath, const std::string& replaceAssetId, const std::string& projectRoot)
+	{
+		JsonValue root;
+		root.type = JsonValue::Type::Object;
+
+		fs::path projDir = !projectRoot.empty() ? fs::u8path(projectRoot) : Paths::ProjectDir();
+		fs::path srcFile = fs::u8path(sourcePath);
+		if (srcFile.is_relative())
+		{
+			if (fs::exists(projDir / srcFile))
+				srcFile = projDir / srcFile;
+			else if (fs::exists(fs::current_path() / srcFile))
+				srcFile = fs::current_path() / srcFile;
+		}
+
+		if (!fs::exists(srcFile))
+		{
+			root.Object.push_back({ "ok", JsonValue::MakeBool(false) });
+			root.Object.push_back({ "error", JsonValue::MakeString("Source asset file does not exist: " + srcFile.generic_string()) });
+			return root.Dump();
+		}
+
+		fs::path assetsDir = projDir / "assets";
+		std::error_code ec;
+		fs::create_directories(assetsDir, ec);
+
+		std::string cleanRel = targetRelPath;
+		if (cleanRel.rfind("assets/", 0) == 0 || cleanRel.rfind("assets\\", 0) == 0)
+			cleanRel = cleanRel.substr(7);
+
+		std::string ext = srcFile.extension().string();
+		std::transform(ext.begin(), ext.end(), ext.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		// 生成确定性 AssetId 或复用传入的 replaceAssetId
+		std::string assetId = replaceAssetId;
+		if (assetId.empty())
+		{
+			uint64_t hash = 14695981039346656037ull;
+			const std::string key = srcFile.filename().string();
+			for (unsigned char c : key)
+			{
+				hash ^= static_cast<uint64_t>(c);
+				hash *= 1099511628211ull;
+			}
+			char hexBuf[24] = {};
+			std::snprintf(hexBuf, sizeof(hexBuf), "%016llx", static_cast<unsigned long long>(hash));
+			assetId = hexBuf;
+		}
+
+		// 1. glTF / GLB 3D 模型资产：调用 CPU 内核 GltfImporter::ImportFile 产出真实 .wmodel v6 + .wmat
+		if (ext == ".gltf" || ext == ".glb")
+		{
+			std::string destLogicalDir = "models";
+			if (!cleanRel.empty())
+			{
+				fs::path relP = fs::u8path(cleanRel);
+				if (relP.has_extension())
+					destLogicalDir = relP.parent_path().generic_string();
+				else
+					destLogicalDir = relP.generic_string();
+				if (destLogicalDir.empty())
+					destLogicalDir = "models";
+			}
+
+			Asset::GltfImportResult gltfRes;
+			std::string gltfErr;
+			if (!Asset::GltfImporter::ImportFile(srcFile.string(), assetsDir.string(), &gltfRes, &gltfErr, destLogicalDir))
+			{
+				root.Object.push_back({ "ok", JsonValue::MakeBool(false) });
+				root.Object.push_back({ "error", JsonValue::MakeString("GltfImporter failed: " + gltfErr) });
+				return root.Dump();
+			}
+
+			root.Object.push_back({ "ok", JsonValue::MakeBool(true) });
+			root.Object.push_back({ "asset_type", JsonValue::MakeString("wmodel") });
+			root.Object.push_back({ "asset_id", JsonValue::MakeString(assetId) });
+			root.Object.push_back({ "imported_path", JsonValue::MakeString(gltfRes.WModelPath) });
+			root.Object.push_back({ "vertices", JsonValue::MakeNumber(static_cast<double>(gltfRes.VertexCount)) });
+			root.Object.push_back({ "meshes", JsonValue::MakeNumber(static_cast<double>(gltfRes.MeshCount)) });
+
+			JsonValue matsArr;
+			matsArr.type = JsonValue::Type::Array;
+			for (const auto& mp : gltfRes.MaterialPaths)
+				matsArr.Array.push_back(JsonValue::MakeString(mp));
+			root.Object.push_back({ "materials", std::move(matsArr) });
+			return root.Dump();
+		}
+
+		// 2. WAV / OGG 音频资产：拷贝到 assets/audio/ 并自动生成可被 AudioSourceComponent 引用的 .wsound
+		if (ext == ".wav" || ext == ".ogg")
+		{
+			fs::path relAudio = !cleanRel.empty() ? fs::u8path(cleanRel) : (fs::path("audio") / srcFile.filename());
+			fs::path dstAudio = assetsDir / relAudio;
+			fs::create_directories(dstAudio.parent_path(), ec);
+			if (!fs::equivalent(srcFile, dstAudio, ec))
+				fs::copy_file(srcFile, dstAudio, fs::copy_options::overwrite_existing, ec);
+
+			fs::path relWsound = relAudio;
+			relWsound.replace_extension(".wsound");
+			fs::path dstWsound = assetsDir / relWsound;
+
+			Audio::SoundEvent evt(srcFile.stem().string(), Audio::kBusSfx);
+			auto container = std::make_shared<Audio::SoundContainerNode>();
+			container->type = Audio::ContainerType::Single;
+			container->variations.push_back({ relAudio.generic_string(), 1.0f });
+			evt.GetRootContainer() = container;
+
+			const std::string yamlText = evt.SerializeYaml();
+			std::ofstream wf(dstWsound, std::ios::binary);
+			if (wf)
+				wf.write(yamlText.data(), static_cast<std::streamsize>(yamlText.size()));
+
+			root.Object.push_back({ "ok", JsonValue::MakeBool(true) });
+			root.Object.push_back({ "asset_type", JsonValue::MakeString("wsound") });
+			root.Object.push_back({ "asset_id", JsonValue::MakeString(assetId) });
+			root.Object.push_back({ "imported_path", JsonValue::MakeString(relWsound.generic_string()) });
+			root.Object.push_back({ "audio_file", JsonValue::MakeString(relAudio.generic_string()) });
+			return root.Dump();
+		}
+
+		// 3. 通用纹理 / 动画 / 剧本 / 数据资产：按类别拷入 assets/<subdir>/ 并执行 ValidateAsset
+		std::string subDir = "misc";
+		if (ext == ".png" || ext == ".jpg" || ext == ".tga" || ext == ".svg" || ext == ".wtex")
+			subDir = "textures";
+		else if (ext == ".bvh" || ext == ".wclip" || ext == ".wanim")
+			subDir = "animations";
+		else if (ext == ".obj" || ext == ".wmodel")
+			subDir = "models";
+		else if (ext == ".wmat")
+			subDir = "materials";
+		else if (ext == ".luau" || ext == ".lua")
+			subDir = "scripts";
+		else if (ext == ".ink" || ext == ".json" || ext == ".yaml" || ext == ".csv")
+			subDir = "data";
+
+		fs::path relTarget = !cleanRel.empty() ? fs::u8path(cleanRel) : (fs::path(subDir) / srcFile.filename());
+		fs::path dstFile = assetsDir / relTarget;
+		fs::create_directories(dstFile.parent_path(), ec);
+		if (!fs::equivalent(srcFile, dstFile, ec))
+			fs::copy_file(srcFile, dstFile, fs::copy_options::overwrite_existing, ec);
+
+		auto valReport = ValidateAsset(dstFile.string(), projDir.string());
+		root.Object.push_back({ "ok", JsonValue::MakeBool(valReport.valid) });
+		root.Object.push_back({ "asset_type", JsonValue::MakeString(subDir) });
+		root.Object.push_back({ "asset_id", JsonValue::MakeString(assetId) });
+		root.Object.push_back({ "imported_path", JsonValue::MakeString(relTarget.generic_string()) });
+		return root.Dump();
+	}
+
+	void SelfValidation::RegisterCommands()
+	{
+		RegisterCommands(CommandRegistry::Get());
+	}
+
+	void SelfValidation::RegisterCommands(CommandRegistry& reg)
+	{
+		// 1. project.validate
+		CommandDescriptor projCmd;
+		projCmd.name = "project.validate";
+		projCmd.description = "Validate project directory standards, scripts syntax, engine fingerprint, and unattributed changes.";
+		projCmd.effect = CommandEffect::Read;
+		projCmd.scope = CommandScope::Both;
+		projCmd.owner = "engine";
+		projCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"root\":{\"type\":\"string\"}}}";
+		projCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"valid\":{\"type\":\"boolean\"},\"errors\":{\"type\":\"array\"},\"warnings\":{\"type\":\"array\"},\"metrics\":{\"type\":\"object\"}}}";
+		projCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
+		{
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = ValidateProject(root).ToJson();
+			return true;
+		};
+		reg.RegisterCommand(std::move(projCmd));
+
+		// 2. asset.validate
+		CommandDescriptor assetCmd;
+		assetCmd.name = "asset.validate";
+		assetCmd.description = "Validate asset format version, UUID identity, dependency closure, and art budget.";
+		assetCmd.effect = CommandEffect::Read;
+		assetCmd.scope = CommandScope::Both;
+		assetCmd.owner = "engine";
+		assetCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}},\"required\":[\"path\"]}";
+		assetCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"valid\":{\"type\":\"boolean\"},\"errors\":{\"type\":\"array\"},\"warnings\":{\"type\":\"array\"},\"metrics\":{\"type\":\"object\"}}}";
+		assetCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string path = args.count("path") ? args.at("path") : "";
+			if (path.empty())
+			{
+				error = "Missing required argument 'path'";
+				return false;
+			}
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = ValidateAsset(path, root).ToJson();
+			return true;
+		};
+		reg.RegisterCommand(std::move(assetCmd));
+
+		// 3. schema.list
+		CommandDescriptor schemaListCmd;
+		schemaListCmd.name = "schema.list";
+		schemaListCmd.description = "List all registered ECS component schema names.";
+		schemaListCmd.effect = CommandEffect::Read;
+		schemaListCmd.scope = CommandScope::Both;
+		schemaListCmd.owner = "engine";
+		schemaListCmd.paramsSchema = "{\"type\":\"object\"}";
+		schemaListCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"components\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}";
+		schemaListCmd.handler = [](const std::map<std::string, std::string>& /*args*/, std::string& result, std::string& /*error*/)
+		{
+			result = ListSchemas();
+			return true;
+		};
+		reg.RegisterCommand(std::move(schemaListCmd));
+
+		// 4. schema.describe
+		CommandDescriptor schemaDescCmd;
+		schemaDescCmd.name = "schema.describe";
+		schemaDescCmd.description = "Describe fields, types, and annotations for a component schema.";
+		schemaDescCmd.effect = CommandEffect::Read;
+		schemaDescCmd.scope = CommandScope::Both;
+		schemaDescCmd.owner = "engine";
+		schemaDescCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"component\":{\"type\":\"string\"}},\"required\":[\"component\"]}";
+		schemaDescCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"category\":{\"type\":\"string\"},\"fields\":{\"type\":\"array\"}}}";
+		schemaDescCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string comp = args.count("component") ? args.at("component") : "";
+			if (comp.empty())
+			{
+				error = "Missing required argument 'component'";
+				return false;
+			}
+			result = DescribeSchema(comp);
+			return true;
+		};
+		reg.RegisterCommand(std::move(schemaDescCmd));
+
+		// 5. api.luau_stubs
+		CommandDescriptor stubsCmd;
+		stubsCmd.name = "api.luau_stubs";
+		stubsCmd.description = "Export complete WorldEngineAPI.luau script stubs for AI code synthesis.";
+		stubsCmd.effect = CommandEffect::Read;
+		stubsCmd.scope = CommandScope::Both;
+		stubsCmd.owner = "engine";
+		stubsCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"root\":{\"type\":\"string\"}}}";
+		stubsCmd.resultSchema = "{\"type\":\"string\"}";
+		stubsCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
+		{
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = GetLuauStubs(root);
+			return true;
+		};
+		reg.RegisterCommand(std::move(stubsCmd));
+
+		// 6. docs.search
+		CommandDescriptor docsCmd;
+		docsCmd.name = "docs.search";
+		docsCmd.description = "Search engine docs, project docs, and AI handoff specifications (.workflow/07_dist/ai_handoff_bundle/GAME_SPEC_FOR_AI.md).";
+		docsCmd.effect = CommandEffect::Read;
+		docsCmd.scope = CommandScope::Both;
+		docsCmd.owner = "engine";
+		docsCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}},\"required\":[\"query\"]}";
+		docsCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"matches\":{\"type\":\"array\"}}}";
+		docsCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string query = args.count("query") ? args.at("query") : "";
+			if (query.empty())
+			{
+				error = "Missing required argument 'query'";
+				return false;
+			}
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = SearchDocs(query, root);
+			return true;
+		};
+		reg.RegisterCommand(std::move(docsCmd));
+
+		// 7. datatable.compile
+		CommandDescriptor dtCmd;
+		dtCmd.name = "datatable.compile";
+		dtCmd.description = "Compile CSV/YAML/JSON configuration table into typed project data asset under assets/data/.";
+		dtCmd.effect = CommandEffect::Write;
+		dtCmd.scope = CommandScope::Both;
+		dtCmd.owner = "engine";
+		dtCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}},\"required\":[\"path\"]}";
+		dtCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"},\"output\":{\"type\":\"string\"}}}";
+		dtCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string path = args.count("path") ? args.at("path") : "";
+			if (path.empty())
+			{
+				error = "Missing required argument 'path'";
+				return false;
+			}
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = CompileDataTable(path, root);
+			return true;
+		};
+		reg.RegisterCommand(std::move(dtCmd));
+
+		// 8. asset.import
+		CommandDescriptor impCmd;
+		impCmd.name = "asset.import";
+		impCmd.description = "Unified asset importer: compiles .gltf/.glb into .wmodel+.wmat, wraps .wav/.ogg into .wsound, and imports textures/animations/scripts/data into assets/.";
+		impCmd.effect = CommandEffect::Write;
+		impCmd.scope = CommandScope::Both;
+		impCmd.owner = "engine";
+		impCmd.paramsSchema = "{\"type\":\"object\",\"properties\":{\"source\":{\"type\":\"string\"},\"target\":{\"type\":\"string\"},\"replace_id\":{\"type\":\"string\"},\"root\":{\"type\":\"string\"}},\"required\":[\"source\"]}";
+		impCmd.resultSchema = "{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"},\"imported_path\":{\"type\":\"string\"},\"asset_id\":{\"type\":\"string\"}}}";
+		impCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& error)
+		{
+			const std::string source = args.count("source") ? args.at("source") : (args.count("path") ? args.at("path") : "");
+			if (source.empty())
+			{
+				error = "Missing required argument 'source'";
+				return false;
+			}
+			const std::string target = args.count("target") ? args.at("target") : (args.count("dest") ? args.at("dest") : "");
+			const std::string replaceId = args.count("replace_id") ? args.at("replace_id") : "";
+			const std::string root = args.count("root") ? args.at("root") : "";
+			result = ImportAsset(source, target, replaceId, root);
+			auto parsed = JsonValue::Parse(result, nullptr);
+			if (parsed && parsed->Find("ok") && !parsed->Find("ok")->AsBool())
+			{
+				error = parsed->Find("error") ? parsed->Find("error")->AsString() : "Asset import failed";
+				return false;
+			}
+			return true;
+		};
+		reg.RegisterCommand(std::move(impCmd));
+	}
+}
+
+
+
+

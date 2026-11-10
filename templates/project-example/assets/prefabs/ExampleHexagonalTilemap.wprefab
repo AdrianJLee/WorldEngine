@@ -1,0 +1,21 @@
+FormatVersion: 2
+Scene: ExampleHexagonalTilemap
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000402
+    World::TagComponent:
+      Tag: Hexagonal Board Tilemap
+    World::TransformComponent:
+      Location: [-4.5, 0.5, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [1, 1, 1]
+    World::TilemapComponent:
+      TintColor: [1, 1, 1, 1]
+      Tilemap: "assets/textures/characters/hex_board.wtilemap"
+      CellSize: [1, 1]
+      SortingLayer: -5
+      OrderInLayer: 0
+      GenerateCollision: false
+      ShowGrid: true
+      GridType: 2

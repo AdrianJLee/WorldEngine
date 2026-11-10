@@ -1,0 +1,23 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 910000000000000015
+  World::TagComponent:
+    Tag: "Right Hand IK"
+  World::TransformComponent:
+    Location: [0, 0, 0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::TwoBoneIkComponent:
+    OwnerUuid: 910000000000000001
+    TargetUuid: 910000000000000014
+    RootBone: "UpperArm.R"
+    MidBone: "LowerArm.R"
+    EndBone: "Hand.R"
+    TargetPosition: [0, 0, 0]
+    Weight: 0.85
+    PoleAngleDeg: 0
+    Enabled: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 1

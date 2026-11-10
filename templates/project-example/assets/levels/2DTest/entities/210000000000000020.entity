@@ -1,0 +1,35 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 210000000000000020
+  World::TagComponent:
+    Tag: Conveyor Belt Surface
+  World::TransformComponent:
+    Location: [-2.8, -1.8, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [3.0, 0.4, 1]
+  World::SpriteComponent:
+    Color: [0.95, 0.55, 0.15, 1]
+    Texture: "assets/textures/Icon.wtex"
+    TilingFactor: 1
+    SortingLayer: 0
+    OrderInLayer: 2
+  World::RigidBody2DComponent:
+    Type: Static
+    FixedRotation: true
+    Ccd: false
+    Layer: 1
+    Mask: 65535
+  World::BoxCollider2DComponent:
+    Offset: [0, 0]
+    Size: [0.5, 0.5]
+    Density: 1.0
+    Friction: 0.8
+    Restitution: 0.0
+    ShowCollider: true
+    IsSensor: false
+  World::SurfaceEffector2DComponent:
+    Speed: 4.0
+    ForceScale: 1.0
+    Enabled: true

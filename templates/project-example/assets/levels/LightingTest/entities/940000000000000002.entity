@@ -1,0 +1,17 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 940000000000000002
+  World::TagComponent:
+    Tag: Floor
+  World::TransformComponent:
+    Location: [0, -2.5, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [24, 1, 24]
+  World::MeshRendererComponent:
+    Primitive: 2
+    Color: [0.300000012, 0.330000013, 0.379999995, 1]
+    Mesh: ""
+    Material: ""
+    MeshIndex: 0

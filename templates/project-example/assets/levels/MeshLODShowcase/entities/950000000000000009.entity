@@ -1,0 +1,39 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 950000000000000009
+  World::TagComponent:
+    Tag: "Character Mannequin (Auto LOD)"
+  World::TransformComponent:
+    Location: [0, 0.6, 2]
+    Rotation: [0, 180, 0]
+    Scale: [1.8, 1.8, 1.8]
+  World::SkinnedMeshRendererComponent:
+    Mesh: "engine/models/characters/mannequin.wmodel"
+    MeshIndex: 0
+    Material: ""
+    CastShadow: true
+  World::AnimationPlayerComponent:
+    Clip: "engine/animation/mannequin_idle.wclip"
+    PlaybackSpeed: 1.0
+    CurrentTime: 0.0
+    Playing: 1
+    Loop: 1
+  World::MeshLODComponent:
+    LOD1Distance: 15.0
+    LOD2Distance: 35.0
+    LOD3Distance: 42.0
+    LOD4Distance: 49.0
+    LOD5Distance: 56.0
+    LOD6Distance: 63.0
+    LOD7Distance: 68.2
+    CullDistance: 70.0
+    Hysteresis: 2.0
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
+    CurrentLOD: 0
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 2

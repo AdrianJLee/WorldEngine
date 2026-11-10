@@ -1,0 +1,56 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 16,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "project-debug",
+      "displayName": "This project (Debug)",
+      "description": "Configures this project's Game.dll build. Machine-local values stay out of this file: WE_ROOT and WE_ENGINE_BUILD_DIR come from the environment when set, otherwise the project resolves .we/engine-root.txt / the relative layout, and a complete <engine>/build/x64-Debug is picked up automatically (fast path).",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/x64-Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WE_ROOT": "$env{WE_ROOT}",
+        "WE_ENGINE_BUILD_DIR": "$env{WE_ENGINE_BUILD_DIR}"
+      }
+    },
+    {
+      "name": "project-release",
+      "displayName": "This project (Release)",
+      "description": "Release configuration. It uses the fast path only when the engine also has build/x64-Release built; otherwise it falls back to building the engine from source (slow on the first run).",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/x64-Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WE_ROOT": "$env{WE_ROOT}",
+        "WE_ENGINE_BUILD_DIR": "$env{WE_ENGINE_BUILD_DIR}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "project-release",
+      "displayName": "Release",
+      "configurePreset": "project-release",
+      "configuration": "Release",
+      "targets": [
+        "Game"
+      ]
+    },
+    {
+      "name": "project-debug",
+      "displayName": "Debug",
+      "configurePreset": "project-debug",
+      "configuration": "Debug",
+      "targets": [
+        "Game"
+      ]
+    }  ]
+}
+

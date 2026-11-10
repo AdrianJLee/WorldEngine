@@ -1,0 +1,1317 @@
+#include "wldpch.h"
+#include "World/RHI/RhiFramebufferBridge.h"
+#include "World/WUI/WuiRhiBackend.h"
+
+#include "World/Core/Application.h"
+#include "World/Renderer/Renderer.h"
+#include "World/Renderer/ShaderUtils.h"
+#include "World/WUI/WuiTextureRegistry.h"
+#include "World/WUI/WuiWidgets.h"
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb_truetype.h>
+
+#include <GLFW/glfw3.h>
+
+
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <utility>
+
+namespace World::Wui
+{
+	WuiInputCollector WuiRhiBackend::s_Input;
+	// HOTR-P1-T3:引擎 shader 失效代 + 活实例计数(多实例:主窗口 + 浮窗都要失效)。
+	uint32_t WuiRhiBackend::s_ShaderGeneration = 1;
+	uint32_t WuiRhiBackend::s_LiveInstances = 0;
+	// WLD_WUI_FONT_STATS=1:每 120 帧把每个字面的图集占用打进日志(默认关)。
+	bool WuiRhiBackend::s_FontStats = std::getenv("WLD_WUI_FONT_STATS") != nullptr;
+	// WLD_WUI_FONT_LEGACY_BLANK=1:**只用于验证** —— 复现旧版"图集满就把空白缓存下来"的缺陷,
+	// 让 `verify-wui-font-atlas.py` 能在同一个二进制上做正反对照(否则要另编一份旧代码)。
+	bool WuiRhiBackend::s_LegacyBlankBake = std::getenv("WLD_WUI_FONT_LEGACY_BLANK") != nullptr;
+	uint32_t WuiRhiBackend::s_FontMissLogs = 0;
+	uint32_t WuiRhiBackend::s_FontStatsFrame = 0;
+
+	namespace
+	{
+		constexpr uint32_t MaxQuads = 65536;
+
+		thread_local std::vector<uint32_t> tlsCodepoints;
+		thread_local std::vector<int> tlsOffsets;
+		thread_local std::vector<uint32_t> tlsMeasureCodepoints;
+		thread_local std::vector<int> tlsMeasureOffsets;
+
+		void DecodeUtf8(std::string_view text, std::vector<uint32_t>& codepoints, std::vector<int>& byteOffsets)
+		{
+			codepoints.clear();
+			byteOffsets.clear();
+			size_t i = 0;
+			while (i < text.size())
+			{
+				const int start = static_cast<int>(i);
+				const unsigned char c = static_cast<unsigned char>(text[i]);
+				uint32_t cp = 0;
+				// 续字节必须真的是 0b10xxxxxx:旧版只看"字节够不够",于是**半截序列**会把后面
+				// 1~2 个正常字节也当成分量吃掉(实测:省略号 "..." 被吞、并拼出幽灵码点 U+6BAE)。
+				// 现在非法序列只前进 1 字节并产出一个替换符,后续文字保持完整。
+				const auto cont = [&text](size_t index) {
+					return index < text.size()
+						&& (static_cast<unsigned char>(text[index]) & 0xC0u) == 0x80u;
+				};
+				if (c < 0x80) { cp = c; i += 1; }
+				else if ((c >> 5) == 0x6 && cont(i + 1)) { cp = ((c & 0x1Fu) << 6) | (text[i + 1] & 0x3Fu); i += 2; }
+				else if ((c >> 4) == 0xE && cont(i + 1) && cont(i + 2)) { cp = ((c & 0x0Fu) << 12) | ((text[i + 1] & 0x3Fu) << 6) | (text[i + 2] & 0x3Fu); i += 3; }
+				else if ((c >> 3) == 0x1E && cont(i + 1) && cont(i + 2) && cont(i + 3)) { cp = ((c & 0x07u) << 18) | ((text[i + 1] & 0x3Fu) << 12) | ((text[i + 2] & 0x3Fu) << 6) | (text[i + 3] & 0x3Fu); i += 4; }
+				else { cp = 0xFFFD; i += 1; }
+				codepoints.push_back(cp);
+				byteOffsets.push_back(start);
+			}
+		}
+
+		bool LoadFile(const std::filesystem::path& path, std::vector<unsigned char>& bytes)
+		{
+			std::ifstream stream(path, std::ios::binary);
+			if (!stream)
+				return false;
+			stream.seekg(0, std::ios::end);
+			const std::streamsize size = stream.tellg();
+			stream.seekg(0, std::ios::beg);
+			if (size <= 0)
+				return false;
+			bytes.resize(static_cast<size_t>(size));
+			stream.read(reinterpret_cast<char*>(bytes.data()), size);
+			return stream.good();
+		}
+	}
+
+	WuiRhiBackend::WuiRhiBackend()
+	{
+		m_Faces.resize(5);
+		++s_LiveInstances;
+		// 度量钩子**不在这里注册**:构造时字体还没加载(EnsureResources 才加载),
+		// 未加载字体的后端会让 MeasureText 退化成 0.6em 估算;如果它最后注册,
+		// 整个编辑器的排版/光标就都用估算值,而绘制用真实字形 → 每个 token 前出现
+		// 累积空隙(用户实测:代码里操作符前像多了两三个空格)。见 EnsureResources。
+	}
+
+	WuiRhiBackend::~WuiRhiBackend()
+	{
+		ReleaseDeviceResources();
+		ClearTextMeasureHook(this);
+		for (FontFace& face : m_Faces)
+			delete face.Info;
+		if (s_LiveInstances > 0)
+			--s_LiveInstances;
+	}
+
+	void WuiRhiBackend::ReleaseDeviceResources()
+	{
+		// 先摘钩子再放资源:钩子是 [this] 的 lambda,留在 Renderer 的钩子表里会在
+		// Renderer::Shutdown(设备销毁前)对已析构的后端调用 ReleaseResources()。
+		Renderer::UnregisterDeviceReleaseHook(this);
+		ReleaseResources();
+	}
+
+	void WuiRhiBackend::FeedKey(uint32_t keyCode, bool down, bool repeat) { s_Input.OnKey(keyCode, down, repeat); }
+	void WuiRhiBackend::FeedChar(uint32_t codepoint) { s_Input.OnChar(codepoint); }
+	void WuiRhiBackend::FeedMouseButton(int button, bool down) { s_Input.OnMouseButton(button, down); }
+	void WuiRhiBackend::FeedMouseMove(float x, float y) { s_Input.OnMouseMove(x, y); }
+	void WuiRhiBackend::FeedMouseScroll(float dx, float dy) { s_Input.OnMouseScroll(dx, dy); }
+	void WuiRhiBackend::ResetMouseState() { s_Input.ResetMouseState(); }
+
+	bool WuiRhiBackend::BeginFrame(WuiInputState& input)
+	{
+		if (Application::HasInstance() && !m_UseLocalInput)
+		{
+			m_PhysicalViewport = { static_cast<float>(Application::Get().GetWindow().GetWidth()),
+				static_cast<float>(Application::Get().GetWindow().GetHeight()) };
+		}
+		// P4-UX2c:面板按**设计单位**布局(物理像素 / 内容缩放),渲染时由视口映射放大。
+		const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+		m_Viewport = m_PhysicalViewport / scale;
+		const double now = glfwGetTime();
+		if (m_LastTime > 0 && now > m_LastTime)
+			m_Fps = static_cast<float>(1.0 / (now - m_LastTime));
+		m_LastTime = now;
+		if (m_UseLocalInput)
+			m_LocalInput.BeginFrame(input, m_Viewport, m_Fps);
+		else
+			s_Input.BeginFrame(input, m_Viewport, m_Fps);
+		return true;
+	}
+
+	void WuiRhiBackend::UseLocalInput(glm::vec2 viewport)
+	{
+		m_UseLocalInput = true;
+		// 调用方传的是窗口客户区(物理像素);设计单位在 BeginFrame 里换算。
+		m_PhysicalViewport = viewport;
+		m_Viewport = viewport / (UiScale() > 0.0f ? UiScale() : 1.0f);
+		m_CursorWindow = nullptr;
+	}
+
+	void WuiRhiBackend::ReleaseResources()
+	{
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_Cmds[slot] = nullptr;
+			m_Vbs[slot] = nullptr;
+			m_Ibs[slot] = nullptr;
+			m_Ubos[slot] = nullptr;
+			m_GlobalSets[slot] = nullptr;
+			m_TextureSets[slot].clear();
+		}
+		m_Shader = nullptr;
+		m_Pipeline = nullptr;
+		m_TextureLayout = nullptr;
+		m_Sampler = nullptr;
+		m_WhiteTexture = nullptr;
+		m_UiPass = nullptr;
+		m_UiColor = nullptr;
+		m_UiFramebuffer = nullptr;
+		m_UiWidth = m_UiHeight = 0;
+		m_ActiveTexture = nullptr;
+		for (FontFace& face : m_Faces)
+			face.AtlasTexture = nullptr;
+		++m_TextureContentRevision;   // 资源已释放:下一帧强制重建描述符集缓存
+		m_TextureChanged = true;
+		m_DeviceKey = nullptr;
+	}
+
+	// HOTR-P1-T3:静态代数 +1,让**所有**活实例在各自下一帧 EnsureResources 里只重建
+	// shader + pipeline(返回本次将重建管线的活实例数,供 Renderer::ReloadShaders 计数)。
+	uint32_t WuiRhiBackend::InvalidateShaders()
+	{
+		++s_ShaderGeneration;
+		return s_LiveInstances;
+	}
+
+	// HOTR-P1-T3:编译 Wui_Ui.slang 并按既有描述建管线;失败返回 false + error,
+	// **不动**任何既有句柄。reload=false = 启动路径(沿用断言编译入口,行为不变);
+	// reload=true = 热重载(非断言入口;空 stage / 空句柄一律视为失败)。
+	bool WuiRhiBackend::BuildShaderAndPipeline(const Rhi::Handle<Rhi::Device>& device, bool reload,
+		Rhi::Handle<Rhi::Shader>& outShader, Rhi::Handle<Rhi::Pipeline>& outPipeline, std::string* error)
+	{
+		if (!device || !m_UiPass || !m_TextureLayout)
+		{
+			if (error) *error = "WUI backend is not initialized";
+			return false;
+		}
+
+		Rhi::ShaderDesc shaderDesc;
+		shaderDesc.DebugName = "WUI";
+		Rhi::ShaderStageSource vertexStage;
+		Rhi::ShaderStageSource pixelStage;
+		if (reload)
+		{
+			if (!ShaderCompiler::TryCompileStage(Rhi::ShaderStage::Vertex, "assets/shaders/Wui_Ui.slang",
+					"VSMain", "vs_6_0", vertexStage, error)
+				|| !ShaderCompiler::TryCompileStage(Rhi::ShaderStage::Fragment, "assets/shaders/Wui_Ui.slang",
+					"PSMain", "ps_6_0", pixelStage, error))
+				return false;
+		}
+		else
+		{
+			vertexStage = ShaderCompiler::CompileStage(
+				Rhi::ShaderStage::Vertex, "assets/shaders/Wui_Ui.slang", "VSMain", "vs_6_0");
+			pixelStage = ShaderCompiler::CompileStage(
+				Rhi::ShaderStage::Fragment, "assets/shaders/Wui_Ui.slang", "PSMain", "ps_6_0");
+		}
+		shaderDesc.Stages.push_back(std::move(vertexStage));
+		shaderDesc.Stages.push_back(std::move(pixelStage));
+		Rhi::Handle<Rhi::Shader> shader = device->CreateShader(shaderDesc);
+		if (!shader)
+		{
+			if (error) *error = "CreateShader failed for assets/shaders/Wui_Ui.slang";
+			return false;
+		}
+
+		Rhi::PipelineDesc pipelineDesc;
+		pipelineDesc.Shader = shader;
+		pipelineDesc.RenderPass = m_IsVulkan ? Renderer::GetPresentRenderPass() : m_UiPass;
+		pipelineDesc.DescriptorSetLayouts = { Renderer::GetGlobalDescriptorSetLayout(), m_TextureLayout };
+		pipelineDesc.Topology = Rhi::PrimitiveTopology::TriangleList;
+		pipelineDesc.Cull = Rhi::CullMode::None;
+		pipelineDesc.VertexBindings.push_back({ 0, sizeof(Vertex), false });
+		pipelineDesc.VertexAttributes = {
+			{ 0, 0, Rhi::Format::R32G32_SFLOAT, 0 },
+			{ 1, 0, Rhi::Format::R32G32B32A32_SFLOAT, 8 },
+			{ 2, 0, Rhi::Format::R32G32_SFLOAT, 24 },
+		};
+		pipelineDesc.Blends.push_back({
+			true,
+			Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
+			Rhi::BlendFactor::SrcAlpha, Rhi::BlendFactor::OneMinusSrcAlpha, Rhi::BlendOp::Add,
+			0xF });
+		pipelineDesc.DebugName = "WUI";
+		Rhi::Handle<Rhi::Pipeline> pipeline = device->CreatePipeline(pipelineDesc);
+		if (!pipeline)
+		{
+			if (error) *error = "CreatePipeline failed (WUI)";
+			return false;
+		}
+		outShader = shader;
+		outPipeline = pipeline;
+		return true;
+	}
+
+	void WuiRhiBackend::EnsureResources()
+	{
+		const Rhi::Handle<Rhi::Device>& device = Renderer::GetDevice();
+		if (!device)
+			return;
+		if (device.get() == m_DeviceKey && m_Pipeline)
+		{
+			// HOTR-P1-T3:设备没变但引擎 shader 失效代变了 → **只**重建 shader + pipeline;
+			// 命令缓冲/UBO/描述符集/纹理集/字体图集/离屏 UI 目标全部保留。
+			if (m_SeenShaderGeneration != s_ShaderGeneration)
+			{
+				Rhi::Handle<Rhi::Shader> shader;
+				Rhi::Handle<Rhi::Pipeline> pipeline;
+				std::string error;
+				if (BuildShaderAndPipeline(device, /*reload*/ true, shader, pipeline, &error))
+				{
+					const Rhi::Handle<Rhi::Shader> oldShader = m_Shader;
+					const Rhi::Handle<Rhi::Pipeline> oldPipeline = m_Pipeline;
+					m_Shader = shader;
+					m_Pipeline = pipeline;
+					Renderer::QueueRelease([oldShader, oldPipeline]() {});
+				}
+				else
+				{
+					WLD_CORE_ERROR("[wui] engine shader hot reload failed: {0}", error);
+				}
+				// 无论成败都记"该代数已处理":失败保留旧管线;修好源码后的下一次
+				// Renderer::ReloadShaders(新代数)才会再试,不会每帧重跑编译器。
+				m_SeenShaderGeneration = s_ShaderGeneration;
+			}
+			return;
+		}
+		// 设备销毁前主动释放:句柄析构必须发生在设备仍存活时。
+		Renderer::RegisterDeviceReleaseHook(this, [this] { ReleaseResources(); });
+		ReleaseResources();
+		m_DeviceKey = device.get();
+		m_IsVulkan = Renderer::GetBackendName() == "vulkan";
+
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+			m_Cmds[slot] = device->CreateCommandBuffer("WuiBackend");
+
+		Rhi::DescriptorSetLayoutDesc textureLayoutDesc;
+		// 着色器用组合采样器(Slang `Sampler2D`)声明,SPIR-V 产物里 binding 1 就是
+		// combined image sampler(GL 与 Vulkan 同形)。
+		textureLayoutDesc.Bindings.push_back({ 1, Rhi::DescriptorType::CombinedImageSampler,
+			Rhi::ShaderStageFlag(Rhi::ShaderStage::Fragment), 1 });
+		m_TextureLayout = device->CreateDescriptorSetLayout(textureLayoutDesc);
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+			m_GlobalSets[slot] = device->CreateDescriptorSet(Renderer::GetGlobalDescriptorSetLayout());
+
+		Rhi::SamplerDesc samplerDesc;
+		samplerDesc.MinFilter = Rhi::Filter::Linear;
+		samplerDesc.MagFilter = Rhi::Filter::Linear;
+		samplerDesc.AddressU = Rhi::SamplerAddressMode::ClampToEdge;
+		samplerDesc.AddressV = Rhi::SamplerAddressMode::ClampToEdge;
+		m_Sampler = device->CreateSampler(samplerDesc);
+
+		Rhi::RenderPassDesc passDesc;
+		Rhi::RenderPassAttachment colorAttachment;
+		colorAttachment.Format = m_IsVulkan ? Rhi::Format::B8G8R8A8_UNORM : Rhi::Format::R8G8B8A8_UNORM;
+		colorAttachment.Samples = Rhi::SampleCount::Count1;
+		// 该通道仅用于 OpenGL 离屏层(Vulkan 直接渲染到呈现通道):
+		// 每帧清除,避免 Load + Undefined 初始布局的非法组合。
+		colorAttachment.Load = Rhi::LoadOp::Clear;
+		colorAttachment.Store = Rhi::StoreOp::Store;
+		colorAttachment.InitialLayout = Rhi::AttachmentLayout::ColorAttachment;
+		colorAttachment.FinalLayout = m_IsVulkan ? Rhi::AttachmentLayout::Present : Rhi::AttachmentLayout::ShaderReadOnly;
+		passDesc.Attachments = { colorAttachment };
+		Rhi::SubpassDesc subpass;
+		subpass.ColorAttachments = { { 0, Rhi::AttachmentLayout::ColorAttachment } };
+		passDesc.Subpasses = { subpass };
+		passDesc.DebugName = "WuiTarget";
+		m_UiPass = device->CreateRenderPass(passDesc);
+
+		// HOTR-P1-T3:shader + 管线由 BuildShaderAndPipeline 统一创建(热重载走同一实现)。
+		{
+			std::string error;
+			if (!BuildShaderAndPipeline(device, /*reload*/ false, m_Shader, m_Pipeline, &error))
+			{
+				// 启动路径的编译入口本身会断言/记 ERROR;这里补一条装配原因。
+				WLD_CORE_ERROR("[wui] engine shader/pipeline creation failed: {0}", error);
+			}
+		}
+		m_SeenShaderGeneration = s_ShaderGeneration;
+
+		Rhi::BufferDesc vertexDesc;
+		// 按帧槽位分段:每个槽位一段,保证帧 N+1 的上传不覆盖帧 N 仍在读的数据。
+		vertexDesc.Size = static_cast<uint64_t>(MaxQuads) * kFramesInFlight * 4 * sizeof(Vertex);
+		vertexDesc.Usage = Rhi::BufferUsageVertex;
+		vertexDesc.Memory = Rhi::MemoryHint::HostVisible;
+		Rhi::BufferDesc indexDesc;
+		indexDesc.Size = static_cast<uint64_t>(MaxQuads) * kFramesInFlight * 6 * sizeof(uint32_t);
+		indexDesc.Usage = Rhi::BufferUsageIndex;
+		indexDesc.Memory = Rhi::MemoryHint::HostVisible;
+		Rhi::BufferDesc uboDesc;
+		uboDesc.Size = sizeof(glm::mat4);
+		uboDesc.Usage = Rhi::BufferUsageUniform;
+		uboDesc.Memory = Rhi::MemoryHint::HostVisible;
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			m_Vbs[slot] = device->CreateBuffer(vertexDesc);
+			m_Ibs[slot] = device->CreateBuffer(indexDesc);
+			m_Ubos[slot] = device->CreateBuffer(uboDesc);
+			Rhi::DescriptorWrite globalWrite;
+			globalWrite.Binding = 0;
+			globalWrite.Type = Rhi::DescriptorType::UniformBuffer;
+			globalWrite.Buffer = m_Ubos[slot];
+			m_GlobalSets[slot]->Update({ globalWrite });
+		}
+
+		Rhi::TextureDesc whiteDesc;
+		whiteDesc.Type = Rhi::TextureType::Texture2D;
+		whiteDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+		whiteDesc.Extent = { 1, 1, 1 };
+		whiteDesc.Usage = Rhi::TextureUsageSampled;
+		m_WhiteTexture = device->CreateTexture(whiteDesc);
+		const unsigned char white[4] = { 255, 255, 255, 255 };
+		m_WhiteTexture->SetData(white, 4);
+
+		// P4-UX3(用户 2026-09-20 决策):UI 正文换成 Inter(中性、小字号清晰、数字整齐),
+		// CJK 仍回落 Noto Sans SC,代码保持 JetBrains Mono;Montserrat 保留给大标题/欢迎页,
+		// 这里作为**回退**:Inter 缺失时不会导致整个 UI 没字。
+		const std::string fontPaths[5][2] = {
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/Inter/Inter-Regular.ttf",
+			  std::string(WLD_EDITOR_DIR) + "assets/fonts/Montserrat/static/Montserrat-Regular.ttf" },
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/Inter/Inter-Bold.ttf",
+			  std::string(WLD_EDITOR_DIR) + "assets/fonts/Montserrat/static/Montserrat-Bold.ttf" },
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/NotoSansSC/NotoSansSC-Subset.ttf", "" },
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf", "" },
+			{ std::string(WLD_EDITOR_DIR) + "assets/fonts/JetBrainsMono/JetBrainsMono-Bold.ttf", "" },
+		};
+		for (size_t i = 0; i < m_Faces.size(); ++i)
+		{
+			FontFace& face = m_Faces[i];
+			face.Glyphs.clear();
+			if (!face.Info)
+				face.Info = new stbtt_fontinfo;
+			bool loaded = false;
+			for (const std::string& candidate : fontPaths[i])
+			{
+				if (candidate.empty())
+					continue;
+				if (!LoadFile(candidate, face.Ttf))
+					continue;
+				if (stbtt_InitFont(face.Info, face.Ttf.data(), stbtt_GetFontOffsetForIndex(face.Ttf.data(), 0)))
+				{
+					loaded = true;
+					break;
+				}
+			}
+			if (!loaded)
+			{
+				WLD_CORE_WARN("WUI backend failed to load font {0}(回退 {1} 也不可用)",
+					fontPaths[i][0], fontPaths[i][1].empty() ? "<none>" : fontPaths[i][1]);
+				// P4-UX3a(独立验证者实测 0xC0000005):加载失败必须把字面置成"不可用"——
+				// 旧写法只是 continue,留下一个**已分配但未初始化**的 stbtt_fontinfo,
+				// 下游 FaceForCodepoint 仍会把它交出去,解引用后访问冲突。
+				// 置空指针后:AdvanceOf 走等宽回退、DrawText/Bake 按 Info != nullptr 跳过,
+				// 表现是"没有文字"而不是崩溃。
+				delete face.Info;
+				face.Info = nullptr;
+				face.Ttf.clear();
+				face.ScaleFor1Px = 0.0f;
+				face.GlyphIndexLut.clear();
+				face.RawAdvanceLut.clear();
+				continue;
+			}
+			face.ScaleFor1Px = stbtt_ScaleForPixelHeight(face.Info, 1.0f);
+			face.GlyphIndexLut.assign(65536, -2);
+			face.RawAdvanceLut.assign(65536, -1);
+			face.Index = static_cast<uint32_t>(i);
+			// 诊断/门禁开关:把图集压小来**故意**制造"图集满",验证回退与重建路径
+			// (`WLD_WUI_ATLAS=512`)。默认 2048²:桶数 × 面积都留足余量。
+			if (const char* atlasSize = std::getenv("WLD_WUI_ATLAS"))
+			{
+				const int size = std::atoi(atlasSize);
+				if (size >= 64 && size <= 4096)
+					face.AtlasW = face.AtlasH = static_cast<uint32_t>(size);
+			}
+			face.Atlas.assign(static_cast<size_t>(face.AtlasW) * face.AtlasH * 4, 0);
+			Rhi::TextureDesc atlasDesc;
+			atlasDesc.Type = Rhi::TextureType::Texture2D;
+			atlasDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+			atlasDesc.Extent = { face.AtlasW, face.AtlasH, 1 };
+			atlasDesc.Usage = Rhi::TextureUsageSampled;
+			face.AtlasTexture = device->CreateTexture(atlasDesc);
+		}
+		// 字体加载完成后再注册度量钩子(WuiContext::MeasureTextWidth / WuiCodeEditor 的
+		// 命中测试、行宽与 caret 定位都走这里);幂等:设备重建时重新注册。
+		SetTextMeasureHook(this, [this](std::string_view text, float fontSize, WuiFontFamily family)
+		{
+			// P4-UX2c:度量也要在"设计单位"上回答:按物理像素量完再除以缩放,
+			// 与 DrawText 的摆放口径一致(caret/命中才不会错位)。
+			const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+			return MeasureText(text, fontSize * scale, family, false) / scale;
+		});
+		m_Vertices.clear();
+		m_Indices.clear();
+		m_ActiveTexture = m_WhiteTexture;
+		m_TextureChanged = true;
+	}
+
+	WuiRhiBackend::FontFace* WuiRhiBackend::PrimaryFace(WuiFontFamily family, bool bold)
+	{
+		if (m_Faces.size() < 5)
+			return nullptr;
+		if (family == WuiFontFamily::Monospace)
+			return &m_Faces[bold ? 4 : 3];
+		return &m_Faces[bold ? 1 : 0];
+	}
+
+	int WuiRhiBackend::FindGlyphIndexFast(FontFace& face, uint32_t cp)
+	{
+		if (!face.Info)
+			return 0;
+		if (cp < 65536)
+		{
+			if (face.GlyphIndexLut.empty())
+				face.GlyphIndexLut.assign(65536, -2);
+			const int32_t cached = face.GlyphIndexLut[cp];
+			if (cached != -2)
+				return cached;
+			const int idx = stbtt_FindGlyphIndex(face.Info, static_cast<int>(cp));
+			face.GlyphIndexLut[cp] = idx;
+			return idx;
+		}
+		return stbtt_FindGlyphIndex(face.Info, static_cast<int>(cp));
+	}
+
+	WuiRhiBackend::FontFace* WuiRhiBackend::FaceForCodepoint(WuiFontFamily family, bool bold, uint32_t codepoint)
+	{
+		FontFace* primary = PrimaryFace(family, bold);
+		// '\t' 的 advance 是特判的(4 空格),'\r'/'\n' 不可见:一律走主面。
+		if (codepoint == '\t' || codepoint == '\r' || codepoint == '\n' || codepoint == 0)
+			return primary;
+		// 主面缺该字形时回落 Noto(CJK、以及 JetBrains Mono 未覆盖的码位)。
+		if (primary && primary->Info && FindGlyphIndexFast(*primary, codepoint) != 0)
+			return primary;
+		FontFace* fallback = m_Faces.size() > 2 ? &m_Faces[2] : nullptr;
+		if (fallback && fallback->Info)
+			return fallback;
+		return primary ? primary : fallback;
+	}
+
+	// 桶粒度:按**相对误差**定档(0.25 / 0.5 / 1 / 2 px,×2 递增)。
+	// 位图字形的 bitmap box 高度**必然是整数像素**,所以"字号连续"只能靠细桶逼近:
+	//   * 固定 1/4px(M53):9px 字跳变 2.8% —— 小字号正好,可大字号一个字位图面积 ∝ 尺寸²,
+	//     同一步长在大字号上既多占桶数又多占面积,图集会被"只用一次的尺寸"塞满;
+	//   * 本档:跳变在 ≥12px 时 ≤1.2%,9px 仍是 2.8%(与 M53 相同,已实测可接受)。
+	void WuiRhiBackend::ResetFaceAtlas(FontFace& face)
+	{
+		// 整面重建:清字形缓存 + 清位图 + 归零游标。比"逐字形淘汰"简单得多,而字形缓存
+		// 本来就是"按需重烘"的,重建后自然补回来(所以不需要 LRU 账本)。
+		face.Glyphs.clear();
+		face.Atlas.assign(static_cast<size_t>(face.AtlasW) * face.AtlasH * 4, 0);
+		face.CursorX = 1;
+		face.CursorY = 1;
+		face.RowH = 0;
+		face.PeakRows = 0;
+		face.AtlasDirty = true;
+		face.NeedsReset = false;
+		++face.Resets;
+	}
+
+	static float BucketStep(float pixelSize)
+	{
+		float step = 0.25f;
+		while (step < pixelSize * 0.008f && step < 2.0f)
+			step *= 2.0f;
+		return step;
+	}
+
+	WuiRhiBackend::Glyph& WuiRhiBackend::Bake(FontFace& face, uint32_t codepoint, float pixelSize)
+	{
+		// 键统一量化到 **1/4px**:于是"同样的桶尺寸"必然命中同一份位图,与它是怎么定档来的无关
+		// (否则 21px/0.25 档与 42px/0.5 档会算出同一个档号,却要的是不同尺寸的位图)。
+		const float step = BucketStep(pixelSize);
+		const uint32_t sizeStep = static_cast<uint32_t>(std::max(1.0f, std::round(pixelSize / step)));
+		const float bucketSize = static_cast<float>(sizeStep) * step;
+		// 下限 6px 与旧版一致:太小的桶既看不清也没有缓存价值(会把 key 空间撑大)。
+		const uint32_t quant = static_cast<uint32_t>(std::max(24.0f, std::round(bucketSize * 4.0f)));
+		const uint64_t key = (static_cast<uint64_t>(quant) << 32) | codepoint;
+		auto it = face.Glyphs.find(key);
+		if (it != face.Glyphs.end())
+			return it->second;
+
+		Glyph glyph;
+		glyph.PixelSize = static_cast<float>(quant) / 4.0f;
+		if (FindGlyphIndexFast(face, codepoint) == 0 && face.MissingGlyphLogs < 8)
+		{
+			// 该字面没有这个码点 ⇒ 一定画成空白。**旧版这里是静默的**,于是用户看到"乱码"
+			// 却没有半条日志可查。限流 8 条:足够暴露"选错字面"这类系统性错误,又不会刷屏。
+			++face.MissingGlyphLogs;
+			WLD_CORE_WARN("[wui-font] face#{0} has no glyph for U+{1:X} at {2}px — will draw blank",
+				face.Index, codepoint, glyph.PixelSize);
+		}
+		const float scale = stbtt_ScaleForPixelHeight(face.Info, glyph.PixelSize);
+		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+		stbtt_GetCodepointBitmapBox(face.Info, codepoint, scale, scale, &x0, &y0, &x1, &y1);
+		const int width = x1 - x0;
+		const int height = y1 - y0;
+		bool placed = false;
+		if (width > 0 && height > 0)
+		{
+			if (face.CursorX + width + 1 >= face.AtlasW)
+			{
+				face.CursorX = 1;
+				face.CursorY += face.RowH + 1;
+				face.RowH = 0;
+			}
+			if (face.CursorY + height + 1 < face.AtlasH)
+			{
+				std::vector<unsigned char> bitmap(static_cast<size_t>(width) * height);
+				stbtt_MakeCodepointBitmap(face.Info, bitmap.data(), width, height, width, scale, scale, codepoint);
+				for (int row = 0; row < height; ++row)
+					for (int col = 0; col < width; ++col)
+					{
+						const size_t dst = (static_cast<size_t>(face.CursorY + row) * face.AtlasW + face.CursorX + col) * 4;
+						const unsigned char v = bitmap[static_cast<size_t>(row) * width + col];
+						face.Atlas[dst] = 255;
+						face.Atlas[dst + 1] = 255;
+						face.Atlas[dst + 2] = 255;
+						face.Atlas[dst + 3] = v;
+					}
+				glyph.X = static_cast<float>(face.CursorX);
+				glyph.Y = static_cast<float>(face.CursorY);
+				glyph.W = static_cast<float>(width);
+				glyph.H = static_cast<float>(height);
+				face.CursorX += width + 1;
+				face.RowH = std::max(face.RowH, static_cast<uint32_t>(height));
+				face.PeakRows = std::max(face.PeakRows, face.CursorY + face.RowH + 1);
+				face.Bakes += 1;
+				face.AtlasDirty = true;
+				placed = true;
+			}
+		}
+		if (!placed && width > 0 && height > 0 && s_LegacyBlankBake)
+		{
+			// 旧行为(负对照,只用于验证):图集满 ⇒ 把 0×0 的空白按当前桶**缓存**下来,
+			// 不标记重建、也不做"最近桶"回退 ⇒ 这个字永久空白。用户看到的"乱码"就是这么来的。
+			glyph.OffsetX = static_cast<float>(x0);
+			glyph.OffsetY = static_cast<float>(y0);
+			int advance = 0;
+			stbtt_GetCodepointHMetrics(face.Info, codepoint, &advance, nullptr);
+			glyph.Advance = advance * scale;
+			return face.Glyphs.emplace(key, glyph).first->second;
+		}
+		if (!placed && width > 0 && height > 0)
+		{
+			// 有字形但**装不下**:取同码点最接近的已缓存桶(宁可轻微缩放也不要缺字;旧版取"任意一个"
+			// 时 20px 会用到 12px 的位图 = 1.67× 放大 ⇒ 明显发虚),并标记"下一帧重建图集"。
+			//
+			// **这里绝不缓存空白** —— 旧写法把空白按当前桶写进缓存,于是图集一满,之后**每个新码点
+			// 都永久变成空白**,用户看到的就是乱码,而且重启前不会自愈。现在最多影响当前一帧。
+			face.NeedsReset = true;
+			face.FullHits += 1;
+			if (face.AtlasFullLogs < 8)
+			{
+				++face.AtlasFullLogs;
+				WLD_CORE_WARN("[wui-font] face#{0} atlas full at U+{1:X} ({2}x{3}, peak rows {4}) — rebuild next frame",
+					face.Index, codepoint, face.AtlasW, face.AtlasH, face.PeakRows);
+			}
+			Glyph* nearest = nullptr;
+			uint32_t nearestDistance = 0xFFFFFFFFu;
+			for (auto& entry : face.Glyphs)
+			{
+				if (static_cast<uint32_t>(entry.first & 0xFFFFFFFFull) != codepoint)
+					continue;
+				const uint32_t cached = static_cast<uint32_t>(entry.first >> 32);
+				const uint32_t distance = cached > quant ? cached - quant : quant - cached;
+				if (distance < nearestDistance)
+				{
+					nearestDistance = distance;
+					nearest = &entry.second;
+				}
+			}
+			if (nearest != nullptr)
+				return *nearest;
+		}
+		// 走到这里有两种情况:
+		//   ① 该码点没有位图(空格/组合符/字面缺码点)—— 正常,缓存下来省得每帧重算;
+		//   ② 有字形但图集满且**同码点一个桶都没有** —— 返回一个**不缓存**的替身(布局照旧正确),
+		//      下一帧重建图集后自然烘出来。签名是 `Glyph&`,所以替身必须住在 face 里。
+		glyph.OffsetX = static_cast<float>(x0);
+		glyph.OffsetY = static_cast<float>(y0);
+		int advance = 0;
+		if (codepoint < 65536)
+		{
+			if (face.RawAdvanceLut.empty())
+				face.RawAdvanceLut.assign(65536, -1);
+			const int32_t cached = face.RawAdvanceLut[codepoint];
+			if (cached >= 0)
+				advance = cached;
+			else
+			{
+				stbtt_GetCodepointHMetrics(face.Info, static_cast<int>(codepoint), &advance, nullptr);
+				face.RawAdvanceLut[codepoint] = advance;
+			}
+		}
+		else
+		{
+			stbtt_GetCodepointHMetrics(face.Info, static_cast<int>(codepoint), &advance, nullptr);
+		}
+		glyph.Advance = advance * scale;
+		if (!placed && width > 0 && height > 0)
+		{
+			face.Fallback = glyph;
+			return face.Fallback;
+		}
+		const auto result = face.Glyphs.emplace(key, glyph);
+		return result.first->second;
+	}
+
+	float WuiRhiBackend::AdvanceOf(FontFace* face, uint32_t codepoint, float fontSize)
+	{
+		if (codepoint == '\r' || codepoint == '\n')
+			return 0.0f;
+		if (!face || !face->Info)
+			return fontSize * (codepoint < 0x80 ? 0.6f : 1.0f);
+
+		const uint32_t queryCp = (codepoint == '\t') ? ' ' : codepoint;
+		int advance = 0;
+		if (queryCp < 65536)
+		{
+			if (face->RawAdvanceLut.empty())
+				face->RawAdvanceLut.assign(65536, -1);
+			const int32_t cached = face->RawAdvanceLut[queryCp];
+			if (cached >= 0)
+				advance = cached;
+			else
+			{
+				stbtt_GetCodepointHMetrics(face->Info, static_cast<int>(queryCp), &advance, nullptr);
+				face->RawAdvanceLut[queryCp] = advance;
+			}
+		}
+		else
+		{
+			stbtt_GetCodepointHMetrics(face->Info, static_cast<int>(queryCp), &advance, nullptr);
+		}
+
+		float width = advance * (face->ScaleFor1Px * fontSize);
+		if (codepoint == '\t')
+			width *= 4.0f;
+		return width;
+	}
+
+	float WuiRhiBackend::MeasureText(std::string_view text, float fontSize, WuiFontFamily family, bool bold, int byteOffset)
+	{
+		DecodeUtf8(text, tlsMeasureCodepoints, tlsMeasureOffsets);
+		float width = 0;
+		for (size_t i = 0; i < tlsMeasureCodepoints.size(); ++i)
+		{
+			if (byteOffset >= 0 && tlsMeasureOffsets[i] >= byteOffset)
+				break;
+			width += AdvanceOf(FaceForCodepoint(family, bold, tlsMeasureCodepoints[i]), tlsMeasureCodepoints[i], fontSize);
+		}
+		return width;
+	}
+
+	void WuiRhiBackend::PushQuad(const WuiRect& rect, const WuiColor& color, const WuiRect& uv)
+	{
+		if (m_Vertices.size() + 4 > MaxQuads * 4)
+			Flush();
+		const uint32_t base = static_cast<uint32_t>(m_Vertices.size());
+		const float x1 = rect.X + rect.W;
+		const float y1 = rect.Y + rect.H;
+		m_Vertices.push_back({ rect.X, rect.Y, color.R, color.G, color.B, color.A, uv.X, uv.Y });
+		m_Vertices.push_back({ x1, rect.Y, color.R, color.G, color.B, color.A, uv.X + uv.W, uv.Y });
+		m_Vertices.push_back({ x1, y1, color.R, color.G, color.B, color.A, uv.X + uv.W, uv.Y + uv.H });
+		m_Vertices.push_back({ rect.X, y1, color.R, color.G, color.B, color.A, uv.X, uv.Y + uv.H });
+		const uint32_t quad = base / 4;
+		m_Indices.insert(m_Indices.end(), { quad * 4, quad * 4 + 1, quad * 4 + 2, quad * 4, quad * 4 + 2, quad * 4 + 3 });
+	}
+
+	void WuiRhiBackend::PushSolidQuad(const WuiRect& rect, const WuiColor& color)
+	{
+		PushQuad(rect, color, { -1.0f, 0.0f, 0.0f, 0.0f });
+	}
+
+	void WuiRhiBackend::PushQuadVertices(const std::array<glm::vec2, 4>& positions, const WuiColor& color)
+	{
+		if (m_Vertices.size() + 4 > MaxQuads * 4)
+			Flush();
+		const uint32_t base = static_cast<uint32_t>(m_Vertices.size());
+		// 实心四边形:UV 落在白纹理上(-1 表示"不采样贴图"的既有约定)。
+		for (const glm::vec2& position : positions)
+			m_Vertices.push_back({ position.x, position.y, color.R, color.G, color.B, color.A, -1.0f, 0.0f });
+		const uint32_t quad = base / 4;
+		m_Indices.insert(m_Indices.end(), { quad * 4, quad * 4 + 1, quad * 4 + 2, quad * 4, quad * 4 + 2, quad * 4 + 3 });
+	}
+
+	// P4-U10:四角渐变(P4-U10 取色器用)。顶点顺序与 Quad 一致:左上/右上/右下/左下。
+	void WuiRhiBackend::PushGradientQuad(const WuiRect& rect, const std::array<WuiColor, 4>& corners)
+	{
+		if (m_Vertices.size() + 4 > MaxQuads * 4)
+			Flush();
+		const uint32_t base = static_cast<uint32_t>(m_Vertices.size());
+		const glm::vec2 positions[4] = {
+			{ rect.X, rect.Y },
+			{ rect.X + rect.W, rect.Y },
+			{ rect.X + rect.W, rect.Y + rect.H },
+			{ rect.X, rect.Y + rect.H },
+		};
+		for (int i = 0; i < 4; ++i)
+		{
+			const WuiColor& color = corners[static_cast<size_t>(i)];
+			m_Vertices.push_back({ positions[i].x, positions[i].y, color.R, color.G, color.B, color.A, -1.0f, 0.0f });
+		}
+		const uint32_t quad = base / 4;
+		m_Indices.insert(m_Indices.end(), { quad * 4, quad * 4 + 1, quad * 4 + 2, quad * 4, quad * 4 + 2, quad * 4 + 3 });
+	}
+
+	void WuiRhiBackend::SetActiveTexture(const Rhi::Handle<Rhi::Texture>& texture)
+	{
+		if (texture.get() == m_ActiveTexture.get())
+			return;
+		Flush();
+		m_ActiveTexture = texture;
+		m_TextureChanged = true;
+	}
+
+	Rhi::Handle<Rhi::DescriptorSet> WuiRhiBackend::TextureSetFor(const Rhi::Handle<Rhi::Texture>& texture)
+	{
+		const uint32_t slot = FrameSlot();
+		auto& textureSets = m_TextureSets[slot];
+		const void* key = texture.get();
+		auto it = textureSets.find(key);
+		if (it != textureSets.end())
+			return it->second;
+		Rhi::Handle<Rhi::DescriptorSet> set = Renderer::GetDevice()->CreateDescriptorSet(m_TextureLayout);
+		if (set)
+		{
+			Rhi::DescriptorWrite write;
+			write.Binding = 1;
+			write.Type = Rhi::DescriptorType::CombinedImageSampler;
+			write.Texture = texture;
+			write.Sampler = m_Sampler;
+			set->Update({ write });
+		}
+		textureSets.emplace(key, set);
+		return set;
+	}
+
+	uint32_t WuiRhiBackend::FrameSlot() const
+	{
+		return static_cast<uint32_t>(Renderer::FrameSlot()) % kFramesInFlight;
+	}
+
+	void WuiRhiBackend::ReleaseStaleTextureSets()
+	{
+		std::vector<std::unordered_map<const void*, Rhi::Handle<Rhi::DescriptorSet>>> stale;
+		stale.reserve(kFramesInFlight);
+		for (uint32_t slot = 0; slot < kFramesInFlight; ++slot)
+		{
+			if (m_TextureSets[slot].empty())
+				continue;
+			stale.push_back(std::move(m_TextureSets[slot]));
+			m_TextureSets[slot].clear();
+		}
+		if (stale.empty())
+			return;
+		// 句柄在回调里析构(=vkDestroyDescriptorPool);GL 立即执行,语义与旧代码一致。
+		Renderer::QueueRelease([stale = std::move(stale)]() mutable { stale.clear(); });
+	}
+
+	uint64_t WuiRhiBackend::SlotVertexBase() const
+	{
+		return static_cast<uint64_t>(FrameSlot()) * MaxQuads * 4 * sizeof(Vertex);
+	}
+
+	uint64_t WuiRhiBackend::SlotIndexBase() const
+	{
+		return static_cast<uint64_t>(FrameSlot()) * MaxQuads * 6 * sizeof(uint32_t);
+	}
+
+	void WuiRhiBackend::Flush()
+	{
+		const uint32_t slot = FrameSlot();
+		if (m_Vertices.empty() || !m_Cmds[slot])
+			return;
+		if (m_TextureChanged)
+			m_TextureChanged = false;
+		// 每个批次写入独立的缓冲区区间:同一命令缓冲在提交后才由 GPU 执行,
+		// 复用同一段内存会让所有绘制都读到最后一个批次的数据(界面成片缺失)。
+		const uint64_t vertexBytes = m_Vertices.size() * sizeof(Vertex);
+		const uint64_t indexBytes = m_Indices.size() * sizeof(uint32_t);
+		const uint64_t vertexBase = SlotVertexBase();
+		const uint64_t indexBase = SlotIndexBase();
+		if (m_FrameVertexBytes + vertexBytes > vertexBase + static_cast<uint64_t>(MaxQuads) * 4 * sizeof(Vertex) ||
+			m_FrameIndexBytes + indexBytes > indexBase + static_cast<uint64_t>(MaxQuads) * 6 * sizeof(uint32_t))
+		{
+			static bool s_BufferOverflowLogged = false;
+			if (!s_BufferOverflowLogged)
+			{
+				s_BufferOverflowLogged = true;
+				WLD_CORE_WARN("[wui] UI vertex/index buffer capacity exceeded (MaxQuads={0}), truncating excess draw calls to protect frame buffer", MaxQuads);
+			}
+			m_Vertices.clear();
+			m_Indices.clear();
+			return;
+		}
+		const uint64_t vertexOffset = m_FrameVertexBytes;
+		const uint64_t indexOffset = m_FrameIndexBytes;
+		m_FrameVertexBytes += vertexBytes;
+		m_FrameIndexBytes += indexBytes;
+		// 顶点/索引走槽位缓冲的直接映射写:
+		//   ① Vulkan 的 vkCmdUpdateBuffer/CopyBuffer 不允许录制在 render pass 内
+		//      (VUID-vkCmdUpdateBuffer-renderpass),而批次上传发生在 Begin/EndRenderPass 之间;
+		//   ② 缓冲按帧槽位环形化 + BeginFrame 等待该槽位的帧栅栏,GPU 上一轮引用已结束,
+		//      映射写不会与在飞绘制冲突;CPU 侧只剩一次 memcpy(无驱动同步点)。
+		m_Vbs[slot]->SetData(m_Vertices.data(), vertexBytes, vertexOffset);
+		m_Ibs[slot]->SetData(m_Indices.data(), indexBytes, indexOffset);
+		m_Cmds[slot]->BindPipeline(m_Pipeline);
+		m_Cmds[slot]->BindDescriptorSet(m_GlobalSets[slot], 0);
+		m_Cmds[slot]->BindDescriptorSet(TextureSetFor(m_ActiveTexture), 1);
+		m_Cmds[slot]->BindVertexBuffer(0, m_Vbs[slot], vertexOffset);
+		m_Cmds[slot]->BindIndexBuffer(m_Ibs[slot], indexOffset);
+		m_Cmds[slot]->DrawIndexed(static_cast<uint32_t>(m_Indices.size()));
+		m_Vertices.clear();
+		m_Indices.clear();
+	}
+
+	void WuiRhiBackend::ApplyScissor(const WuiRect& rect)
+	{
+		const uint32_t slot = FrameSlot();
+		if (!m_Cmds[slot])
+			return;
+		// 设计单位 → 物理像素(P4-UX2c 内容缩放)。
+		const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+		const float px = rect.X * scale;
+		const float py = rect.Y * scale;
+		const float pw = rect.W * scale;
+		const float ph = rect.H * scale;
+		Rhi::Scissor scissor;
+		scissor.X = std::max(0, static_cast<int32_t>(px));
+		scissor.Width = static_cast<uint32_t>(std::max(0.0f, pw));
+		if (m_IsVulkan)
+		{
+			scissor.Y = std::max(0, static_cast<int32_t>(py));
+		}
+		else
+		{
+			const int32_t top = static_cast<int32_t>(py);
+			const int32_t height = std::max(0, static_cast<int32_t>(ph));
+			scissor.Y = std::max(0, static_cast<int32_t>(m_PhysicalViewport.y) - top - height);
+		}
+		scissor.Height = static_cast<uint32_t>(std::max(0.0f, ph));
+			m_Cmds[slot]->SetScissor(scissor);
+	}
+
+	void WuiRhiBackend::DrawText(const WuiDrawCommand& command)
+	{
+		// P4-UX2c:命令里的字号是**设计单位**;栅格化按物理像素(design * UiScale),
+		// 摆放/推进仍用设计单位(视口映射负责放大),否则字与布局会错位。
+		const float scale = UiScale() > 0.0f ? UiScale() : 1.0f;
+		const float designSize = command.FontSize > 0 ? command.FontSize : 15.0f;
+		const float pixelSize = designSize * scale;
+		FontFace* baselineFace = PrimaryFace(command.Family, command.Bold);
+		float baseline = command.Rect.Y + designSize * 0.8f;
+		if (baselineFace && baselineFace->Info)
+		{
+			int ascent = 0;
+			stbtt_GetFontVMetrics(baselineFace->Info, &ascent, nullptr, nullptr);
+			baseline = command.Rect.Y + ascent * stbtt_ScaleForPixelHeight(baselineFace->Info, pixelSize) / scale;
+		}
+
+		if (command.TextSelStart >= 0 && command.TextSelEnd > command.TextSelStart)
+		{
+			const float x0 = MeasureText(command.Text, pixelSize, command.Family, command.Bold, command.TextSelStart) / scale;
+			const float x1 = MeasureText(command.Text, pixelSize, command.Family, command.Bold, command.TextSelEnd) / scale;
+			PushSolidQuad({ command.Rect.X + x0, command.Rect.Y, x1 - x0, designSize },
+				{ 0.3f, 0.5f, 0.9f, 0.45f });
+		}
+
+		DecodeUtf8(command.Text, tlsCodepoints, tlsOffsets);
+		float pen = command.Rect.X;
+		for (uint32_t cp : tlsCodepoints)
+		{
+			FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
+			const float advance = AdvanceOf(face, cp, pixelSize) / scale;
+			// '\t' 按 4 空格推进但无字形;'\r'/'\n' 不可见。
+			if (face && face->Info && cp != '\t' && cp != '\r' && cp != '\n')
+			{
+				// 该字面没有这个码点 ⇒ 画**可见的豆腐块**而不是空白:乱码/缺字必须能被一眼看见,
+				// 静默空白会让"字体缺字 / 数据坏字节 / 上游截碎字符"这三类问题都变成猜谜
+				// (实测:用户报"乱码",日志里一条线索都没有)。日志侧另有 FaceForCodepoint 的限流告警。
+				if (FindGlyphIndexFast(*face, cp) == 0)
+				{
+					const float boxW = std::max(2.0f, advance * scale * 0.82f);
+					const float boxH = std::max(2.0f, designSize * 0.62f);
+					const float boxY = baseline - boxH;
+					const float t = std::max(1.0f, designSize * 0.07f);
+					const float bx = std::round(pen * scale) / scale;
+					const float by = std::round(boxY * scale) / scale;
+					PushSolidQuad({ bx, by, boxW, t }, command.Color);
+					PushSolidQuad({ bx, by + boxH - t, boxW, t }, command.Color);
+					PushSolidQuad({ bx, by + t, t, boxH - 2 * t }, command.Color);
+					PushSolidQuad({ bx + boxW - t, by + t, t, boxH - 2 * t }, command.Color);
+					pen += advance;
+					continue;
+				}
+				Glyph& glyph = Bake(*face, cp, pixelSize);
+				// M53:按**精确** pixelSize 缩放绘制 —— 尺寸随缩放**连续**变化(不再一格一格跳)。
+				// 清晰度由桶的粒度保证:`Bake` 用 1/4 px 桶 ⇒ 这里的比例落在 ±0.5% 内,双线性重采样
+				// 到那个程度看不出来。上一版为"绝不重采样"改成按桶 1:1 画,反而让表观字号随桶跳变
+				// (用户报的"放大后字体大小还会变")—— 连续与清晰要一起解,不能只解一件。
+				const float sizeRatio = pixelSize / (glyph.PixelSize > 0.0f ? glyph.PixelSize : face->BaseSize);
+				// 落笔位置钉到**整数物理像素**(位图在分数位置采样也会软):只钉位置,不钉尺寸。
+				const float snapPen = std::round(pen * scale) / scale;
+				const float snapBase = std::round(baseline * scale) / scale;
+				const float w = glyph.W * sizeRatio / scale;
+				const float h = glyph.H * sizeRatio / scale;
+				if (w > 0 && h > 0)
+				{
+					SetActiveTexture(face->AtlasTexture);
+					PushQuad({ snapPen + glyph.OffsetX * sizeRatio / scale, snapBase + glyph.OffsetY * sizeRatio / scale, w, h },
+						command.Color,
+						{ glyph.X / face->AtlasW, glyph.Y / face->AtlasH, glyph.W / face->AtlasW, glyph.H / face->AtlasH });
+				}
+			}
+			pen += advance;
+		}
+
+		// W9 代码编辑器 caret:按真实度量定位,0.5s 闪烁,1.5px 宽。
+		if (command.TextCaretByte >= 0)
+		{
+			const float caretX = command.Rect.X +
+				MeasureText(command.Text, pixelSize, command.Family, command.Bold, command.TextCaretByte) / scale;
+			const bool visible = std::fmod(glfwGetTime(), 1.0) < 0.5;
+			if (visible)
+				PushSolidQuad({ caretX, command.Rect.Y, 1.5f, designSize }, command.Color);
+		}
+
+		if (command.TextCursorByte >= 0)
+		{
+			const float cursorX = command.Rect.X +
+				MeasureText(command.Text, pixelSize, command.Family, command.Bold, command.TextCursorByte) / scale;
+			PushSolidQuad({ cursorX, command.Rect.Y, 1.0f, designSize }, command.Color);
+		}
+	}
+
+	void WuiRhiBackend::DrawRectCommand(const WuiDrawCommand& command, bool outline)
+	{
+		if (!outline)
+		{
+			PushSolidQuad(command.Rect, command.Color);
+			return;
+		}
+		const float t = command.Thickness > 0 ? command.Thickness : 1.0f;
+		const WuiRect& r = command.Rect;
+		PushSolidQuad({ r.X, r.Y, r.W, t }, command.Color);
+		PushSolidQuad({ r.X, r.Y + r.H - t, r.W, t }, command.Color);
+		PushSolidQuad({ r.X, r.Y + t, t, r.H - 2 * t }, command.Color);
+		PushSolidQuad({ r.X + r.W - t, r.Y + t, t, r.H - 2 * t }, command.Color);
+	}
+
+	void WuiRhiBackend::DrawImageCommand(const WuiDrawCommand& command)
+	{
+		Rhi::Handle<Rhi::Texture> texture = WuiTextureRegistry::Get().Resolve(command.Image);
+		if (!texture)
+		{
+			static int s_MissingLogged = 0;
+			if (s_MissingLogged < 12)
+			{
+				WLD_CORE_WARN("[wui-img] unresolved image id={0} rect=({1},{2},{3},{4})",
+					command.Image, command.Rect.X, command.Rect.Y, command.Rect.W, command.Rect.H);
+				++s_MissingLogged;
+			}
+			return;
+		}
+		SetActiveTexture(texture);
+		PushQuad(command.Rect, command.Color, command.Uv);
+	}
+
+	void WuiRhiBackend::DrawList(const std::vector<WuiDrawCommand>& commands)
+	{
+		for (const WuiDrawCommand& command : commands)
+		{
+			switch (command.Kind)
+			{
+				case WuiDrawKind::ClipPush:
+				{
+					m_ClipStack.push_back(m_CurrentClip);
+					WuiRect next = m_CurrentClip;
+					const float x0 = std::max(next.X, command.Rect.X);
+					const float y0 = std::max(next.Y, command.Rect.Y);
+					const float x1 = std::min(next.X + next.W, command.Rect.X + command.Rect.W);
+					const float y1 = std::min(next.Y + next.H, command.Rect.Y + command.Rect.H);
+					next = { x0, y0, std::max(0.0f, x1 - x0), std::max(0.0f, y1 - y0) };
+					m_CurrentClip = next;
+					Flush();
+					ApplyScissor(next);
+					break;
+				}
+				case WuiDrawKind::ClipPop:
+				{
+					if (m_ClipStack.empty())
+						m_CurrentClip = { 0, 0, m_Viewport.x, m_Viewport.y };
+					else
+					{
+						m_CurrentClip = m_ClipStack.back();
+						m_ClipStack.pop_back();
+					}
+					Flush();
+					ApplyScissor(m_CurrentClip);
+					break;
+				}
+				case WuiDrawKind::Rect: DrawRectCommand(command, false); break;
+				case WuiDrawKind::RectOutline: DrawRectCommand(command, true); break;
+				case WuiDrawKind::Text: DrawText(command); break;
+				case WuiDrawKind::Image: DrawImageCommand(command); break;
+				case WuiDrawKind::Quad: PushQuadVertices(command.Vertices, command.Color); break;
+				case WuiDrawKind::Gradient: PushGradientQuad(command.Rect, command.Corners); break;
+			}
+		}
+	}
+
+	void WuiRhiBackend::Render(const std::vector<WuiDrawCommand>& commands, const std::vector<WuiDrawCommand>& overlayCommands)
+	{
+		if (!Renderer::GetDevice())
+			return;
+		// 只在设备真正切换时失效注册表;首帧 m_DeviceKey 还是空指针,
+		// 之前会把宿主在 OnAttach 里注册好的图标/场景纹理全部清掉。
+		if (m_DeviceKey && Renderer::GetDevice().get() != m_DeviceKey)
+			WuiTextureRegistry::Get().Clear();
+		// 注册表内容变化(重建/换句柄)后,按纹理缓存的描述符集会指向已销毁的贴图,需要一并失效。
+		// 用 ContentRevision(而不是 Generation):Generation 只在整表清空时 +1,而视口 resize
+		// 是 Update 换句柄 —— 描述符集缓存的键是纹理对象**地址**,分配器复用地址后会命中
+		// 旧贴图的 set(野 imageView)→ 反复拉伸窗口必现 vkQueueSubmit DEVICE_LOST。
+		if (WuiTextureRegistry::Get().ContentRevision() != m_TextureContentRevision)
+		{
+			ReleaseStaleTextureSets();
+			m_TextureContentRevision = WuiTextureRegistry::Get().ContentRevision();
+		}
+		EnsureResources();
+		const uint32_t slot = FrameSlot();
+		if (!m_Cmds[slot] || !m_Pipeline)
+			return;
+
+		Rhi::Handle<Rhi::RenderPass> pass;
+		Rhi::Handle<Rhi::Framebuffer> framebuffer;
+		if (m_IsVulkan)
+		{
+			pass = Renderer::GetPresentRenderPass();
+			framebuffer = Renderer::GetPresentFramebuffer();
+			if (!framebuffer)
+				return;
+		}
+		else
+		{
+			// GL 走"离屏 UI 目标 + blit 到后缓冲":目标尺寸必须是**物理像素**,
+			// 否则内容缩放后 UI 只占左上角一小块(P4-UX2c)。
+			const uint32_t width = std::max(1u, static_cast<uint32_t>(m_PhysicalViewport.x));
+			const uint32_t height = std::max(1u, static_cast<uint32_t>(m_PhysicalViewport.y));
+			if (m_UiWidth != width || m_UiHeight != height || !m_UiFramebuffer)
+			{
+				m_UiWidth = width;
+				m_UiHeight = height;
+				// 旧的离屏目标可能仍在飞:延迟释放,避免 resize 时回收在用资源。
+				if (m_UiFramebuffer || m_UiColor)
+				{
+					auto oldFramebuffer = m_UiFramebuffer;
+					auto oldColor = m_UiColor;
+					Renderer::QueueRelease([oldFramebuffer, oldColor]() {});
+				}
+				Rhi::TextureDesc colorDesc;
+				colorDesc.Type = Rhi::TextureType::Texture2D;
+				colorDesc.Format = Rhi::Format::R8G8B8A8_UNORM;
+				colorDesc.Extent = { width, height, 1 };
+				colorDesc.Usage = Rhi::TextureUsageColorAttachment | Rhi::TextureUsageSampled;
+				m_UiColor = Renderer::GetDevice()->CreateTexture(colorDesc);
+				Rhi::FramebufferDesc framebufferDesc;
+				framebufferDesc.RenderPass = m_UiPass;
+				framebufferDesc.Extent = { width, height };
+				framebufferDesc.Attachments = { m_UiColor };
+				framebufferDesc.DebugName = "WuiOffscreen";
+				m_UiFramebuffer = Renderer::GetDevice()->CreateFramebuffer(framebufferDesc);
+			}
+			pass = m_UiPass;
+			framebuffer = m_UiFramebuffer;
+		}
+
+		// M54:图集重建**只在帧首**(prebake 之前)。一帧之内绘制命令已经带着 UV 提交,
+		// 中途清空图集会让这些 UV 指向空白区 —— 那才是真正的"乱码"。放在帧首,本帧 prebake
+		// 会按需把用到的字形重新烘一遍,画面完整;代价是这一帧多一次全量烘焙。
+		for (FontFace& face : m_Faces)
+			if (face.NeedsReset && face.AtlasTexture)
+			{
+				ResetFaceAtlas(face);
+				if (face.Resets <= kAtlasLogLimit)
+					WLD_CORE_WARN("[wui-font] face#{0} atlas rebuilt after filling up ({1}x{2}, reset #{3})",
+						face.Index, face.AtlasW, face.AtlasH, face.Resets);
+			}
+		const auto prebake = [&](const std::vector<WuiDrawCommand>& list)
+		{
+			for (const WuiDrawCommand& command : list)
+				if (command.Kind == WuiDrawKind::Text)
+				{
+					DecodeUtf8(command.Text, tlsCodepoints, tlsOffsets);
+					for (uint32_t cp : tlsCodepoints)
+					{
+						if (cp == '\t' || cp == '\r' || cp == '\n')
+							continue;
+						FontFace* face = FaceForCodepoint(command.Family, command.Bold, cp);
+						if (face && face->Info)
+						{
+							// 缺码点时把**整条字符串**打出来:只说"U+XXXX 没字形"没法定位是哪条文案/哪个数据
+							// (实测踩过:两个幽灵码点 U+4BAE/U+6BAE 在仓库里翻遍了都搜不到)。限流 8 条。
+							if (FindGlyphIndexFast(*face, cp) == 0 && s_FontMissLogs < 8)
+							{
+								++s_FontMissLogs;
+								WLD_CORE_WARN("[wui-font] face#{0} missing U+{1:X}: text=\"{2}\"",
+									face->Index, cp, command.Text);
+							}
+							// M52:必须按**物理**字号预热(design * UiScale)——与 `DrawText` 同一口径。
+							// 此前用设计字号:预热的是另一套整数桶,图集被永远用不到的尺寸塞满,
+							// 真正要画的字号反而落进"图集满"的任意尺寸回退 ⇒ **部分文本发虚**
+							// (用户报的"滚轮放大后部分文本变模糊"正是这个:放大改变表观字号、
+							// 桶数量增长最快,最先撞满的就是设计器画布的字号)。
+							const float bakeScale = UiScale() > 0.0f ? UiScale() : 1.0f;
+							Bake(*face, cp, (command.FontSize > 0.0f ? command.FontSize : 15.0f) * bakeScale);
+						}
+					}
+				}
+		};
+		prebake(commands);
+		prebake(overlayCommands);
+		// 预解析图像贴图:GL→Vulkan 包装包含一次离屏上传(提交并等待队列),
+		// 必须在命令缓冲开始录制之前完成,否则上传不可靠(图标/场景贴图全黑)。
+		for (const WuiDrawCommand& command : commands)
+			if (command.Kind == WuiDrawKind::Image)
+				WuiTextureRegistry::Get().Resolve(command.Image);
+		for (const WuiDrawCommand& command : overlayCommands)
+			if (command.Kind == WuiDrawKind::Image)
+				WuiTextureRegistry::Get().Resolve(command.Image);
+		for (FontFace& face : m_Faces)
+			if (face.AtlasDirty && face.AtlasTexture)
+			{
+				face.AtlasTexture->SetData(face.Atlas.data(), face.Atlas.size());
+				face.AtlasDirty = false;
+			}
+		// 诊断开关(WLD_WUI_FONT_STATS=1):每 120 帧打一行字面统计。图集占用是"乱码"类
+		// 问题的第一现场,而它以前完全不可观测(只能靠猜)。默认关闭,零开销。
+		if (s_FontStats && (s_FontStatsFrame++ % 120) == 0)
+			for (FontFace& face : m_Faces)
+				if (face.AtlasTexture)
+				{
+					std::vector<uint32_t> buckets;
+					buckets.reserve(face.Glyphs.size());
+					for (const auto& entry : face.Glyphs)
+						buckets.push_back(static_cast<uint32_t>(entry.first >> 32));
+					std::sort(buckets.begin(), buckets.end());
+					buckets.erase(std::unique(buckets.begin(), buckets.end()), buckets.end());
+					WLD_CORE_INFO("[wui-font] face#{0} glyphs={1} buckets={2} rows={3}/{4} peak={5} bakes={6} full={7} missing={8} resets={9}",
+						face.Index, face.Glyphs.size(), buckets.size(), face.CursorY + face.RowH + 1, face.AtlasH,
+						face.PeakRows, face.Bakes, face.FullHits, face.MissingGlyphLogs, face.Resets);
+				}
+
+		// WUI 矩形是“原点在左上、Y 向下”。GL 的 NDC +Y 在窗口上方,Vulkan 的
+		// NDC +Y 在窗口下方,所以要按后端取相反的 Y 顺序,才能让 rect.Y=0 落在
+		// 屏幕顶部并与 ApplyScissor 的裁剪矩形一致(否则界面整体上下颠倒)。
+		m_Projection = m_IsVulkan
+			? glm::ortho(0.0f, m_Viewport.x, 0.0f, m_Viewport.y, -1.0f, 1.0f)
+			: glm::ortho(0.0f, m_Viewport.x, m_Viewport.y, 0.0f, -1.0f, 1.0f);
+
+		m_Vertices.clear();
+		m_Indices.clear();
+		m_ClipStack.clear();
+		m_CurrentClip = { 0, 0, m_Viewport.x, m_Viewport.y };
+		m_FrameVertexBytes = SlotVertexBase();
+		m_FrameIndexBytes = SlotIndexBase();
+		m_ActiveTexture = m_WhiteTexture;
+		m_TextureChanged = true;
+
+		m_Cmds[slot]->Begin();
+		// 投影 UBO 走槽位缓冲的映射写(理由同批次顶点:render pass 内不能录制上传命令)。
+		m_Ubos[slot]->SetData(&m_Projection, sizeof(glm::mat4), 0);
+		Rhi::ClearValue clear;
+		clear.Color = { 0, 0, 0, 0 };
+		m_Cmds[slot]->BeginRenderPass(pass, framebuffer, { clear });
+		// RHI 视口用**物理像素**:设计单位 → 像素的放大由视口/投影映射完成(P4-UX2c)。
+		m_Cmds[slot]->SetViewport({ 0, 0, m_PhysicalViewport.x, m_PhysicalViewport.y, 0.0f, 1.0f });
+		ApplyScissor(m_CurrentClip);
+		DrawList(commands);
+		DrawList(overlayCommands);
+		Flush();
+		m_Cmds[slot]->EndRenderPass();
+		m_Cmds[slot]->End();
+		Renderer::SubmitUi(m_Cmds[slot]);
+
+		if (!m_IsVulkan)
+		{
+			Rhi::BlitFramebufferToBackbuffer(m_UiFramebuffer, { m_UiWidth, m_UiHeight });
+		}
+	}
+
+	void WuiRhiBackend::EndFrame(WuiCursor cursor)
+	{
+		if (m_UseLocalInput)
+			m_LocalInput.EndFrame();
+		else
+			s_Input.EndFrame();
+		GLFWwindow* window = m_CursorWindow
+			? static_cast<GLFWwindow*>(m_CursorWindow)
+			: (Application::HasInstance()
+				? static_cast<GLFWwindow*>(Application::Get().GetWindow().GetNativeWindow())
+				: nullptr);
+		if (!window)
+			return;
+		// P4-UX2d:无边框主窗口的缩放带要给出缩放光标 —— 否则用户看不出边缘可以拖
+		// (实测以前只有 6px 命中带且没有任何视觉反馈,用户反馈"主窗口不能自由伸缩")。
+		if (!m_UseLocalInput && Application::HasInstance())
+		{
+			const int border = Application::Get().GetWindow().ResizeBorderPixels();
+			if (border > 0)
+			{
+				double mouseX = 0.0, mouseY = 0.0;
+				int windowWidth = 0, windowHeight = 0;
+				glfwGetCursorPos(window, &mouseX, &mouseY);
+				glfwGetWindowSize(window, &windowWidth, &windowHeight);
+				const bool left = mouseX < border;
+				const bool right = mouseX >= windowWidth - border;
+				const bool top = mouseY < border;
+				const bool bottom = mouseY >= windowHeight - border;
+				if ((left && top) || (right && bottom)) cursor = WuiCursor::ResizeNWSE;
+				else if ((right && top) || (left && bottom)) cursor = WuiCursor::ResizeNESW;
+				else if (left || right) cursor = WuiCursor::ResizeEW;
+				else if (top || bottom) cursor = WuiCursor::ResizeNS;
+			}
+		}
+		int index = 0;
+		int shape = GLFW_ARROW_CURSOR;
+		switch (cursor)
+		{
+			case WuiCursor::IBeam: index = 1; shape = GLFW_IBEAM_CURSOR; break;
+			case WuiCursor::ResizeEW: index = 2; shape = GLFW_HRESIZE_CURSOR; break;
+			case WuiCursor::ResizeNS: index = 3; shape = GLFW_VRESIZE_CURSOR; break;
+			case WuiCursor::ResizeNWSE: index = 4; shape = GLFW_RESIZE_NWSE_CURSOR; break;
+			case WuiCursor::ResizeNESW: index = 5; shape = GLFW_RESIZE_NESW_CURSOR; break;
+			case WuiCursor::Hand: index = 6; shape = GLFW_HAND_CURSOR; break;
+			default: index = 0; shape = GLFW_ARROW_CURSOR; break;
+		}
+		static GLFWcursor* cursors[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+		if (!cursors[index])
+			cursors[index] = glfwCreateStandardCursor(shape);
+		// **每帧都写**,不做"形状没变就跳过"的缓存(用户 2026-09-20:"鼠标形状还是刚刚的")。
+		// 原因有两层:
+		//   ① 缓存曾经是函数级 static → 主窗口与独立窗口共用一个下标,某个窗口设过一次
+		//      (如缩放宽)后,别的窗口算出的同一形状被判定成"没变化",本窗口的光标不再写回;
+		//   ② 主窗口的缩放带属于**非客户区**,Windows 会按 WM_SETCURSOR 自己画系统缩放光标 ——
+		//      只"变了才写"的缓存无法察觉这次外部改形状,回到普通区域时就会停在旧形状。
+		// 每帧一次 glfwSetCursor(SetCursor)代价可忽略,换来的是形状永远等于本帧算出来的值。
+		if (cursors[index])
+			glfwSetCursor(window, cursors[index]);
+	}
+}
+
+
+

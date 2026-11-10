@@ -1,0 +1,8 @@
+{
+  "id": "empty",
+  "name": "Empty Plugin",
+  "description": "Minimal plugin package: manifest, WePluginQuery entry point and CMake. Nothing is registered yet.",
+  "order": 1,
+  "scopes": ["engine", "project"],
+  "requires": "none"
+}

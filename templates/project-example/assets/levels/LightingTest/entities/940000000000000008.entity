@@ -1,0 +1,14 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 940000000000000008
+  World::TagComponent:
+    Tag: Ambient
+  World::TransformComponent:
+    Location: [0, 0, 0]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::AmbientLightComponent:
+    Color: [0.649999976, 0.699999988, 0.800000012]
+    Intensity: 0.25

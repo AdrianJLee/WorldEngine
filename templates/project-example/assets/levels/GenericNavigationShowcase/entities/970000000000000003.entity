@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000003
+  World::TagComponent:
+    Tag: "Grand Staircase"
+  World::TransformComponent:
+    Location: [6.0, 1.5, 12.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 2
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [4.0, 3.0, 8.0]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.72, 0.75, 0.80, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

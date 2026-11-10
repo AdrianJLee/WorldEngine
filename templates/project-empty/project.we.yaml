@@ -1,0 +1,24 @@
+# WorldEngine 项目清单(project.we.yaml)。
+id: com.template.empty
+version: 1.0.0
+content_root: assets
+start_scene: scenes/Main.wlevel
+renderer: vulkan
+rendering:
+  culling: true
+  shadows: false
+  shadow_map_size: 2048
+  max_directional_lights: 1
+  max_point_lights: 7
+  gpu_timing: false
+  vsync: true
+  instancing: true
+  anisotropy: 1
+  msaa: 1
+  render_scale: 1
+physics:
+  fixed_step_hz: 60
+  gravity: -9.81000042
+  multithreaded: false
+packages:
+  []

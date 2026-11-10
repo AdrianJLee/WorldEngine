@@ -1,0 +1,24 @@
+Name: DungeonAutotile
+AtlasPath: assets/textures/characters/dungeon_atlas.watlas
+DefaultTileId: 1
+Rules:
+  - OutputTileId: 16
+    Neighbors: [2, 2, 2, 2, 2, 2, 2, 2]
+  - OutputTileId: 2
+    Neighbors: [2, 2, 2, 2, 1, 2, 1, 1]
+  - OutputTileId: 3
+    Neighbors: [2, 2, 2, 1, 2, 1, 1, 2]
+  - OutputTileId: 4
+    Neighbors: [2, 1, 1, 2, 1, 2, 2, 2]
+  - OutputTileId: 5
+    Neighbors: [1, 1, 2, 1, 2, 2, 2, 2]
+  - OutputTileId: 6
+    Neighbors: [0, 2, 0, 1, 1, 0, 1, 0]
+  - OutputTileId: 7
+    Neighbors: [0, 1, 0, 1, 1, 0, 2, 0]
+  - OutputTileId: 8
+    Neighbors: [0, 1, 0, 2, 1, 0, 1, 0]
+  - OutputTileId: 9
+    Neighbors: [0, 1, 0, 1, 2, 0, 1, 0]
+  - OutputTileId: 1
+    Neighbors: [1, 1, 1, 1, 1, 1, 1, 1]

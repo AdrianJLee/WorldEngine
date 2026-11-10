@@ -1,0 +1,42 @@
+#pragma once
+
+//	For use by World applications
+
+#include "World/Core/Application.h"
+#include "World/Core/Layer.h"
+#include "World/Core/Log.h"
+#include "World/Core/Input.h"
+#include "World/Core/KeyCodes.h"
+#include "World/Core/Timestep.h"
+#include "World/Core/MouseCodes.h"
+#include "World/Core/WorldContext.h"
+
+#include "World/Core/Memory/Memory.h"
+#include "World/Core/Memory/Allocator.h"
+#include "World/Core/Memory/LinearAllocator.h"
+#include "World/Core/Memory/DualTrackAllocator.h"
+#include "World/Profiling/MemoryTrack.h"
+
+#include "World/Core/Vfs/Vfs.h"
+#include "World/Schema/Schema.h"
+#include "World/Schema/SchemaRegistry.h"
+
+#include "World/Core/Thread/JobSystem.h"
+
+#include "World/Scene/Scene.h"
+#include "World/Scene/Components.h"
+#include "World/Scene/Entity.h"
+#include "World/Scene/SceneSerializer.h"
+
+#include "World/Renderer/SceneRenderer.h"
+#include "World/Renderer/Renderer.h"
+#include "World/Renderer/Renderer2D.h"
+#include "World/Renderer/Legacy/Gfx/RenderCommand.h"
+#include "World/Renderer/Legacy/Gfx/Buffer.h"
+#include "World/Renderer/Legacy/Gfx/Framebuffer.h"
+#include "World/Renderer/Legacy/Gfx/Shader.h"
+#include "World/Renderer/Legacy/Gfx/VertexArray.h"
+
+#include "World/Utils/PlatformUtils.h"
+//	Entry Point
+

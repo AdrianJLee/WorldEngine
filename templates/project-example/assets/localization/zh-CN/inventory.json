@@ -1,0 +1,32 @@
+{
+  "$format": "wld-localization/1",
+  "$layer": "project",
+  "$language": "zh-CN",
+  "$owns": [
+    "inventory."
+  ],
+  "inventory.title": "背包",
+  "inventory.capacity": "负重",
+  "inventory.gold": "金币 12,480",
+  "inventory.tab.all": "全部",
+  "inventory.tab.weapon": "武器",
+  "inventory.tab.material": "材料",
+  "inventory.row": "物品",
+  "inventory.detail.title": "精铁长剑",
+  "inventory.detail.icon": "物品图标",
+  "inventory.detail.rarity": "史诗 · 单手武器",
+  "inventory.detail.desc": "由精铁锻造的长剑,挥砍时附带少量火焰伤害。\n装备后提升攻击与暴击。",
+  "inventory.detail.durability": "耐久",
+  "inventory.detail.weight": "重量",
+  "inventory.detail.hint": "右键装备 / 左键拖动整理",
+  "inventory.equip": "装备",
+  "inventory.drop": "丢弃",
+  "inventory.close": "关闭",
+  "inventory.version": "背包 v1.0",
+  "inventory.stat.hp": "生命",
+  "inventory.stat.atk": "攻击",
+  "inventory.stat.def": "防御",
+  "inventory.stat.crit": "暴击",
+  "inventory.stat.speed": "攻速",
+  "inventory.stat.luck": "幸运"
+}

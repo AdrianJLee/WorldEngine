@@ -1,0 +1,26 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000008
+  World::TagComponent:
+    Tag: "East Paved Road"
+  World::TransformComponent:
+    Location: [34.0, 0.02, 20.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 0
+    Subdivisions: 1
+    Steps: 8
+    Dimensions: [3.5, 0.04, 34.0]
+    BevelSize: 0.0
+    GenerateCollision: 0
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.82, 0.78, 0.64, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

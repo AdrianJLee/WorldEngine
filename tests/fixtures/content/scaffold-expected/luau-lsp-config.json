@@ -1,0 +1,8 @@
+{
+  "definitions": [
+    "assets/scripts/intermediate/WorldEngineAPI.luau"
+  ],
+  "ignoreGlobs": [
+    "assets/scripts/intermediate/**"
+  ]
+}

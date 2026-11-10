@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000006
+  World::TagComponent:
+    Tag: "LWC 100km Waymarker Beacon"
+  World::TransformComponent:
+    Location: [0.0, 30.0, -800.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [8.0, 60.0, 8.0]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.2, 0.85, 1.0, 1.0]
+    Mesh: "engine/models/primitives/cube.wmodel"
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

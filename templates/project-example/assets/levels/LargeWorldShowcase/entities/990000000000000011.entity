@@ -1,0 +1,34 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 990000000000000011
+  World::TagComponent:
+    Tag: "Mid-Field Foliage Bush Cluster"
+  World::TransformComponent:
+    Location: [28.0, 1.8, -22.0]
+    Rotation: [0.0, -30.0, 0.0]
+    Scale: [3.0, 3.0, 3.0]
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.76, 0.78, 0.72, 1.0]
+    Mesh: "engine/models/foliage/bush_cluster.wmodel"
+    Material: ""
+  World::MeshLODComponent:
+    LOD1Distance: 25.0
+    LOD2Distance: 50.0
+    LOD3Distance: 80.0
+    LOD4Distance: 110.0
+    LOD5Distance: 135.0
+    LOD6Distance: 155.0
+    LOD7Distance: 165.0
+    CullDistance: 170.0
+    Hysteresis: 2.0
+    LODBias: 1.0
+    ForcedLOD: -1
+    MaxLODLevel: 7
+    CurrentLOD: 0
+    EnableCrossFade: 1
+  World::LevelEntityComponent:
+    DataLayerMask: 2

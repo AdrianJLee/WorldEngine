@@ -1,0 +1,23 @@
+FormatVersion: 2
+Scene: LegacyCameraPod
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000042
+    World::TagComponent:
+      Tag: LegacyCamera
+    World::TransformComponent:
+      Location: [0, 1, 5]
+      Rotation: [0, 0, 0]
+      Scale: [1, 1, 1]
+    World::CameraComponent:
+      Camera:
+        m_ProjectionType: 0
+        m_OrthographicZoom: 1
+        m_OrthographicNearClip: -1
+        m_OrthographicFarClip: 1
+        m_PerspectiveFOV: 63
+        m_PerspectiveNearClip: 0.25
+        m_PerspectiveFarClip: 200
+      Primary: true
+      FixedAspectRatio: false

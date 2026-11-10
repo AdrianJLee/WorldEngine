@@ -1,0 +1,25 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 900000000000000002
+  World::TagComponent:
+    Tag: Mesh:Plane Floor
+  World::TransformComponent:
+    Location: [0, 0, 0]
+    Rotation: [0, 0, 0]
+    Scale: [12, 1, 12]
+  World::MeshRendererComponent:
+    Primitive: 2
+    Color: [0.340000004, 0.360000014, 0.400000006, 1]
+    Mesh: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1
+  World::AudioSourceComponent:
+    Volume: 1.0
+    Pitch: 1.0
+    MinDistance: 2.0
+    MaxDistance: 15.0
+    Spatial3D: true
+    Looping: true
+    PlayOnAwake: true

@@ -1,0 +1,22 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000001
+  World::TagComponent:
+    Tag: Camera3D
+  World::TransformComponent:
+    Location: [0, 3, 10]
+    Rotation: [0, 0, 0, 1]
+    Scale: [1, 1, 1]
+  World::CameraComponent:
+    Camera:
+      m_ProjectionType: 0
+      m_OrthographicZoom: 1
+      m_OrthographicNearClip: -1
+      m_OrthographicFarClip: 1
+      m_PerspectiveFOV: 45
+      m_PerspectiveNearClip: 0.100000001
+      m_PerspectiveFarClip: 500
+    Primary: true
+    FixedAspectRatio: false

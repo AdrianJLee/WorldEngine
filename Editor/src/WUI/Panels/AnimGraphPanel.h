@@ -1,0 +1,281 @@
+#pragma once
+
+#include "WUI/Common/EditorPanel.h"
+#include "World/Animation/AnimGraph.h"
+#include "World/Asset/WModelIO.h"
+
+#include <array>
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+namespace World
+{
+	// ---------------------------------------------------------------------------
+	// M4 AnimGraph 编辑器面板(单例,id = "animgraph")。
+	//
+	// 职责边界(见 tasks/20261023-1400-animgraph-showcase-and-mannequin/contracts.md §3):
+	//   · 资产读写**只**走 AnimGraph::LoadFromFile / SaveToFile —— 面板不含任何 .wanimgraph
+	//     文本解析器,格式演进只有引擎侧一处事实源;
+	//   · 编辑状态/样本/过渡/遮罩层 = 改动内存中的 AnimGraph,再落盘;
+	//   · Live Preview 通过 AnimGraphSystem::SetParameter 驱动选中实体,不直接写
+	//     AnimGraphComponent.CurrentStateHash(该字段由运行时回写)。
+	//
+	// 数据流:OnRender(每帧) —读盘只在 Load 时发生— 控件直接改模型 — Save 落盘。
+	// 视图态(选中项/滚动/拖拽/编辑缓冲)全部留在面板成员里,不进 AnimGraph 资产。
+	// ---------------------------------------------------------------------------
+	class AnimGraphPanel final : public EditorPanel
+	{
+	public:
+		AnimGraphPanel();
+		~AnimGraphPanel() override = default;
+
+		const char* Id() const override { return "animgraph"; }
+		const char* Title() const override { return "Animation Graph"; }
+		void OnRender(Wui::WuiContext& ctx, const Wui::WuiRect& rect, PanelHost& host) override;
+		bool OnShortcut(uint32_t keyCode, bool ctrl, bool shift, bool alt) override;
+
+		// 内容浏览器双击 `.wanimgraph` 的窄通道(与 UiDesignerPanel::RequestOpenPath 同款:
+		// 面板是单实例,外部拿不到实例指针,只把"要打开哪份资产"排进待办,面板渲染时取走)。
+		static void RequestOpenPath(const std::string& logicalPath);
+
+		// 文档接口(工具栏 / 测试/AI 通道共用)。
+		void LoadAsset(const std::string& logicalPath);
+		bool SaveAsset();
+		bool ReloadAsset();
+		bool ApplyToSelected(PanelHost& host);
+		bool IsDirty() const { return m_Dirty; }
+		const std::string& GetLoadedPath() const { return m_LoadedPath; }
+
+	private:
+		// ---- 文档 ----
+		std::filesystem::path ResolvePhysicalPath(const std::string& logicalPath) const;
+		std::string ToLogicalPath(const std::filesystem::path& physical) const;
+		void MakeDefaultGraph();
+		void ConsumeOpenRequest();
+		void MarkDirty();
+		void SetStatus(const std::string& text, bool error);
+		void PushUndo();
+		bool Undo();
+		bool Redo();
+		void RestoreHistorySnapshot(AnimGraph snapshot, const std::string& initialStateHint);
+		// 连续拖动(滑杆/样本数值)只在第一次实际变化时入栈；鼠标松开后结束本次事务。
+		bool BeginContinuousEdit(const std::string& key, bool continuous);
+
+		// 状态编辑 = 复制 → 改 → ReplaceState(契约只给了 const GetStates,
+		// 因此没有可变访问时按 RemoveState + AddState 重建,见派工 §3.3)。
+		bool ReplaceState(const std::string& originalName, const AnimState& state, bool recordUndo = true);
+		void AddStateOfKind(AnimStateKind kind);
+		void DeleteSelectedState();
+		void RenameSelectedState(const std::string& newName);
+		void CommitPendingCondition();
+		const AnimState* SelectedState() const;
+
+		// ---- 布局 ----
+		void RenderToolbar(Wui::WuiContext& ctx, const Wui::WuiRect& bar, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderOpenRow(Wui::WuiContext& ctx, const Wui::WuiRect& row, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderModelPickerRow(Wui::WuiContext& ctx, const Wui::WuiRect& row, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderLeftColumn(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderCenterColumn(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderLivePanel(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderStateCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderBlendSpaceCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderSamplesCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderTransitionsCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderLayersCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderLayerCard(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+		void RenderStateGraph(Wui::WuiContext& ctx, const Wui::WuiRect& area, PanelHost& host,
+			const Wui::WuiTheme& theme);
+
+		void RenderStatusBar(Wui::WuiContext& ctx, const Wui::WuiRect& bar,
+			const Wui::WuiTheme& theme);
+
+		// ---- 混合空间画布(AnimGraphPanel_BlendSpace.cpp) ----
+		void RebuildTriangulation();
+		void DrawBlendCanvas(Wui::WuiContext& ctx, const Wui::WuiRect& canvas, PanelHost& host,
+			const Wui::WuiTheme& theme, const AnimState& state, bool blend2d);
+		void UpdateBlendDrag(Wui::WuiContext& ctx, const Wui::WuiRect& canvas, const std::string& stateName,
+			bool blend2d);
+
+		// ---- Live Preview ----
+		void RefreshLiveBinding(PanelHost& host);
+		void PushParameters(PanelHost& host);
+		void UpdateSimulation(float dt);
+		void ResetSimulation();
+		void EnsureSimulationGraph();
+
+		// ---- 图级参数（定义来自 AnimGraph::GetParameterDefinitions）----
+		// 面板只在名字与定义之间做值缓存；不再假设 Speed/Direction/IsFalling/AimWeight 一定存在。
+		float ParamValue(const std::string& name) const;
+		void SetParamValue(const std::string& name, float value);
+		void SyncParameterValues();
+		std::vector<std::string> CollectReferencedParameters() const;
+
+		// ---- 模型/Clip ----
+		void RefreshModel(PanelHost& host);
+		std::string ModelLogicalPathForSelected(PanelHost& host) const;
+		std::vector<std::string> ClipOptionsForCombo(const std::string& current) const;
+		std::string ClipDisplayLabel(const std::string& pathOrName) const;
+
+
+	private:
+		// 文档
+		AnimGraph m_Graph;
+		std::string m_LoadedPath;
+		// 契约没有 GetInitialState 访问器:载入后 GetCurrentStateName() 就是 initial(LoadFromFile
+		// 末尾会 SetInitialState),面板据此跟踪并在改名/删除时同步,避免写出悬空的 initial:。
+		std::string m_InitialStateHint;
+		bool m_Dirty = false;
+		std::string m_Status;
+		bool m_StatusError = false;
+		float m_StatusAge = 0.0f;
+		bool m_OpenRowVisible = false;
+		std::string m_OpenPathBuffer;
+		// 整图快照历史：操作前入栈，上限 64。快照内的 CurrentState 被规范化为 initial hint，
+		// 因此每条记录都能独立恢复 initial:；m_UndoInitialState 跟踪撤销栈顶对应的 hint。
+		std::vector<AnimGraph> m_UndoStack;
+		std::vector<AnimGraph> m_RedoStack;
+		std::string m_UndoInitialState;
+
+		// 视图态
+		std::string m_SelectedState;
+		int m_SelectedSample = -1;
+		std::string m_SelectedLayer;
+		int m_SelectedTransition = -1;
+		float m_StateScroll = 0.0f;
+		float m_LayerScroll = 0.0f;
+		float m_CenterScroll = 0.0f;
+		float m_LayerCardScroll = 0.0f;
+		int m_CenterTab = 0;   // 0 = 状态, 1 = 层, 2 = 姿态, 3 = IK
+		Wui::WuiRect m_CanvasRect { 0, 0, 0, 0 };
+		int m_HoverSample = -1;
+		int m_DragSample = -1;
+		int m_DragPending = -1;
+		glm::vec2 m_DragStartPos { 0.0f, 0.0f };
+		glm::vec2 m_DragGrabOffset { 0.0f, 0.0f };
+		// 拖拽期间冻结参数映射范围，避免样本改变极值后坐标系反馈造成抖动。
+		float m_DragMinX = 0.0f;
+		float m_DragMaxX = 1.0f;
+		float m_DragMinY = -1.0f;
+		float m_DragMaxY = 1.0f;
+		bool m_DragChanged = false;
+		std::string m_DeleteArmState;
+		float m_DeleteArmAge = 0.0f;
+		std::string m_EditTransactionKey;
+
+		// 编辑缓冲(TextField 必须拿到跨帧稳定的引用)
+		std::string m_NameBuffer;
+		std::string m_NameBufferKey;
+		std::string m_ConditionBuffer;
+		std::string m_ConditionKey;
+		bool m_NameFieldWasFocused = false;
+		std::string m_ConditionFocusKey;
+		// 上一帧字段矩形:本帧点在其外 = 提交(先于工具栏处理,Save/Apply 不会丢输入)。
+		Wui::WuiRect m_NameFieldRect { 0.0f, 0.0f, 0.0f, 0.0f };
+		Wui::WuiRect m_ConditionFieldRect { 0.0f, 0.0f, 0.0f, 0.0f };
+
+		// 新建状态下拉(菜单目标跨帧保留;位置在打开那一帧钉住)
+		bool m_NewStateMenuOpen = false;
+		glm::vec2 m_NewStateMenuPos { 0.0f, 0.0f };
+
+		// 三角剖分缓存(拖动结束才重算,见派工 §3.2)
+		std::vector<std::array<int, 3>> m_Triangles;
+		bool m_TrianglesDirty = true;
+
+		// Live Preview
+		std::unordered_map<std::string, float> m_ParamValues;
+		float m_ParamScroll = 0.0f;
+		bool m_ParamsInitialized = false;
+		entt::entity m_BoundEntity = entt::null;
+		Scene* m_BoundScene = nullptr;
+		std::string m_BoundName;
+
+		// 参数管理器（新建参数行）。类型 0=float, 1=bool。
+		bool m_ParameterEditorOpen = false;
+		std::string m_ParameterNameBuffer;
+		int m_ParameterTypeIndex = 0;
+		float m_ParameterDefaultBuffer = 0.0f;
+		float m_ParameterMinBuffer = 0.0f;
+		float m_ParameterMaxBuffer = 1.0f;
+		std::string m_ParameterUnitBuffer;
+		std::string m_ParameterError;
+
+		// 内部模拟预览：独立的 AnimGraph 副本，不写回资产，也不依赖实体。
+		// 模拟 = 用参数面板当前值驱动副本，不存在脚本化循环。
+		bool m_Simulate = false;
+		bool m_SimGraphReady = false;
+		AnimGraph m_SimGraph;
+
+		// 过渡编辑器（每行独立；m_TransitionEditKey = "<state>#<index>"）。
+		std::string m_TransitionEditKey;
+		std::string m_TransitionExprBuffer;
+		std::string m_TransitionValueBuffer;
+		int m_TransitionParamIndex = 0;
+		int m_TransitionOpIndex = 0;
+		bool m_TransitionAdvancedOpen = false;
+		std::string m_TransitionError;
+
+		// 状态图画布视图态（只保存布局，不进资产）。
+		std::unordered_map<std::string, glm::vec2> m_StateGraphPositions;
+		std::string m_StateGraphDragPending;
+		std::string m_StateGraphDragNode;
+		glm::vec2 m_StateGraphDragStart { 0.0f, 0.0f };
+		glm::vec2 m_StateGraphDragOffset { 0.0f, 0.0f };
+		glm::vec2 m_StateGraphPan { 0.0f, 0.0f };
+		float m_StateGraphZoom = 1.0f;
+		// 中栏滚动区在画布之前先吃滚轮：画布悬停时由 RenderCenterColumn 把这次滚轮
+		// 暂存到这里并从输入里清零，避免"缩放了、整页也跟着滚"。
+		float m_CanvasWheel = 0.0f;
+		bool m_StateGraphPanning = false;
+		glm::vec2 m_StateGraphPanStart { 0.0f, 0.0f };
+		glm::vec2 m_StateGraphPanOrigin { 0.0f, 0.0f };
+		bool m_StateGraphFitRequested = false;
+		bool m_RevealTransitionRow = false;
+
+		// 层卡片的编辑缓冲（TextField 需要跨帧稳定引用）。
+		bool m_NewParameterRowVisible = false;
+		std::string m_NewParameterBuffer;
+		bool m_LayerMaskAdvancedOpen = false;
+		float m_LayerMaskScroll = 0.0f;
+		std::string m_LayerMaskTextKey;
+		std::string m_LayerMaskTextBuffer;
+		std::unordered_set<std::string> m_MaskCollapsed;   // 关键字 = 骨骼名
+		std::string m_MaskSelectedBone;
+
+
+
+		// 模型/Clip 缓存(选中实体或模型路径变化时才重读)
+		std::string m_TargetModelPath;
+		std::string m_ClipEditBuffer;
+		std::string m_ClipEditBufferKey;
+		std::string m_ModelKey;
+		std::string m_ModelError;
+		bool m_ModelValid = false;
+		Asset::WModelData m_Model;
+
+
+
+		// 混合空间视图态
+		bool m_BlendShowGrid = true;
+		bool m_BlendCrosshairGuides = true;
+
+		// 窄窗口形态(<900 时右栏折到底部)
+		bool m_Narrow = false;
+	};
+}
+

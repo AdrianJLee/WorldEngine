@@ -1,0 +1,18 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 960000000000000005
+  World::TagComponent:
+    Tag: "Showcase Sun"
+  World::TransformComponent:
+    Location: [32, 30, 32]
+    Rotation: [-50, 30, 0]
+    Scale: [1, 1, 1]
+  World::DirectionalLightComponent:
+    Color: [1, 0.95, 0.88]
+    Intensity: 2.2
+    Direction: [0.35, -0.8, 0.45]
+    CastShadow: false
+  World::LevelEntityComponent:
+    DataLayerMask: 1

@@ -1,0 +1,41 @@
+FormatVersion: 2
+Scene: ExampleAreaEffector2D
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000306
+    World::TagComponent:
+      Tag: Updraft Area Effector 2D
+    World::TransformComponent:
+      Location: [0, 0, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [2, 4, 1]
+    World::SpriteComponent:
+      Color: [0.2, 0.8, 0.6, 0.35]
+      Texture: "assets/textures/Icon.wtex"
+      TilingFactor: 1
+      SortingLayer: 0
+      OrderInLayer: 1
+    World::RigidBody2DComponent:
+      Type: Static
+      FixedRotation: true
+      Ccd: false
+      Layer: 1
+      Mask: 65535
+    World::BoxCollider2DComponent:
+      Offset: [0, 0]
+      Size: [0.5, 0.5]
+      Density: 1.0
+      Friction: 0.0
+      Restitution: 0.0
+      ShowCollider: true
+      IsSensor: true
+    World::AreaEffector2DComponent:
+      ForceDirection: [0, 1]
+      ForceMagnitude: 25.0
+      LinearDrag: 0.5
+      AngularDrag: 0.5
+      ForceMode: 0
+      UseGlobalCoordinates: false
+      AffectsInertia: false
+      Enabled: true

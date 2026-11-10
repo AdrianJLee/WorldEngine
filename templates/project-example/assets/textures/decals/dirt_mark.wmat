@@ -1,0 +1,12 @@
+# WorldEngine 3D Decal Material - Dirt Mark
+FormatVersion: 3
+AssetId: 0x0DECA10000000003
+Name: "Decal Dirt Mark"
+BaseColor: [1, 1, 1, 1]
+Metallic: 0.0
+Roughness: 0.9
+Emissive: [0, 0, 0]
+AlbedoTexture: "textures/decals/dirt_mark.png"
+NormalTexture: ""
+BlendMode: Transparent
+DoubleSided: true

@@ -1,0 +1,12 @@
+# WorldEngine 粒子专用叠加混合材质
+FormatVersion: 3
+AssetId: 0x0A2B3C4D5E6F7001
+Name: "Particle Additive"
+BaseColor: [1, 1, 1, 1]
+Metallic: 0
+Roughness: 0.1
+Emissive: [2.5, 2.5, 2.5]
+AlbedoTexture: "textures/particles/flame_soft.wtex"
+NormalTexture: ""
+BlendMode: Additive
+DoubleSided: true

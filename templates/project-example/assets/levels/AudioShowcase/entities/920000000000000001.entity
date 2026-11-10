@@ -1,0 +1,13 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 920000000000000001
+  World::TagComponent:
+    Tag: "Audio Demo Stage"
+  World::TransformComponent:
+    Location: [0, 0, 0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::LevelEntityComponent:
+    DataLayerMask: 1

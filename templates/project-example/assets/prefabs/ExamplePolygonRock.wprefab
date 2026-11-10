@@ -1,0 +1,26 @@
+FormatVersion: 2
+Scene: ExamplePolygonRock
+Entities:
+  - World::UUIDComponent:
+      ID:
+        m_UUID: 910000000000000303
+    World::TagComponent:
+      Tag: Polygon Rock
+    World::TransformComponent:
+      Location: [0, 3, 0]
+      Rotation: [0, 0, 0, 1]
+      Scale: [1, 1, 1]
+    World::RigidBody2DComponent:
+      Type: Dynamic
+      FixedRotation: false
+      Ccd: false
+      Layer: 1
+      Mask: 65535
+    World::PolygonCollider2DComponent:
+      Offset: [0, 0]
+      Points: "-0.6,-0.4;0.5,-0.6;0.7,0.3;0.1,0.7;-0.5,0.4"
+      Density: 1.5
+      Friction: 0.5
+      Restitution: 0.1
+      ShowCollider: true
+      IsSensor: false

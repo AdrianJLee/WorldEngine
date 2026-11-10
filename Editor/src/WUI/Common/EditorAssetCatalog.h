@@ -1,0 +1,222 @@
+#pragma once
+
+// P4-U9:项目内容根(运行期 `World::Paths::AssetRoot()`)下的资产目录扫描 —— 属性面板的"资产路径"下拉、材质面板的
+// 贴图槽等共用一份结果。每帧都要列表,所以带 TTL 缓存(默认 2s),不每帧扫盘。
+
+#include "WUI/Common/EditorAssetTypes.h"
+#include "World/Utils/Paths.h"
+
+#include <algorithm>
+#include <chrono>
+#include <map>
+#include <string>
+#include <vector>
+#include <unordered_set>
+
+namespace World
+{
+	namespace Editor::AssetCatalog
+	{
+		// schema 里的资产类型名(Of("Texture2D") / Asset("Material")…)→ 编辑器资产类型。
+		inline EditorAssetKind KindForName(const std::string& assetType)
+		{
+			if (assetType == "Material") return EditorAssetKind::Material;
+			if (assetType == "SpriteAtlas" || assetType == "TextureAtlas" || assetType == "Atlas") return EditorAssetKind::SpriteAtlas;
+			if (assetType == "SpriteAnimation" || assetType == "Animation2D") return EditorAssetKind::SpriteAnimation;
+			if (assetType == "Tilemap" || assetType == "TileMap") return EditorAssetKind::Tilemap;
+			if (assetType == "RuleTile" || assetType == "Rule" || assetType == "AutoTile" || assetType == "Rule Tile") return EditorAssetKind::RuleTile;
+			if (assetType == "Curve" || assetType == "BezierCurve") return EditorAssetKind::Curve;
+			// M4:3D 动画图资产(.wanimgraph)。
+			if (assetType == "AnimGraph" || assetType == "AnimationGraph" || assetType == "Animation Graph")
+				return EditorAssetKind::AnimGraph;
+			if (assetType == "Skeleton" || assetType == "WSkeleton") return EditorAssetKind::Skeleton;
+			if (assetType == "AnimationClip" || assetType == "Animation Clip" || assetType == "WAnimationClip" || assetType == "Clip")
+				return EditorAssetKind::AnimationClip;
+			if (assetType == "PhysicsMaterial" || assetType == "PhysMat" || assetType == "PhysicalMaterial") return EditorAssetKind::PhysicsMaterial;
+			// Slang-B1:表面函数(Material Shader)—— 唯一扩展名 `.slang`(Slang-B1se 起
+			// 旧扩展名不再进资产列表)。与 `.wmat` 实例分开的资产类型,供"Shader"字段/
+			// 参数表按名字取路径列表时使用。
+			if (assetType == "Shader" || assetType == "MaterialShader" || assetType == "Material Shader")
+				return EditorAssetKind::Shader;
+			// P4-U10:Model = **引擎原生** .wmodel(场景/字段只引用它);glTF/GLB 是导入源,
+			// 单独一个 kind —— 网格选取里绝不该出现 .gltf(用户 2026-09-21 报的歧义)。
+			if (assetType == "Model" || assetType == "Mesh" || assetType == "StaticMesh" || assetType == "WModel") return EditorAssetKind::Model;
+			if (assetType == "ModelSource" || assetType == "glTF" || assetType == "GLTF")
+				return EditorAssetKind::ModelSource;
+			if (assetType == "Texture" || assetType == "Texture2D") return EditorAssetKind::Texture;
+			if (assetType == "Script") return EditorAssetKind::Script;
+			if (assetType == "Scene") return EditorAssetKind::Scene;
+			// M7a(GameUI):`.wui` 的设计数据资产(单一扩展名)。schema/字段里的类型名
+			// 可写作 "UiDocument"/"UI Document"(宽容匹配,与其它类型同口径)。
+			if (assetType == "UiDocument" || assetType == "UIDocument"
+				|| assetType == "UI Document")
+				return EditorAssetKind::UiDocument;
+			if (assetType == "VFX" || assetType == "Particle" || assetType == "VisualEffect" || assetType == "Effect")
+				return EditorAssetKind::VFX;
+			if (assetType == "BehaviorTree" || assetType == "BT" || assetType == "BehaviorTreeAsset")
+				return EditorAssetKind::BehaviorTree;
+			if (assetType == "Blackboard" || assetType == "BB" || assetType == "BlackboardAsset")
+				return EditorAssetKind::Blackboard;
+			if (assetType == "EQSQuery" || assetType == "EQS" || assetType == "EnvQuery" || assetType == "EQSAsset")
+				return EditorAssetKind::EQSQuery;
+			return EditorAssetKind::Unknown;
+		}
+
+		inline bool MatchesKind(EditorAssetKind kind, const std::filesystem::path& path)
+		{
+			switch (kind)
+			{
+				case EditorAssetKind::Material: return LowerExtension(path) == ".wmat";
+				// Slang-B1se:资产过滤器只认 `.slang`(旧扩展名已从编辑器移除)。
+				case EditorAssetKind::Shader: return LowerExtension(path) == ".slang";
+				// 原生模型资产 = .wmodel(导入产物)。.gltf/.glb 属于 ModelSource,不在"可引用资产"里。
+				case EditorAssetKind::Model: return LowerExtension(path) == ".wmodel";
+				case EditorAssetKind::ModelSource:
+				{
+					const std::string extension = LowerExtension(path);
+					return extension == ".gltf" || extension == ".glb";
+				}
+				case EditorAssetKind::TextureSource:
+				{
+					const std::string extension = LowerExtension(path);
+					// M4-TEX P4:材质/字段引用的贴图路径 = **源图**(`<源图>.wtexc` 是它的产物),
+					// 所以 `Texture` 一族只含图片源;`.wtex` 是设置资产,不进可引用列表。
+					return extension == ".png" || extension == ".jpg" || extension == ".jpeg"
+						|| extension == ".tga" || extension == ".bmp";
+				}
+				case EditorAssetKind::TextureAsset: return LowerExtension(path) == ".wtex";
+				case EditorAssetKind::Script:
+				{
+					const std::string extension = LowerExtension(path);
+					return extension == ".lua" || extension == ".luau";
+				}
+				case EditorAssetKind::Scene: return LowerExtension(path) == ".wlevel";
+				// M7a(GameUI):`.wui` 不可被场景/字段引用(它不是资产引用,只是编辑器文档),
+				// 所以只按扩展名归类;AssetCatalog::Scan(UiDocument) 仍能列出它们。
+				case EditorAssetKind::UiDocument: return LowerExtension(path) == ".wui";
+				case EditorAssetKind::SpriteAtlas: return LowerExtension(path) == ".watlas";
+				case EditorAssetKind::SpriteAnimation: return LowerExtension(path) == ".wanim";
+				case EditorAssetKind::Tilemap: return LowerExtension(path) == ".wtilemap";
+				case EditorAssetKind::RuleTile: return LowerExtension(path) == ".wruletile";
+				case EditorAssetKind::Curve: return LowerExtension(path) == ".wcurve";
+				case EditorAssetKind::AnimGraph: return LowerExtension(path) == ".wanimgraph";
+				case EditorAssetKind::Skeleton: return LowerExtension(path) == ".wskeleton";
+				case EditorAssetKind::AnimationClip: return LowerExtension(path) == ".wclip";
+				case EditorAssetKind::PhysicsMaterial: return LowerExtension(path) == ".wphysmat";
+				case EditorAssetKind::VFX: return LowerExtension(path) == ".wvfx" || LowerExtension(path) == ".wparticle";
+				case EditorAssetKind::BehaviorTree: return LowerExtension(path) == ".wbt" || LowerExtension(path) == ".wbehaviortree";
+				case EditorAssetKind::Blackboard: return LowerExtension(path) == ".wbb" || LowerExtension(path) == ".wblackboard";
+				case EditorAssetKind::EQSQuery: return LowerExtension(path) == ".weqs" || LowerExtension(path) == ".weqsquery";
+				default: return false;
+			}
+		}
+
+		inline std::vector<std::string> Scan(EditorAssetKind kind)
+		{
+			std::vector<std::string> paths;
+			if (kind == EditorAssetKind::Unknown || kind == EditorAssetKind::Folder)
+				return paths;
+			std::error_code ec;
+			std::vector<std::filesystem::path> searchRoots;
+			const std::filesystem::path primaryRoot = World::Paths::AssetRoot();
+			if (std::filesystem::exists(primaryRoot, ec))
+				searchRoots.push_back(primaryRoot);
+
+			const std::filesystem::path templateAssets = std::filesystem::current_path() / "templates" / "project-example" / "assets";
+			if (searchRoots.empty() && std::filesystem::exists(templateAssets, ec))
+				searchRoots.push_back(templateAssets);
+
+			const std::filesystem::path engineRoot = World::Paths::EngineContentRoot();
+			if (std::filesystem::exists(engineRoot, ec))
+				searchRoots.push_back(engineRoot);
+
+			if (searchRoots.empty())
+				return paths;
+
+			std::unordered_set<std::string> seen;
+			for (const auto& root : searchRoots)
+			{
+				for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,
+					std::filesystem::directory_options::skip_permission_denied, ec))
+				{
+					if (!entry.is_regular_file(ec) || !MatchesKind(kind, entry.path()))
+						continue;
+					const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, ec);
+					if (!ec)
+					{
+						std::string rel = (root == engineRoot) ? ("engine/" + relative.generic_string()) : relative.generic_string();
+						if (!seen.count(rel))
+						{
+							seen.insert(rel);
+							paths.push_back(rel);
+						}
+					}
+				}
+			}
+			std::sort(paths.begin(), paths.end());
+			return paths;
+		}
+
+		// 带 TTL 的列表(相对内容根的逻辑路径,按字典序)。
+		inline const std::vector<std::string>& PathsFor(EditorAssetKind kind, double ttlSeconds = 2.0)
+		{
+			using Clock = std::chrono::steady_clock;
+			static std::map<EditorAssetKind, std::pair<Clock::time_point, std::vector<std::string>>> cache;
+			static const Clock::time_point start = Clock::now();
+			const double now = std::chrono::duration<double>(Clock::now() - start).count();
+			auto& entry = cache[kind];
+			const double stamp = std::chrono::duration<double>(entry.first - start).count();
+			if (stamp <= 0.0 || now - stamp > ttlSeconds)
+			{
+				entry.first = Clock::now();
+				entry.second = Scan(kind);
+			}
+			return entry.second;
+		}
+
+		inline const std::vector<std::string>& PathsForName(const std::string& assetType, double ttlSeconds = 2.0)
+		{
+			return PathsFor(KindForName(assetType), ttlSeconds);
+		}
+
+		// P4-U13d:"创建预制体"对话框的目录下拉 —— 内容根下的目录清单(逻辑路径,字典序)。
+		// 与 Scan 同一份缓存口径(默认 2s TTL),低频操作不每帧扫盘;权限错误跳过。
+		inline std::vector<std::string> ScanDirs()
+		{
+			std::vector<std::string> dirs;
+			std::error_code ec;
+			const std::filesystem::path root = World::Paths::AssetRoot();
+			if (!std::filesystem::exists(root, ec))
+				return dirs;
+			for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(root,
+				std::filesystem::directory_options::skip_permission_denied, ec))
+			{
+				std::error_code itemError;
+				if (!entry.is_directory(itemError))
+					continue;
+				const std::filesystem::path relative = std::filesystem::relative(entry.path(), root, itemError);
+				if (itemError || relative.empty())
+					continue;
+				dirs.push_back(relative.generic_string());
+			}
+			std::sort(dirs.begin(), dirs.end());
+			return dirs;
+		}
+
+		inline const std::vector<std::string>& Dirs(double ttlSeconds = 2.0)
+		{
+			using Clock = std::chrono::steady_clock;
+			static std::pair<Clock::time_point, std::vector<std::string>> cache;
+			static const Clock::time_point start = Clock::now();
+			const double now = std::chrono::duration<double>(Clock::now() - start).count();
+			const double stamp = std::chrono::duration<double>(cache.first - start).count();
+			if (stamp <= 0.0 || now - stamp > ttlSeconds)
+			{
+				cache.first = Clock::now();
+				cache.second = ScanDirs();
+			}
+			return cache.second;
+		}
+	}
+}
+

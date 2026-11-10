@@ -1,0 +1,26 @@
+﻿ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 983000000000000007
+  World::TagComponent:
+    Tag: "Hostile Sniper Threat"
+  World::TransformComponent:
+    Location: [-18.0, 1.0, 4.0]
+    Rotation: [0.0, 0.0, 0.0]
+    Scale: [1, 1, 1]
+  World::WhiteboxComponent:
+    Shape: 1
+    Subdivisions: 1
+    Steps: 12
+    Dimensions: [0.9, 1.8, 0.9]
+    BevelSize: 0.0
+    GenerateCollision: 1
+  World::MeshRendererComponent:
+    Primitive: 0
+    MeshIndex: 0
+    Color: [0.95, 0.20, 0.18, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 2

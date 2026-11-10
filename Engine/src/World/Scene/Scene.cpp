@@ -1,0 +1,3630 @@
+#include "World/Foliage/FoliageRenderer.h"
+#include "World/Foliage/FoliageInteraction.h"
+#include "World/Physics/Physics2DUtils.h"
+#include "wldpch.h"
+#include "World/Core/StringPool.h"
+#include "World/Scene/Scene.h"
+#include "World/NavMesh/NavMesh.h"
+#include <filesystem>
+#include "World/Scene/Components.h"
+#include "World/Scene/Systems/TransformSystem.h"
+#include "World/Scene/Systems/CameraSystem.h"
+#include "World/Scene/Systems/MovementSystem.h"
+#include "World/Scene/Systems/SpriteAnimationSystem.h"
+#include "World/Renderer/Tilemap.h"
+#include "World/Scene/Hierarchy.h"
+#include "World/Renderer/TransformInterpolation.h"
+#include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Renderer/AnimationSystem.h"
+#include "World/Animation/AnimGraphSystem.h"
+#include "World/Scene/Systems/AnimationPlayerSystem.h"
+#include "World/Renderer/FrameExtract.h"
+#include "World/Core/Thread/JobSystem.h"
+#include "World/Gameplay/Runtime/SystemRegistry.h"
+#include "World/Gameplay/Framework/TimerSystem.h"
+#include "World/Gameplay/Framework/BehaviorTreeSystem.h"
+#include "World/Gameplay/Framework/Blackboard.h"
+#include "World/Level/AI/EQSCoverSystem.h"
+#include "World/Level/AI/EQS/EnvQueryManager.h"
+#include "World/Gameplay/Framework/SmartObjectSystem.h"
+#include "World/Physics/Physics3D.h"
+#include "World/Audio/AudioSystem.h"
+#include "World/Renderer/VirtualCameraSystem.h"
+#include "World/Renderer/PostProcess/PostProcessPasses.h"
+#include "World/Renderer/ParticleSystem.h"
+#include "World/Renderer/ParticleAsset.h"
+#include "World/Script/Bindings/BindParticle.h"
+#include "World/Environment/WaterSimulation.h"
+#include "World/Environment/WeatherSimulation.h"
+#include "World/Scene/Systems/WeatherSystem.h"
+#include <box2d/box2d.h>
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <mutex>
+#include <stdexcept>
+
+namespace World
+{
+	namespace
+	{
+		// ---- PLUG-T2c:活场景表 ----------------------------------------------------
+		// Scene 构造/析构维护 (WorldContext, registry) 指针;插件卸载前的活实例查询用它
+		// 枚举"进程内所有活场景"(可按 WorldContext 过滤)。表本身加锁;注册表内容的读写
+		// 仍由场景 owner 线程负责 —— 查询走宿主主线程的卸载路径(与场景同线程)。
+		struct LiveSceneEntry
+		{
+			Scene* Owner = nullptr;
+			const WorldContext* Context = nullptr;
+			const entt::registry* Registry = nullptr;
+		};
+
+		struct SceneSlotEntry
+		{
+			const Scene* Owner = nullptr;
+			uint16_t Generation = 1;
+		};
+
+		constexpr std::size_t kMaxSceneSlots = 256;
+		std::mutex g_SceneSlotMutex;
+		SceneSlotEntry g_SceneSlots[kMaxSceneSlots]{};
+
+		std::pair<uint16_t, uint16_t> AllocateSceneSlot(const Scene* scene)
+		{
+			std::lock_guard<std::mutex> lock(g_SceneSlotMutex);
+			for (std::size_t i = 1; i < kMaxSceneSlots; ++i)
+			{
+				if (g_SceneSlots[i].Owner == nullptr)
+				{
+					g_SceneSlots[i].Owner = scene;
+					if (g_SceneSlots[i].Generation == 0)
+						g_SceneSlots[i].Generation = 1;
+					return { static_cast<uint16_t>(i), g_SceneSlots[i].Generation };
+				}
+			}
+			return { 0, 0 };
+		}
+
+		void ReleaseSceneSlot(uint16_t slot, const Scene* scene)
+		{
+			if (slot == 0 || slot >= kMaxSceneSlots)
+				return;
+			std::lock_guard<std::mutex> lock(g_SceneSlotMutex);
+			if (g_SceneSlots[slot].Owner == scene)
+			{
+				g_SceneSlots[slot].Owner = nullptr;
+				g_SceneSlots[slot].Generation++;
+				if (g_SceneSlots[slot].Generation == 0)
+					g_SceneSlots[slot].Generation = 1;
+			}
+		}
+
+		bool CheckSceneSlotAlive(const Scene* scene, uint16_t slot, uint16_t generation) noexcept
+		{
+			if (!scene || slot == 0 || slot >= kMaxSceneSlots)
+				return false;
+			return g_SceneSlots[slot].Owner == scene && g_SceneSlots[slot].Generation == generation;
+		}
+
+		std::mutex g_LiveScenesMutex;
+		std::vector<LiveSceneEntry> g_LiveScenes;
+
+		void RegisterLiveScene(Scene* owner, const WorldContext* context, const entt::registry* registry)
+		{
+			std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+			g_LiveScenes.push_back({ owner, context, registry });
+		}
+
+		void UnregisterLiveScene(const entt::registry* registry)
+		{
+			std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+			g_LiveScenes.erase(std::remove_if(g_LiveScenes.begin(), g_LiveScenes.end(),
+				[registry](const LiveSceneEntry& entry) { return entry.Registry == registry; }),
+				g_LiveScenes.end());
+		}
+
+		template<typename T>
+		std::vector<entt::entity> Snapshot(entt::registry& registry)
+		{
+			auto view = registry.view<T>();
+			return { view.begin(), view.end() };
+		}
+
+		thread_local bool s_InsideFramePipeline = false;
+
+
+
+		// 脚本属性按名字找 schema 字段(大小写敏感;不含嵌套/非叶类型)。
+		const Schema::FieldSchema* FindSchemaField(const Schema::TypeSchema& type, const std::string& name)
+		{
+			for (const Schema::FieldSchema& field : type.Fields)
+			{
+				if (field.Name == name)
+					return &field;
+			}
+			return nullptr;
+		}
+
+		void Report(const std::string& error)
+		{
+			if (Log::GetCoreLogger()) WLD_CORE_ERROR("{0}", error);
+		}
+
+		entt::entity ResolveConnectedEntity2D(const entt::registry& registry, uint64_t connectedValue)
+		{
+			if (connectedValue == 0) return entt::null;
+			entt::entity asEntity = static_cast<entt::entity>(connectedValue);
+			if (registry.valid(asEntity)) return asEntity;
+			for (auto e : registry.view<UUIDComponent>())
+			{
+				if (registry.get<UUIDComponent>(e).ID == UUID(connectedValue))
+					return e;
+			}
+			return entt::null;
+		}
+
+		// WP3:2D runtime handle lookup. Handles never live in components, so every reader goes
+		// through these two helpers; a missing entry means "no live Box2D object".
+		b2BodyId FindBody2D(const std::unordered_map<entt::entity, b2BodyId>& bodies, entt::entity entity)
+		{
+			const auto it = bodies.find(entity);
+			return it == bodies.end() ? b2_nullBodyId : it->second;
+		}
+
+		b2JointId FindJoint2D(const std::unordered_map<entt::entity, b2JointId>& joints, entt::entity entity)
+		{
+			const auto it = joints.find(entity);
+			return it == joints.end() ? b2_nullJointId : it->second;
+		}
+
+		static bool IsSubsumedByCompositeCollider(const entt::registry& registry, entt::entity entity)
+		{
+			entt::entity current = entity;
+			uint32_t guard = 0;
+			while (guard++ < 512)
+			{
+				const auto* hier = registry.try_get<HierarchyComponent>(current);
+				if (!hier || hier->Parent == entt::null || !registry.valid(hier->Parent))
+					break;
+				current = hier->Parent;
+				if (registry.any_of<CompositeCollider2DComponent>(current))
+					return true;
+			}
+			return false;
+		}
+
+		// W3f:刚体创建的唯一实现(世界启动与运行时 AddComponent 共用)。
+		// 形状/质量折算与 OnPhysics2DStart 的既有口径一致:位置/旋转取 Transform,尺寸乘 Scale。
+		bool BuildRuntimeBody(b2WorldId worldId, entt::registry& registry,
+			std::unordered_map<entt::entity, b2BodyId>& bodies,
+			std::unordered_map<entt::entity, uint64_t>& filters, entt::entity entity)
+		{
+			if (!b2World_IsValid(worldId)) return false;
+			if (IsSubsumedByCompositeCollider(registry, entity))
+				return false;
+			auto* rb = registry.try_get<RigidBody2DComponent>(entity);
+			const bool hasCollider = registry.any_of<BoxCollider2DComponent, CircleCollider2DComponent,
+				CapsuleCollider2DComponent, PolygonCollider2DComponent, ChainCollider2DComponent,
+				CompositeCollider2DComponent>(entity);
+			const auto* tilemapForBody = registry.try_get<TilemapComponent>(entity);
+			const bool hasTilemapColl = (tilemapForBody && tilemapForBody->GenerateCollision);
+			if ((!rb && !hasCollider && !hasTilemapColl) || b2Body_IsValid(FindBody2D(bodies, entity)))
+				return false;
+			const RigidBody2DComponent defaultStaticRb{};
+			if (!rb)
+				rb = const_cast<RigidBody2DComponent*>(&defaultStaticRb);
+			auto toBox2DType = [](RigidBody2DComponent::BodyType type)
+			{
+				switch (type)
+				{
+					case RigidBody2DComponent::BodyType::Static: return b2_staticBody;
+					case RigidBody2DComponent::BodyType::Dynamic: return b2_dynamicBody;
+					case RigidBody2DComponent::BodyType::Kinematic: return b2_kinematicBody;
+				}
+				return b2_staticBody;
+			};
+			auto* transform = registry.try_get<TransformComponent>(entity);
+			if (!transform)
+			{
+				Report("[Physics] Missing Transform for rigid body entity=" + std::to_string(static_cast<uint32_t>(entity)));
+				return false;
+			}
+			b2BodyDef bodyDef = b2DefaultBodyDef();
+			bodyDef.type = toBox2DType(rb->Type);
+			bodyDef.position = { transform->Location.x, transform->Location.y };
+			bodyDef.rotation = b2MakeRot(transform->GetEulerAngles().z);
+			bodyDef.motionLocks.angularZ = rb->FixedRotation;
+			bodyDef.isBullet = rb->Ccd;   // P7:CCD(高速小物体不隧穿)
+			const b2BodyId body = b2CreateBody(worldId, &bodyDef);
+			bodies[entity] = body;
+			// P5:每个 shape 统一挂 (a) 碰撞过滤(Box2D b2Filter 口径,取自刚体的 Layer/Mask)、
+			// (b) 传感器开关、(c) 事件开关 —— Box2D 的 enableContactEvents / enableSensorEvents
+			// **默认是 false**,不显式打开就永远收不到任何事件;(d) 实体句柄(供事件反查)。
+			const auto PrepareShape = [&](b2ShapeDef& shapeDef, bool isSensor)
+			{
+				shapeDef.filter.categoryBits = rb->Layer;
+				shapeDef.filter.maskBits = rb->Mask;
+				shapeDef.isSensor = isSensor;
+				shapeDef.enableContactEvents = true;
+				shapeDef.enableSensorEvents = true;
+				shapeDef.enablePreSolveEvents = (rb->Type == RigidBody2DComponent::BodyType::Dynamic);
+				shapeDef.userData = Physics::PackEntityUserData(entity);
+				if (const auto* surf = registry.try_get<SurfaceEffector2DComponent>(entity))
+				{
+					if (surf->Enabled)
+						shapeDef.material.tangentSpeed = surf->Speed;
+				}
+				if (const auto* physMat = registry.try_get<PhysicsMaterialComponent>(entity))
+				{
+					shapeDef.material.friction = std::max(0.0f, physMat->Friction);
+					shapeDef.material.restitution = std::max(0.0f, physMat->Restitution);
+				}
+			};
+			if (const auto* composite = registry.try_get<CompositeCollider2DComponent>(entity))
+			{
+				std::vector<entt::entity> targetEntities;
+				targetEntities.push_back(entity);
+
+				std::function<void(entt::entity)> collectChildren = [&](entt::entity parent)
+				{
+					const auto& children = Hierarchy::ChildrenOf(registry, parent);
+					for (entt::entity child : children)
+					{
+						if (registry.valid(child) && std::find(targetEntities.begin(), targetEntities.end(), child) == targetEntities.end())
+						{
+							targetEntities.push_back(child);
+							collectChildren(child);
+						}
+					}
+					for (auto [childEnt, hier] : registry.view<HierarchyComponent>().each())
+					{
+						if (hier.Parent == parent && registry.valid(childEnt) &&
+							std::find(targetEntities.begin(), targetEntities.end(), childEnt) == targetEntities.end())
+						{
+							targetEntities.push_back(childEnt);
+							collectChildren(childEnt);
+						}
+					}
+				};
+				collectChildren(entity);
+
+				for (const entt::entity currEnt : targetEntities)
+				{
+					glm::mat4 m(1.0f);
+					if (currEnt != entity)
+					{
+						entt::entity cur = currEnt;
+						uint32_t guard = 0;
+						while (cur != entity && cur != entt::null && registry.valid(cur) && guard++ < 64)
+						{
+							if (const auto* tr = registry.try_get<TransformComponent>(cur))
+								m = tr->GetLocalMatrix() * m;
+							const auto* hier = registry.try_get<HierarchyComponent>(cur);
+							cur = hier ? hier->Parent : entt::null;
+						}
+					}
+					const glm::mat4 relTransform = glm::scale(glm::mat4(1.0f), glm::vec3(transform->Scale.x, transform->Scale.y, 1.0f)) * m;
+
+					if (const auto* box = registry.try_get<BoxCollider2DComponent>(currEnt))
+					{
+						const glm::vec2 offset = box->Offset;
+						const glm::vec2 halfSize = box->Size;
+						const glm::vec4 corners[4] = {
+							relTransform * glm::vec4(offset.x - halfSize.x, offset.y - halfSize.y, 0.0f, 1.0f),
+							relTransform * glm::vec4(offset.x + halfSize.x, offset.y - halfSize.y, 0.0f, 1.0f),
+							relTransform * glm::vec4(offset.x + halfSize.x, offset.y + halfSize.y, 0.0f, 1.0f),
+							relTransform * glm::vec4(offset.x - halfSize.x, offset.y + halfSize.y, 0.0f, 1.0f)
+						};
+					b2Vec2 b2Pts[4];
+					for (int i = 0; i < 4; ++i)
+						b2Pts[i] = { corners[i].x, corners[i].y };
+					b2Hull hull = b2ComputeHull(b2Pts, 4);
+					if (hull.count >= 3)
+					{
+						b2Polygon b2Poly = b2MakePolygon(&hull, 0.0f);
+						b2ShapeDef shapeDef = b2DefaultShapeDef();
+						shapeDef.density = composite->Density;
+						shapeDef.material.friction = composite->Friction;
+						shapeDef.material.restitution = composite->Restitution;
+						PrepareShape(shapeDef, composite->IsSensor);
+						b2CreatePolygonShape(body, &shapeDef, &b2Poly);
+					}
+					}
+					if (const auto* circle = registry.try_get<CircleCollider2DComponent>(currEnt))
+					{
+						const glm::vec4 center4 = relTransform * glm::vec4(circle->Offset.x, circle->Offset.y, 0.0f, 1.0f);
+						const float scaleX = glm::length(glm::vec2(relTransform[0]));
+						const float scaleY = glm::length(glm::vec2(relTransform[1]));
+						const float radius = circle->Radius * std::max(scaleX, scaleY);
+						b2Circle shape;
+						shape.center = { center4.x, center4.y };
+						shape.radius = radius;
+						b2ShapeDef shapeDef = b2DefaultShapeDef();
+						shapeDef.density = composite->Density;
+						shapeDef.material.friction = composite->Friction;
+						shapeDef.material.restitution = composite->Restitution;
+						PrepareShape(shapeDef, composite->IsSensor);
+						b2CreateCircleShape(body, &shapeDef, &shape);
+					}
+					if (const auto* capsule = registry.try_get<CapsuleCollider2DComponent>(currEnt))
+					{
+						const float halfLen = capsule->Length * 0.5f;
+						glm::vec4 c1(0.0f), c2(0.0f);
+						if (capsule->Direction == 0) // Vertical
+						{
+							c1 = relTransform * glm::vec4(capsule->Offset.x, capsule->Offset.y - halfLen, 0.0f, 1.0f);
+							c2 = relTransform * glm::vec4(capsule->Offset.x, capsule->Offset.y + halfLen, 0.0f, 1.0f);
+						}
+						else // Horizontal
+						{
+							c1 = relTransform * glm::vec4(capsule->Offset.x - halfLen, capsule->Offset.y, 0.0f, 1.0f);
+							c2 = relTransform * glm::vec4(capsule->Offset.x + halfLen, capsule->Offset.y, 0.0f, 1.0f);
+						}
+						const float scaleX = glm::length(glm::vec2(relTransform[0]));
+						const float scaleY = glm::length(glm::vec2(relTransform[1]));
+						const float radius = capsule->Radius * std::max(scaleX, scaleY);
+						b2Capsule shape;
+						shape.center1 = { c1.x, c1.y };
+						shape.center2 = { c2.x, c2.y };
+						shape.radius = radius;
+						b2ShapeDef shapeDef = b2DefaultShapeDef();
+						shapeDef.density = composite->Density;
+						shapeDef.material.friction = composite->Friction;
+						shapeDef.material.restitution = composite->Restitution;
+						PrepareShape(shapeDef, composite->IsSensor);
+						b2CreateCapsuleShape(body, &shapeDef, &shape);
+					}
+					if (const auto* poly = registry.try_get<PolygonCollider2DComponent>(currEnt))
+					{
+						const auto triangles = Physics2D::DecomposeOrTriangulatePolygon(poly->GetPoints());
+						for (const auto& tri : triangles)
+						{
+							std::vector<b2Vec2> b2Pts(tri.size());
+							for (size_t i = 0; i < tri.size(); ++i)
+							{
+								const glm::vec4 p = relTransform * glm::vec4(poly->Offset.x + tri[i].x, poly->Offset.y + tri[i].y, 0.0f, 1.0f);
+								b2Pts[i] = { p.x, p.y };
+							}
+							b2Hull hull = b2ComputeHull(b2Pts.data(), static_cast<int>(b2Pts.size()));
+							if (hull.count >= 3)
+							{
+								b2Polygon b2Poly = b2MakePolygon(&hull, 0.0f);
+								b2ShapeDef shapeDef = b2DefaultShapeDef();
+								shapeDef.density = composite->Density;
+								shapeDef.material.friction = composite->Friction;
+								shapeDef.material.restitution = composite->Restitution;
+								PrepareShape(shapeDef, composite->IsSensor);
+								b2CreatePolygonShape(body, &shapeDef, &b2Poly);
+							}
+						}
+					}
+				}
+			}
+			else
+			{
+				if (const auto* box = registry.try_get<BoxCollider2DComponent>(entity))
+				{
+					b2ShapeDef shapeDef = b2DefaultShapeDef();
+					shapeDef.density = box->Density;
+					shapeDef.material.friction = box->Friction;
+					shapeDef.material.restitution = box->Restitution;
+					PrepareShape(shapeDef, box->IsSensor);
+					b2Polygon polygon = b2MakeOffsetBox(transform->Scale.x * box->Size.x, transform->Scale.y * box->Size.y,
+						{ box->Offset.x, box->Offset.y }, b2MakeRot(0.0f));
+					b2CreatePolygonShape(body, &shapeDef, &polygon);
+				}
+				if (const auto* circle = registry.try_get<CircleCollider2DComponent>(entity))
+				{
+					b2Circle shape;
+					shape.center = { circle->Offset.x, circle->Offset.y };
+					shape.radius = circle->Radius * transform->Scale.x;
+					b2ShapeDef shapeDef = b2DefaultShapeDef();
+					shapeDef.density = circle->Density;
+					shapeDef.material.friction = circle->Friction;
+					shapeDef.material.restitution = circle->Restitution;
+					PrepareShape(shapeDef, circle->IsSensor);
+					b2CreateCircleShape(body, &shapeDef, &shape);
+				}
+				if (const auto* capsule = registry.try_get<CapsuleCollider2DComponent>(entity))
+				{
+					b2Capsule shape;
+					const float halfLen = capsule->Length * 0.5f;
+					if (capsule->Direction == 0) // Vertical
+					{
+						shape.center1 = { capsule->Offset.x, capsule->Offset.y - halfLen * transform->Scale.y };
+						shape.center2 = { capsule->Offset.x, capsule->Offset.y + halfLen * transform->Scale.y };
+						shape.radius = capsule->Radius * transform->Scale.x;
+					}
+					else // Horizontal
+					{
+						shape.center1 = { capsule->Offset.x - halfLen * transform->Scale.x, capsule->Offset.y };
+						shape.center2 = { capsule->Offset.x + halfLen * transform->Scale.x, capsule->Offset.y };
+						shape.radius = capsule->Radius * transform->Scale.y;
+					}
+				b2ShapeDef shapeDef = b2DefaultShapeDef();
+				shapeDef.density = capsule->Density;
+				shapeDef.material.friction = capsule->Friction;
+				shapeDef.material.restitution = capsule->Restitution;
+				PrepareShape(shapeDef, capsule->IsSensor);
+				b2CreateCapsuleShape(body, &shapeDef, &shape);
+				}
+				if (const auto* poly = registry.try_get<PolygonCollider2DComponent>(entity))
+				{
+					const auto triangles = Physics2D::DecomposeOrTriangulatePolygon(poly->GetPoints());
+					for (const auto& tri : triangles)
+					{
+						std::vector<b2Vec2> b2Pts(tri.size());
+						for (size_t i = 0; i < tri.size(); ++i)
+						{
+							b2Pts[i] = { (poly->Offset.x + tri[i].x) * transform->Scale.x,
+							             (poly->Offset.y + tri[i].y) * transform->Scale.y };
+						}
+						b2Hull hull = b2ComputeHull(b2Pts.data(), static_cast<int>(b2Pts.size()));
+					if (hull.count >= 3)
+					{
+						b2Polygon b2Poly = b2MakePolygon(&hull, 0.0f);
+						b2ShapeDef shapeDef = b2DefaultShapeDef();
+						shapeDef.density = poly->Density;
+						shapeDef.material.friction = poly->Friction;
+						shapeDef.material.restitution = poly->Restitution;
+						PrepareShape(shapeDef, poly->IsSensor);
+						b2CreatePolygonShape(body, &shapeDef, &b2Poly);
+					}
+				}
+				}
+			}
+			if (const auto* chain = registry.try_get<ChainCollider2DComponent>(entity))
+			{
+				auto pts = chain->GetPoints();
+				if (pts.size() >= 2)
+				{
+					while (pts.size() < 4)
+					{
+						const glm::vec2 mid = (pts[pts.size() - 2] + pts.back()) * 0.5f;
+						pts.insert(pts.end() - 1, mid);
+					}
+					std::vector<b2Vec2> b2Pts(pts.size());
+					for (size_t i = 0; i < pts.size(); ++i)
+					{
+						b2Pts[i] = { (chain->Offset.x + pts[i].x) * transform->Scale.x,
+						             (chain->Offset.y + pts[i].y) * transform->Scale.y };
+					}
+					b2SurfaceMaterial mat = b2DefaultSurfaceMaterial();
+					mat.friction = chain->Friction;
+					mat.restitution = chain->Restitution;
+
+					b2ChainDef chainDef = b2DefaultChainDef();
+					chainDef.points = b2Pts.data();
+					chainDef.count = static_cast<int>(b2Pts.size());
+					chainDef.isLoop = chain->Loop;
+					chainDef.materials = &mat;
+					chainDef.materialCount = 1;
+					chainDef.userData = Physics::PackEntityUserData(entity);
+					chainDef.filter.categoryBits = rb->Layer;
+					chainDef.filter.maskBits = rb->Mask;
+					b2CreateChain(body, &chainDef);
+				}
+			}
+			if (const auto* tilemapComp = registry.try_get<TilemapComponent>(entity))
+			{
+				if (tilemapComp->GenerateCollision && tilemapComp->Tilemap.HasPath())
+				{
+					const std::string& tmPath = StringPool::Get().PathOf(tilemapComp->Tilemap.Path);
+					if (auto tm = Tilemap::GetOrLoad(tmPath))
+					{
+						const float cellW = (tilemapComp->CellSize.x > 0.0f ? tilemapComp->CellSize.x : tm->GetCellSize().x) * transform->Scale.x;
+						const float cellH = (tilemapComp->CellSize.y > 0.0f ? tilemapComp->CellSize.y : tm->GetCellSize().y) * transform->Scale.y;
+						const float mapW = static_cast<float>(tm->GetWidth()) * cellW;
+						const float mapH = static_cast<float>(tm->GetHeight()) * cellH;
+						if (tilemapComp->ColliderType == 1) // CompositeChain
+						{
+							const auto contours = tm->ComputeCompositeChainContours();
+							for (auto contour : contours)
+							{
+								if (contour.size() < 3)
+									continue;
+								while (contour.size() < 4)
+								{
+									const glm::vec2 mid = (contour[contour.size() - 2] + contour.back()) * 0.5f;
+									contour.insert(contour.end() - 1, mid);
+								}
+								std::vector<b2Vec2> b2Pts(contour.size());
+								for (size_t i = 0; i < contour.size(); ++i)
+								{
+									const float px = -mapW * 0.5f + (contour[i].x / tm->GetCellSize().x) * cellW;
+									const float py = +mapH * 0.5f - (contour[i].y / tm->GetCellSize().y) * cellH;
+									b2Pts[i] = { px, py };
+								}
+								b2SurfaceMaterial mat = b2DefaultSurfaceMaterial();
+								mat.friction = 0.6f;
+								mat.restitution = 0.0f;
+
+								b2ChainDef chainDef = b2DefaultChainDef();
+								chainDef.points = b2Pts.data();
+								chainDef.count = static_cast<int>(b2Pts.size());
+								chainDef.isLoop = true;
+								chainDef.materials = &mat;
+								chainDef.materialCount = 1;
+								chainDef.userData = Physics::PackEntityUserData(entity);
+								chainDef.filter.categoryBits = rb->Layer;
+								chainDef.filter.maskBits = rb->Mask;
+								b2CreateChain(body, &chainDef);
+							}
+						}
+						else if (tilemapComp->ColliderType == 0) // MergedBoxes
+						{
+							const auto rects = tm->ComputeMergedColliderRects();
+							for (const auto& r : rects)
+							{
+								const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
+								const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
+								const float hx = (r.Width * cellW) * 0.5f;
+								const float hy = (r.Height * cellH) * 0.5f;
+								if (hx > 1e-5f && hy > 1e-5f)
+								{
+									b2Polygon box = b2MakeOffsetBox(hx, hy, { cx, cy }, b2Rot_identity);
+									b2ShapeDef shapeDef = b2DefaultShapeDef();
+									PrepareShape(shapeDef, false);
+									b2CreatePolygonShape(body, &shapeDef, &box);
+								}
+							}
+						}
+					}
+				}
+			}
+			// P5:记下建体时用的 (Layer,Mask) —— 运行时改组件后据此检测变化并 b2Shape_SetFilter。
+			filters[entity] = (static_cast<uint64_t>(rb->Layer) << 32) | static_cast<uint64_t>(rb->Mask);
+			return true;
+		}
+
+		// ---- P7:Box2D 关节(Fixed=Weld / Distance / Hinge=Revolute) ----
+		//
+		// 局部锚点用 b2JointDef::localFrameA/B(b2Transform 的 p 即局部连接点,旋转留单位),
+		// Box2D 自己按刚体当前位姿换算 —— 与 3D 侧"局部→世界"的算法语义一致。
+		// 两个实体都必须已经有活刚体;任一缺失 ⇒ 返回 false 交给调用方报可读错误。
+		b2JointId BuildRuntimeJoint(b2WorldId worldId, entt::registry& registry,
+			const std::unordered_map<entt::entity, b2BodyId>& bodies, entt::entity owner)
+		{
+			if (!b2World_IsValid(worldId)) return b2_nullJointId;
+			auto* joint = registry.try_get<JointComponent>(owner);
+			if (!joint) return b2_nullJointId;
+
+			const entt::entity other = joint->Connected;
+			if (!registry.valid(other) || other == owner) return b2_nullJointId;
+			const b2BodyId ownerBodyId = FindBody2D(bodies, owner);
+			const b2BodyId otherBodyId = FindBody2D(bodies, other);
+			if (!b2Body_IsValid(ownerBodyId) || !b2Body_IsValid(otherBodyId)) return b2_nullJointId;
+
+			b2Transform localA = b2Transform { { joint->AnchorSelf.x, joint->AnchorSelf.y }, b2Rot_identity };
+			b2Transform localB = b2Transform { { joint->AnchorOther.x, joint->AnchorOther.y }, b2Rot_identity };
+			b2JointId created = b2_nullJointId;
+			switch (joint->Type)
+			{
+				case JointComponent::JointKind::Fixed:
+				{
+					b2WeldJointDef def = b2DefaultWeldJointDef();
+					def.base.bodyIdA = ownerBodyId;
+					def.base.bodyIdB = otherBodyId;
+					def.base.localFrameA = localA;
+					def.base.localFrameB = localB;
+					created = b2CreateWeldJoint(worldId, &def);
+					break;
+				}
+				case JointComponent::JointKind::Distance:
+				{
+					b2DistanceJointDef def = b2DefaultDistanceJointDef();
+					def.base.bodyIdA = ownerBodyId;
+					def.base.bodyIdB = otherBodyId;
+					def.base.localFrameA = localA;
+					def.base.localFrameB = localB;
+					if (joint->MinDistance >= 0.0f && joint->MaxDistance >= joint->MinDistance)
+					{
+						def.enableLimit = true;
+						def.minLength = joint->MinDistance;
+						def.maxLength = joint->MaxDistance;
+					}
+					// length 由 Box2D 按 localFrameA/B 的初始世界距离推导(默认 1.0 是占位);
+					// 这里显式留 < 0 时交给 Box2D 的默认行为不可靠,所以按两刚体当前位姿算一次。
+					const b2Vec2 worldA = b2Body_GetWorldPoint(ownerBodyId, { joint->AnchorSelf.x, joint->AnchorSelf.y });
+					const b2Vec2 worldB = b2Body_GetWorldPoint(otherBodyId, { joint->AnchorOther.x, joint->AnchorOther.y });
+					def.length = b2Distance(worldA, worldB);
+					created = b2CreateDistanceJoint(worldId, &def);
+					break;
+				}
+				case JointComponent::JointKind::Hinge:
+				{
+					b2RevoluteJointDef def = b2DefaultRevoluteJointDef();
+					def.base.bodyIdA = ownerBodyId;
+					def.base.bodyIdB = otherBodyId;
+					def.base.localFrameA = localA;
+					def.base.localFrameB = localB;
+					created = b2CreateRevoluteJoint(worldId, &def);
+					break;
+				}
+			}
+			if (!b2Joint_IsValid(created)) return b2_nullJointId;
+			b2Joint_SetCollideConnected(created, joint->EnableCollision);
+			return created;
+		}
+
+		// ---- P5:把 Box2D 的事实翻译成 ECS 事件 ----
+		//
+		// Box2D 原生只给 begin/end(b2World_GetContactEvents / b2World_GetSensorEvents),
+		// **没有 persist** —— 这里用"每步枚举当前接触、减去本步 begin"补齐,让 2D/3D 对外是
+		// 同一套 Begin/Persist/End 语义。
+		//
+		// 只做翻译,不做策略:事件顺序由 Box2D 的数组顺序 + registry 遍历顺序决定,
+		// 同一固定步输入下**确定**(可复现)。事件里的实体句柄来自 shape 的 userData,
+		// shape 已销毁(End 事件里可能出现)则跳过 —— 不做悬垂反查。
+		uint64_t PackEntityPair(entt::entity a, entt::entity b)
+		{
+			const uint32_t x = entt::to_integral(a);
+			const uint32_t y = entt::to_integral(b);
+			return (static_cast<uint64_t>(std::min(x, y)) << 32) | std::max(x, y);
+		}
+
+		entt::entity ResolveShapeEntity(b2ShapeId shape)
+		{
+			if (!b2Shape_IsValid(shape)) return entt::null;
+			return Physics::UnpackEntityUserData(b2Shape_GetUserData(shape));
+		}
+
+		uint8_t ResolveShapeColliderIndex(b2ShapeId shape)
+		{
+			if (!b2Shape_IsValid(shape)) return 0;
+			const b2ShapeType type = b2Shape_GetType(shape);
+			return type == b2_circleShape ? 1 : 0;
+		}
+
+		void AppendContactGeometry(const b2Manifold& manifold, Physics::ContactEvent& event,
+			uint8_t colliderIdxA, uint8_t colliderIdxB)
+		{
+			const glm::vec3 normal(manifold.normal.x, manifold.normal.y, 0.0f);
+			if (event.PointCount == 0)
+				event.Normal = normal;
+
+			for (int point = 0; point < manifold.pointCount && event.PointCount < Physics::kMaxContactPoints; ++point)
+			{
+				const b2ManifoldPoint& manifoldPoint = manifold.points[point];
+				const glm::vec3 pt(manifoldPoint.clipPoint.x, manifoldPoint.clipPoint.y, 0.0f);
+				const float depth = std::max(0.0f, -manifoldPoint.separation);
+
+				Physics::ContactPoint cp;
+				cp.Position = pt;
+				cp.Normal = normal;
+				cp.PenetrationDepth = depth;
+				cp.ColliderIndexA = colliderIdxA;
+				cp.ColliderIndexB = colliderIdxB;
+				event.Points[event.PointCount++] = cp;
+
+				if (depth > event.PenetrationDepth || event.PointCount == 1)
+				{
+					event.PenetrationDepth = depth;
+					event.Point = pt;
+					event.Normal = normal;
+				}
+			}
+		}
+
+		void FillContactGeometry(const b2Manifold& manifold, Physics::ContactEvent& event)
+		{
+			event.PointCount = 0;
+			AppendContactGeometry(manifold, event, 0, 0);
+		}
+
+		void HarvestPhysics2DEvents(b2WorldId world, entt::registry& registry,
+			const std::unordered_map<entt::entity, b2BodyId>& bodies,
+			std::vector<Physics::ContactEvent>& outContacts, std::vector<Physics::TriggerEvent>& outTriggers,
+			std::set<uint64_t>& sensorOverlaps)
+		{
+			if (!b2World_IsValid(world)) return;
+
+			std::unordered_set<uint64_t> beganContacts;
+			std::unordered_set<uint64_t> beganTriggers;
+
+			const b2ContactEvents contactEvents = b2World_GetContactEvents(world);
+			for (int index = 0; index < contactEvents.beginCount; ++index)
+			{
+				const b2ContactBeginTouchEvent& source = contactEvents.beginEvents[index];
+				// 传感器接触由 sensor 事件通道负责,避免同一事实报两遍。
+				if (b2Shape_IsSensor(source.shapeIdA) || b2Shape_IsSensor(source.shapeIdB)) continue;
+				const entt::entity entityA = ResolveShapeEntity(source.shapeIdA);
+				const entt::entity entityB = ResolveShapeEntity(source.shapeIdB);
+				if (entityA == entt::null || entityB == entt::null) continue;
+
+				const uint64_t pairKey = PackEntityPair(entityA, entityB);
+				const uint8_t colIdxA = ResolveShapeColliderIndex(source.shapeIdA);
+				const uint8_t colIdxB = ResolveShapeColliderIndex(source.shapeIdB);
+
+				auto existing = std::find_if(outContacts.begin(), outContacts.end(),
+					[&](const Physics::ContactEvent& e)
+					{
+						return e.Phase == Physics::ContactPhase::Begin &&
+							((e.EntityA == entityA && e.EntityB == entityB) ||
+							 (e.EntityA == entityB && e.EntityB == entityA));
+					});
+
+				if (existing != outContacts.end())
+				{
+					if (b2Contact_IsValid(source.contactId))
+						AppendContactGeometry(b2Contact_GetData(source.contactId).manifold, *existing, colIdxA, colIdxB);
+					continue;
+				}
+
+				Physics::ContactEvent event;
+				event.EntityA = entityA;
+				event.EntityB = entityB;
+				event.Phase = Physics::ContactPhase::Begin;
+				event.PointCount = 0;
+				if (b2Contact_IsValid(source.contactId))
+					AppendContactGeometry(b2Contact_GetData(source.contactId).manifold, event, colIdxA, colIdxB);
+				beganContacts.insert(pairKey);
+				outContacts.push_back(event);
+			}
+			for (int index = 0; index < contactEvents.endCount; ++index)
+			{
+				const b2ContactEndTouchEvent& source = contactEvents.endEvents[index];
+				const entt::entity entityA = ResolveShapeEntity(source.shapeIdA);
+				const entt::entity entityB = ResolveShapeEntity(source.shapeIdB);
+				if (entityA == entt::null || entityB == entt::null) continue;
+
+				auto existing = std::find_if(outContacts.begin(), outContacts.end(),
+					[&](const Physics::ContactEvent& e)
+					{
+						return e.Phase == Physics::ContactPhase::End &&
+							((e.EntityA == entityA && e.EntityB == entityB) ||
+							 (e.EntityA == entityB && e.EntityB == entityA));
+					});
+				if (existing != outContacts.end())
+					continue;
+
+				Physics::ContactEvent event;
+				event.EntityA = entityA;
+				event.EntityB = entityB;
+				event.Phase = Physics::ContactPhase::End;   // 流形此时已不可靠 ⇒ 几何量保持为零
+				event.PointCount = 0;
+				outContacts.push_back(event);
+			}
+
+			const b2SensorEvents sensorEvents = b2World_GetSensorEvents(world);
+			for (int index = 0; index < sensorEvents.beginCount; ++index)
+			{
+				const b2SensorBeginTouchEvent& source = sensorEvents.beginEvents[index];
+				const entt::entity sensor = ResolveShapeEntity(source.sensorShapeId);
+				const entt::entity visitor = ResolveShapeEntity(source.visitorShapeId);
+				if (sensor == entt::null || visitor == entt::null) continue;
+				Physics::TriggerEvent event;
+				event.SensorEntity = sensor;
+				event.OtherEntity = visitor;
+				event.Phase = Physics::ContactPhase::Begin;
+				const uint64_t beginKey = PackEntityPair(sensor, visitor);
+				beganTriggers.insert(beginKey);
+				sensorOverlaps.insert(beginKey);   // Persist 的事实源:仍在重叠的配对
+				outTriggers.push_back(event);
+			}
+			for (int index = 0; index < sensorEvents.endCount; ++index)
+			{
+				const b2SensorEndTouchEvent& source = sensorEvents.endEvents[index];
+				const entt::entity sensor = ResolveShapeEntity(source.sensorShapeId);
+				const entt::entity visitor = ResolveShapeEntity(source.visitorShapeId);
+				if (sensor == entt::null || visitor == entt::null) continue;
+				Physics::TriggerEvent event;
+				event.SensorEntity = sensor;
+				event.OtherEntity = visitor;
+				event.Phase = Physics::ContactPhase::End;
+				sensorOverlaps.erase(PackEntityPair(sensor, visitor));
+				outTriggers.push_back(event);
+			}
+
+			// Persist(传感器):Box2D **不把传感器重叠算作接触** —— b2Body_GetContactData 枚举不到,
+			// 所以这里用场景自己维护的"仍在重叠"集合补齐。顺序取有序集合 ⇒ 同一固定步输入下确定。
+			for (const uint64_t key : sensorOverlaps)
+			{
+				if (beganTriggers.count(key)) continue;   // 本步刚 Begin 的,不重复报 Persist
+				const entt::entity sensor = static_cast<entt::entity>(key >> 32);
+				const entt::entity visitor = static_cast<entt::entity>(key & 0xFFFFFFFFu);
+				Physics::TriggerEvent event;
+				event.SensorEntity = sensor;
+				event.OtherEntity = visitor;
+				event.Phase = Physics::ContactPhase::Persist;
+				outTriggers.push_back(event);
+			}
+
+			// Persist:本步仍在接触、但不是本步 Begin 的配对。两个刚体都会枚举到同一条接触 ⇒ 去重。
+			std::unordered_set<uint64_t> persistedContacts;
+			for (const entt::entity entity : registry.view<RigidBody2DComponent>())
+			{
+				const b2BodyId body = FindBody2D(bodies, entity);
+				if (!b2Body_IsValid(body)) continue;
+				const int capacity = b2Body_GetContactCapacity(body);
+				if (capacity <= 0) continue;
+				std::vector<b2ContactData> contacts(static_cast<std::size_t>(capacity));
+				const int count = b2Body_GetContactData(body, contacts.data(), capacity);
+				for (int index = 0; index < count; ++index)
+				{
+					const b2ContactData& data = contacts[index];
+					const entt::entity entityA = ResolveShapeEntity(data.shapeIdA);
+					const entt::entity entityB = ResolveShapeEntity(data.shapeIdB);
+					if (entityA == entt::null || entityB == entt::null) continue;
+					const bool sensorA = b2Shape_IsValid(data.shapeIdA) && b2Shape_IsSensor(data.shapeIdA);
+					const bool sensorB = b2Shape_IsValid(data.shapeIdB) && b2Shape_IsSensor(data.shapeIdB);
+					if (sensorA || sensorB) continue;   // 传感器重叠不在这里(见上面 sensorOverlaps 通道)
+					const uint64_t key = PackEntityPair(entityA, entityB);
+					if (beganContacts.count(key) || !persistedContacts.insert(key).second) continue;
+					Physics::ContactEvent event;
+					event.EntityA = entityA;
+					event.EntityB = entityB;
+					event.Phase = Physics::ContactPhase::Persist;
+					FillContactGeometry(data.manifold, event);
+					outContacts.push_back(event);
+				}
+			}
+		}
+
+	}
+
+	Scene::Scene(WorldContext& context) : m_Context(&context), m_OwnerThread(std::this_thread::get_id())
+	{
+		const auto [slot, gen] = AllocateSceneSlot(this);
+		m_SceneSlot = slot;
+		m_SceneGeneration = gen;
+		RegisterLiveScene(this, m_Context, &m_Registry);
+	}
+
+	Scene::~Scene()
+	{
+		// sink 是跨帧装在场景上的(见 Renderer/RenderExtract.h):场景先死时必须通知宿主
+		// 忘掉它,否则渲染器里那个 Scene* 会悬垂。
+		if (m_RenderExtractSink)
+		{
+			m_RenderExtractSink->OnExtractSceneDestroyed(*this);
+			m_RenderExtractSink = nullptr;
+		}
+		// Destroying a scene on another thread would also destroy Lua references there.
+		if (m_OwnerThread != std::this_thread::get_id())
+		{
+			Report("Scene destruction must run on its owner thread");
+			std::terminate();
+		}
+		StopScene();
+		ReleaseSceneSlot(m_SceneSlot, this);
+		UnregisterLiveScene(&m_Registry);
+	}
+
+	bool Scene::IsSceneAlive(const Scene* scene, uint16_t slot, uint16_t generation) noexcept
+	{
+		return CheckSceneSlotAlive(scene, slot, generation);
+	}
+
+	Entity Scene::CreateRawEntity()
+	{
+		AssertStructuralWrite();
+		return Entity(this, m_Registry.create());
+	}
+
+	void Scene::CreateEntities(std::size_t count, std::vector<Entity>& out)
+	{
+		AssertStructuralWrite();
+		out.reserve(out.size() + count);
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			out.emplace_back(this, m_Registry.create());
+		}
+	}
+
+	std::size_t Scene::CountLiveComponentInstances(entt::id_type componentId,
+		const WorldContext* context)
+	{
+		std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+		std::size_t count = 0;
+		for (const LiveSceneEntry& entry : g_LiveScenes)
+		{
+			if (context && entry.Context != context)
+				continue;
+			const auto* storage = entry.Registry->storage(componentId);
+			if (storage)
+				count += storage->size();
+		}
+		return count;
+	}
+
+	std::vector<Scene*> Scene::LiveScenes(const WorldContext* context)
+	{
+		std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+		std::vector<Scene*> scenes;
+		scenes.reserve(g_LiveScenes.size());
+		for (const LiveSceneEntry& entry : g_LiveScenes)
+		{
+			if (context && entry.Context != context)
+				continue;
+			if (entry.Owner)
+				scenes.push_back(entry.Owner);
+		}
+		return scenes;
+	}
+
+	bool Scene::FindLiveEntity(const UUID& id, const WorldContext* context, const Scene* only,
+		Scene** outScene, entt::entity* outEntity)
+	{
+		std::lock_guard<std::mutex> lock(g_LiveScenesMutex);
+		for (const LiveSceneEntry& entry : g_LiveScenes)
+		{
+			if (!entry.Owner || !entry.Registry)
+				continue;
+			if (context && entry.Context != context)
+				continue;
+			if (only && entry.Owner != only)
+				continue;
+			for (const entt::entity handle : entry.Registry->view<UUIDComponent>())
+			{
+				const UUIDComponent& identity = entry.Registry->get<UUIDComponent>(handle);
+				if (static_cast<uint64_t>(identity.ID) != static_cast<uint64_t>(id))
+					continue;
+				if (outScene)
+					*outScene = entry.Owner;
+				if (outEntity)
+					*outEntity = handle;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void Scene::AssertOwnerThread() const
+	{
+		if (m_OwnerThread != std::this_thread::get_id())
+			throw std::logic_error("Scene access must run on its owner thread");
+	}
+
+	void Scene::RegisterFrameSystem(FrameSystem system)
+	{
+		AssertOwnerThread();
+		if (system.Name.empty() || !system.Update)
+			throw std::invalid_argument("Scene frame system requires a name and an update function");
+		for (const FrameSystem& existing : m_FrameSystemDefinitions)
+			if (existing.Name == system.Name)
+				throw std::invalid_argument("Scene frame system '" + system.Name + "' is already registered");
+
+		if (!m_FrameSystems)
+			m_FrameSystems = std::make_unique<Gameplay::SystemRegistry>();
+		Gameplay::SystemDesc desc;
+		desc.Name = system.Name;
+		// PURE-ECS:阶段与顺序依赖来自注册方(默认 Update/无依赖),不再硬编码。
+		desc.Phase = system.Phase;
+		desc.ParallelSafe = system.ParallelSafe;
+		desc.After = system.After;
+		desc.Interval = system.Interval;
+		desc.Condition = system.Condition;
+		desc.Owner = system.Owner;
+		// WP4:声明式读写集透传给调度器(相位内冲突判定)。
+		desc.Reads = std::move(system.Reads);
+		desc.Writes = std::move(system.Writes);
+		desc.AccessDeclared = system.AccessDeclared;
+		Gameplay::SystemRegistry::UpdateFn update = std::move(system.Update);
+		if (!m_FrameSystems->Register(desc, std::move(update)))
+			throw std::invalid_argument("Scene frame system '" + desc.Name + "' rejected: " + m_FrameSystems->GetLastError());
+		m_FrameSystemDefinitions.push_back(std::move(system));
+	}
+
+	bool Scene::SetFrameSystemEnabled(const std::string& name, bool enabled)
+	{
+		AssertOwnerThread();
+		if (!m_FrameSystems)
+			return false;
+		return m_FrameSystems->SetEnabled(name, enabled);
+	}
+
+	bool Scene::IsFrameSystemEnabled(const std::string& name) const
+	{
+		if (!m_FrameSystems)
+			return false;
+		return m_FrameSystems->IsEnabled(name);
+	}
+
+	bool Scene::SetFrameSystemOwner(const std::string& name, std::string owner)
+	{
+		AssertOwnerThread();
+		for (FrameSystem& existing : m_FrameSystemDefinitions)
+		{
+			if (existing.Name == name)
+			{
+				existing.Owner = owner;
+				break;
+			}
+		}
+		if (!m_FrameSystems)
+			return false;
+		return m_FrameSystems->SetOwner(name, std::move(owner));
+	}
+
+	bool Scene::HasFrameSystem(const std::string& name) const
+	{
+		for (const FrameSystem& existing : m_FrameSystemDefinitions)
+			if (existing.Name == name)
+				return true;
+		return false;
+	}
+
+	bool Scene::UnregisterFrameSystem(const std::string& name)
+	{
+		AssertOwnerThread();
+		if (name.empty())
+			return false;
+		const auto found = std::find_if(m_FrameSystemDefinitions.begin(), m_FrameSystemDefinitions.end(),
+			[&name](const FrameSystem& existing) { return existing.Name == name; });
+		if (found == m_FrameSystemDefinitions.end())
+			return false;
+		m_FrameSystemDefinitions.erase(found);
+		if (m_FrameSystems)
+			m_FrameSystems->Unregister(name);
+		return true;
+	}
+
+	bool Scene::UnregisterSystemByType(std::type_index type)
+	{
+		AssertOwnerThread();
+		if (type == std::type_index(typeid(void)))
+			return false;
+
+		const auto isMatching = [&type](std::type_index itemType) {
+			return itemType == type
+				|| (itemType != std::type_index(typeid(void))
+					&& std::string_view(itemType.name()) == std::string_view(type.name()));
+		};
+
+		// 检查 Startup
+		const auto sFound = std::find_if(m_StartupSystems.begin(), m_StartupSystems.end(),
+			[&isMatching](const LifecycleSystem& item) { return isMatching(item.TypeIndex); });
+		if (sFound != m_StartupSystems.end())
+		{
+			m_StartupSystems.erase(sFound);
+			return true;
+		}
+
+		// 检查 Teardown
+		const auto tFound = std::find_if(m_TeardownSystems.begin(), m_TeardownSystems.end(),
+			[&isMatching](const LifecycleSystem& item) { return isMatching(item.TypeIndex); });
+		if (tFound != m_TeardownSystems.end())
+		{
+			m_TeardownSystems.erase(tFound);
+			return true;
+		}
+
+		const auto found = std::find_if(m_FrameSystemDefinitions.begin(), m_FrameSystemDefinitions.end(),
+			[&isMatching](const FrameSystem& existing) { return isMatching(existing.TypeIndex); });
+		if (found == m_FrameSystemDefinitions.end())
+			return false;
+		const std::string name = found->Name;
+		m_FrameSystemDefinitions.erase(found);
+		if (m_FrameSystems)
+			m_FrameSystems->Unregister(name);
+		return true;
+	}
+
+	bool Scene::HasSystemByType(std::type_index type) const
+	{
+		if (type == std::type_index(typeid(void)))
+			return false;
+
+		const auto isMatching = [&type](std::type_index itemType) {
+			return itemType == type
+				|| (itemType != std::type_index(typeid(void))
+					&& std::string_view(itemType.name()) == std::string_view(type.name()));
+		};
+
+		for (const auto& item : m_StartupSystems)
+			if (isMatching(item.TypeIndex)) return true;
+		for (const auto& item : m_TeardownSystems)
+			if (isMatching(item.TypeIndex)) return true;
+
+		for (const FrameSystem& existing : m_FrameSystemDefinitions)
+		{
+			if (isMatching(existing.TypeIndex))
+				return true;
+		}
+		return false;
+	}
+
+	void Scene::RegisterStartupSystem(LifecycleSystem system)
+	{
+		AssertOwnerThread();
+		m_StartupSystems.push_back(std::move(system));
+	}
+
+	void Scene::RegisterTeardownSystem(LifecycleSystem system)
+	{
+		AssertOwnerThread();
+		m_TeardownSystems.push_back(std::move(system));
+	}
+
+	void Scene::RunStartupSystems()
+	{
+		AssertOwnerThread();
+		const bool wasCommitting = m_Committing;
+		m_Committing = true;
+		for (const auto& sys : m_StartupSystems)
+		{
+			if (sys.Action)
+				sys.Action(*this);
+		}
+		m_Committing = wasCommitting;
+		FlushStructuralChanges();
+	}
+
+	void Scene::RunTeardownSystems()
+	{
+		AssertOwnerThread();
+		const bool wasCommitting = m_Committing;
+		m_Committing = true;
+		for (const auto& sys : m_TeardownSystems)
+		{
+			if (sys.Action)
+				sys.Action(*this);
+		}
+		m_Committing = wasCommitting;
+	}
+
+	void Scene::MarkComponentChanged(entt::id_type componentId)
+	{
+		m_ComponentVersions[componentId] = m_WorldTick;
+	}
+
+	uint64_t Scene::GetComponentChangeTick(entt::id_type componentId) const
+	{
+		const auto it = m_ComponentVersions.find(componentId);
+		return it != m_ComponentVersions.end() ? it->second : 0;
+	}
+
+	uint64_t Scene::AddComponentChangeObserver(entt::id_type componentId, ComponentChangeObserverFn fn)
+	{
+		AssertOwnerThread();
+		uint64_t handle = ++m_NextObserverId;
+		m_ComponentChangeObservers.push_back({ handle, componentId, std::move(fn) });
+		return handle;
+	}
+
+	bool Scene::RemoveComponentChangeObserver(uint64_t handle)
+	{
+		AssertOwnerThread();
+		const auto it = std::find_if(m_ComponentChangeObservers.begin(), m_ComponentChangeObservers.end(),
+			[handle](const ComponentChangeObserverEntry& entry) { return entry.Handle == handle; });
+		if (it == m_ComponentChangeObservers.end())
+			return false;
+		m_ComponentChangeObservers.erase(it);
+		return true;
+	}
+
+	void Scene::NotifyComponentChanged(Entity entity, entt::id_type componentId)
+	{
+		MarkComponentChanged(componentId);
+		for (const auto& entry : m_ComponentChangeObservers)
+		{
+			if (entry.ComponentId == componentId && entry.Callback)
+				entry.Callback(entity);
+		}
+	}
+
+	// W5-3:帧系统调度统一走 Gameplay::SystemRegistry
+	// (阶段/同阶段依赖/并行安全并行派发/逐系统耗时),Scene 只保留面向宿主的薄封装。
+	void Scene::RunFrameSystems(Timestep ts)
+	{
+		AssertOwnerThread();
+		AdvanceWorldTick();
+		// WP5:可变帧时间推进(TimeScale 只缩放 DeltaSeconds,不改固定步长;暂停时宿主不调本函数)。
+		Gameplay::TimerSystem::BeginVariableFrame(*this, ts);
+		// 一帧的耗时表:谁先跑谁清(固定阶段先于可变阶段,见 OnFixedUpdate)。帧末复位。
+		if (!m_FrameTimingsBegun)
+		{
+			m_FrameSystemTimings.clear();
+			m_FrameTimingsBegun = true;
+		}
+		// P5:本帧一个固定步都没跑 ⇒ 本帧不可能有新物理事件,把上一帧的清掉(读到的永远是"本帧的")。
+		if (!m_PhysicsEventsBegun)
+			ClearPhysicsEvents();
+		if (!m_FrameSystems)
+		{
+			m_FrameTimingsBegun = false;
+			m_PhysicsEventsBegun = false;
+			return;
+		}
+
+		s_InsideFramePipeline = true;
+		struct PipelineScopeGuard
+		{
+			~PipelineScopeGuard() { s_InsideFramePipeline = false; }
+		} guard;
+
+		// PURE-ECS(工业口径):可变阶段 = Update → Late → PreRender,每帧一次。
+		// **Fixed 阶段不在这里** —— 它在 RunFixedFrameSystems 里按固定 dt 跑 0..N 次。
+		// 同阶段内的顺序依赖由 SystemRegistry 的 After 拓扑排序负责。
+		for (int phase = static_cast<int>(Gameplay::SystemPhase::Update);
+			phase <= static_cast<int>(Gameplay::SystemPhase::PreRender); ++phase)
+		{
+			m_FrameSystems->RunPhase(static_cast<Gameplay::SystemPhase>(phase), ts);
+			for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
+			{
+				FrameSystemTiming entry;
+				entry.Name = timing.Name;
+				entry.ParallelSafe = timing.ParallelSafe;
+				entry.Milliseconds = timing.Milliseconds;
+				entry.Phase = timing.Phase;
+				entry.Owner = timing.Owner;
+				entry.Enabled = timing.Enabled;
+				m_FrameSystemTimings.push_back(std::move(entry));
+			}
+		}
+		m_FrameTimingsBegun = false;   // 本帧结束:下一帧重新开始收集
+		m_PhysicsEventsBegun = false;  // 本帧结束:下一帧的固定步重新清空物理事件
+	}
+
+	// ---- P6:固定步长 → 渲染插值(仅表现层) ----
+	void Scene::SetFixedStepAlpha(float alpha)
+	{
+		m_FixedStepAlpha = std::clamp(alpha, 0.0f, 1.0f);
+	}
+
+	void Scene::RecordPhysicsInterpolationState()
+	{
+		if (!m_PhysicsInterpolationEnabled) return;
+
+		// 只**更新**已有状态,不做结构写 —— 本函数在固定步阶段(帧管线内)被调用,
+		// 而运行态的结构写是受保护的。状态的创建放在两处非帧内的点:
+		//   * OnRuntimeStart(所有物理实体);
+		//   * EnsurePhysicsBody(运行时 AddComponent 补建刚体的提交点,新实体当帧补上)。
+		for (const entt::entity entity : m_Registry.view<PhysicsInterpolationState>())
+		{
+			auto& state = m_Registry.get<PhysicsInterpolationState>(entity);
+			// P6:记**局部**变换(权威分量);世界矩阵由渲染侧用插值后的局部变换做层级合成。
+			// 这样父子的相对关系在插值后仍然成立(旧实现插值世界矩阵 ⇒ 子相对父每步跳一次)。
+			// O2(2026-10-05):直接拷权威 TRS,不再 Compose 成矩阵存 —— 消费者要的就是 TRS,
+			// 存矩阵等于"合成了又拆开"(见 PhysicsInterpolationState 说明与标准 §6.3)。
+			if (const auto* transform = m_Registry.try_get<TransformComponent>(entity))
+			{
+				state.PreviousLocation = transform->Location;
+				state.PreviousRotation = transform->Rotation;
+				state.PreviousScale = transform->Scale;
+			}
+			state.Valid = true;
+		}
+	}
+
+	// ---- P5:物理事实 → ECS 事件队列 ----
+	// 产出在固定步长阶段(物理系统),消费在可变阶段(任意系统)。见 Scene.h 的契约说明。
+	void Scene::EnqueueContactEvent(const Physics::ContactEvent& event)
+	{
+		m_ContactEvents.push_back(event);
+	}
+
+	void Scene::EnqueueTriggerEvent(const Physics::TriggerEvent& event)
+	{
+		m_TriggerEvents.push_back(event);
+	}
+
+	void Scene::ClearPhysicsEvents()
+	{
+		m_ContactEvents.clear();
+		m_TriggerEvents.clear();
+	}
+
+	// ---- 固定步长阶段(工业口径)----
+	// 物理与移动在 `PreFixed` / `Fixed` 推进:它们必须跑固定 dt 才可复现 ——
+	// 同一段真实时间、不管帧率是多少,结果一致(GameApp 的累加器负责"跑几步")。
+	void Scene::RunFixedFrameSystems(Timestep fixedDt)
+	{
+		AssertOwnerThread();
+		// WP5:固定步时间服务由 PreFixed 阶段的 `timer-system` 推进;它被禁用/未注册时这里兜底,
+		// 保证 GetTime() 不依赖某个可选系统的开关状态(默认路径仍是单写者,不重复计数)。
+		if (!m_FrameSystems || !m_FrameSystems->IsEnabled(Gameplay::TimerSystem::kSystemName))
+			Gameplay::TimerSystem::AdvanceFixedStep(*this, fixedDt);
+		if (!m_FrameTimingsBegun)
+		{
+			m_FrameSystemTimings.clear();
+			m_FrameTimingsBegun = true;
+		}
+		// P5:本帧的第一个固定步 ⇒ 物理事件从这里开始累积(一帧 0..N 步只清一次)。
+		if (!m_PhysicsEventsBegun)
+		{
+			ClearPhysicsEvents();
+			m_PhysicsEventsBegun = true;
+		}
+		if (!m_FrameSystems)
+			return;
+
+		s_InsideFramePipeline = true;
+		struct PipelineScopeGuard
+		{
+			~PipelineScopeGuard() { s_InsideFramePipeline = false; }
+		} guard;
+
+		for (int phase = static_cast<int>(Gameplay::SystemPhase::PreFixed);
+			phase <= static_cast<int>(Gameplay::SystemPhase::Fixed); ++phase)
+		{
+			m_FrameSystems->RunPhase(static_cast<Gameplay::SystemPhase>(phase), fixedDt);
+			for (const Gameplay::SystemTiming& timing : m_FrameSystems->GetLastTimings())
+			{
+				FrameSystemTiming entry;
+				entry.Name = timing.Name;
+				entry.ParallelSafe = timing.ParallelSafe;
+				entry.Milliseconds = timing.Milliseconds;
+				entry.Phase = timing.Phase;
+				entry.Owner = timing.Owner;
+				entry.Enabled = timing.Enabled;
+				m_FrameSystemTimings.push_back(std::move(entry));
+			}
+		}
+	}
+
+	void Scene::OnFixedUpdate(Timestep fixedDt)
+	{
+		AssertOwnerThread();
+		// 与 OnUpdateRuntime 对称:**不做运行态守卫** —— 宿主已经按"运行时才调"接线,
+		// 而两个物理系统自身有空世界保护(OnUpdatePhysics2D/3D 各自早退),
+		// 无守卫让 headless 测试能直接按固定步驱动(与 OnUpdateRuntime 同一用法)。
+		EnsureDefaultFrameSystems();
+		RunFixedFrameSystems(fixedDt);
+	}
+	const char* Scene::GetFrameSystemStatsDescription(const Scene& scene)
+	{
+		// 静态缓冲:仅供日志/调试打印,不做线程安全承诺。
+		static std::string description;
+		description.clear();
+		for (const FrameSystemTiming& timing : scene.m_FrameSystemTimings)
+		{
+			if (!description.empty())
+				description += ", ";
+			description += timing.Name + (timing.ParallelSafe ? "[par]" : "[excl]") + "=" +
+				std::to_string(timing.Milliseconds) + "ms";
+		}
+		return description.c_str();
+	}
+
+	void Scene::AssertStructuralWrite() const
+	{
+		AssertOwnerThread();
+		if (m_CallbackDepth && m_ScriptWriteDepth == 0)
+			throw std::logic_error("Synchronous structural writes are forbidden in lifecycle callbacks; use DeferStructuralChange");
+		if (m_State == SceneState::Stopping || (IsActive() && !m_Committing && m_ScriptWriteDepth == 0))
+			throw std::logic_error("An active scene accepts structural writes only while committing a command");
+	}
+
+	Scene::ScriptWriteScope::ScriptWriteScope(Scene& scene) : m_Scene(&scene)
+	{
+		scene.AssertOwnerThread();
+		if (scene.m_State == SceneState::Stopping || scene.m_StopRequested)
+			throw std::logic_error("Script structural writes are forbidden while the scene is stopping");
+		// 只放行生命周期回调内的白名单写;回调外仍需走既有的结构提交点。
+		if (scene.m_CallbackDepth == 0 && !scene.m_Committing)
+			throw std::logic_error("Script structural writes are only allowed inside lifecycle callbacks or structural commits");
+		++scene.m_ScriptWriteDepth;
+	}
+
+	Scene::ScriptWriteScope::~ScriptWriteScope()
+	{
+		if (m_Scene && m_Scene->m_ScriptWriteDepth)
+			--m_Scene->m_ScriptWriteDepth;
+	}
+
+	// W4:事件/计时器回调的派发作用域。与生命周期回调的 InvokeCallback 同源地抬升
+	// m_CallbackDepth 并设置"当前脚本来源",同时打开白名单结构写窗口(m_ScriptWriteDepth),
+	// 使 CreateEntityShell / AddComponent / SetParent 在事件/计时器回调里当帧生效。
+	// owner(句柄含场景令牌 + generation)不可用时 IsValid()==false,调用方不得执行回调体。
+	Scene::ScriptCallbackScope::ScriptCallbackScope(Scene& scene, Entity owner, entt::id_type component,
+		uint64_t generation)
+		: m_Scene(&scene)
+	{
+		scene.AssertOwnerThread();
+		if (!owner.IsValid() || owner.GetScene() != &scene)
+			return;
+		if (scene.m_State == SceneState::Stopping || scene.m_StopRequested)
+			return;
+		const ScriptSource source { static_cast<entt::entity>(owner), component, generation, false };
+		if (!scene.IsSourceAlive(source))
+			return;
+		m_PreviousSource = scene.m_CallbackSource;
+		scene.m_CallbackSource = source;
+		++scene.m_CallbackDepth;
+		++scene.m_ScriptWriteDepth;
+		m_Valid = true;
+	}
+
+	Scene::ScriptCallbackScope::~ScriptCallbackScope()
+	{
+		if (!m_Valid || !m_Scene)
+			return;
+		m_Scene->m_CallbackSource = m_PreviousSource;
+		if (m_Scene->m_CallbackDepth)
+			--m_Scene->m_CallbackDepth;
+		if (m_Scene->m_ScriptWriteDepth)
+			--m_Scene->m_ScriptWriteDepth;
+		m_Valid = false;
+	}
+
+	Entity Scene::CreateEntityShell(const std::string& name)
+	{
+		AssertOwnerThread();
+		if (m_State == SceneState::Stopping || m_StopRequested)
+			throw std::logic_error("Cannot create an entity shell while the scene is stopping");
+		// 回调深度是本契约唯一放行的检查;活动场景在回调外仍只接受提交点写入。
+		if (m_CallbackDepth == 0 && IsActive() && !m_Committing)
+			throw std::logic_error("An active scene accepts structural writes only while committing a command or inside a script callback");
+		const entt::entity handle = m_Registry.create();
+		m_Registry.emplace<TagComponent>(handle, name);
+		m_Registry.emplace<UUIDComponent>(handle, UUID());
+		Entity entity(this, handle);
+		NotifyComponentAdded(entity, entt::type_id<TagComponent>().hash());
+		NotifyComponentAdded(entity, entt::type_id<UUIDComponent>().hash());
+		return entity;
+	}
+
+	bool Scene::IsInsideScriptCallback() const
+	{
+		AssertOwnerThread();
+		return m_CallbackDepth != 0;
+	}
+
+	bool Scene::IsVisibleToCurrentScriptUpdate(entt::entity) const
+	{
+		AssertOwnerThread();
+		return true;
+	}
+
+	entt::registry& Scene::GetRegistry() { AssertStructuralWrite(); return m_Registry; }
+	const entt::registry& Scene::GetRegistry() const { AssertOwnerThread(); return m_Registry; }
+
+	// P4-U13b:Prefab 实例注册表的访问器。它们只碰 std::vector 成员,不写 entt 注册表结构,
+	// 所以只做线程归属检查(与 GetWorldSettings 同类);结构写保护仍由 GetRegistry 承担。
+	std::vector<Gameplay::PrefabInstanceRecord>& Scene::PrefabInstances()
+	{
+		AssertOwnerThread();
+		return m_PrefabInstances;
+	}
+
+	const std::vector<Gameplay::PrefabInstanceRecord>& Scene::PrefabInstances() const
+	{
+		AssertOwnerThread();
+		return m_PrefabInstances;
+	}
+
+	Gameplay::PrefabInstanceRecord* Scene::FindPrefabInstance(entt::entity root)
+	{
+		AssertOwnerThread();
+		for (Gameplay::PrefabInstanceRecord& record : m_PrefabInstances)
+			if (record.Root == root)
+				return &record;
+		return nullptr;
+	}
+
+	const Gameplay::PrefabInstanceRecord* Scene::FindPrefabInstance(entt::entity root) const
+	{
+		AssertOwnerThread();
+		for (const Gameplay::PrefabInstanceRecord& record : m_PrefabInstances)
+			if (record.Root == root)
+				return &record;
+		return nullptr;
+	}
+
+	Gameplay::PrefabInstanceRecord& Scene::AddPrefabInstance(const std::string& prefabPath, entt::entity root)
+	{
+		AssertOwnerThread();
+		if (Gameplay::PrefabInstanceRecord* existing = FindPrefabInstance(root))
+		{
+			existing->PrefabPath = prefabPath;
+			return *existing;
+		}
+		Gameplay::PrefabInstanceRecord record;
+		record.PrefabPath = prefabPath;
+		record.Root = root;
+		m_PrefabInstances.push_back(std::move(record));
+		return m_PrefabInstances.back();
+	}
+
+	bool Scene::RemovePrefabInstance(entt::entity root)
+	{
+		AssertOwnerThread();
+		for (auto it = m_PrefabInstances.begin(); it != m_PrefabInstances.end(); ++it)
+		{
+			if (it->Root != root)
+				continue;
+			m_PrefabInstances.erase(it);
+			return true;
+		}
+		return false;
+	}
+
+	void Scene::SetUnknownComponentFragment(const UUID& entity, const std::string& yaml)
+	{
+		AssertOwnerThread();
+		if (static_cast<uint64_t>(entity) == 0)
+			return;
+		if (yaml.empty())
+			m_UnknownComponentNodes.erase(entity);
+		else
+			m_UnknownComponentNodes[entity] = yaml;
+	}
+
+	void Scene::AddPendingPrefabInstance(Gameplay::PendingPrefabInstanceRecord record)
+	{
+		AssertOwnerThread();
+		if (record.RootUuid == 0)
+			return;
+		m_PendingPrefabRecords.push_back(std::move(record));
+	}
+
+	bool Scene::IsPendingDestroy(entt::entity entity) const
+	{
+		AssertOwnerThread();
+		return m_Registry.valid(entity) && m_Registry.all_of<PendingDestroyTag>(entity);
+	}
+
+	bool Scene::IsPendingRemoval(entt::entity entity, entt::id_type component) const
+	{
+		auto it = m_PendingRemove.find(entity);
+		return it != m_PendingRemove.end() && it->second.count(component) != 0;
+	}
+
+	bool Scene::IsSourceAlive(const ScriptSource& source) const
+	{
+		if (source.EntityHandle == entt::null) return true;
+		if (!m_Registry.valid(source.EntityHandle) || IsPendingDestroy(source.EntityHandle) ||
+			IsPendingRemoval(source.EntityHandle, source.Component)) return false;
+		return true;
+	}
+
+	bool Scene::DeferStructuralChange(std::function<void(Scene&)> command)
+	{
+		AssertOwnerThread();
+		if (!command || m_State == SceneState::Stopping || m_StopRequested || m_CallbackSource.Destroying) return false;
+		if (!IsActive() && !m_CallbackDepth && !m_Committing)
+		{
+			try { command(*this); return true; }
+			catch (const std::exception& error) { Report(std::string("[Scene] StructuralChange: ") + error.what()); }
+			catch (...) { Report("[Scene] StructuralChange: unknown exception"); }
+			return false;
+		}
+		m_Changes.push_back({ ChangeKind::General, std::move(command), m_CallbackSource });
+		return true;
+	}
+
+	void Scene::RequestDestroy(entt::entity entity)
+	{
+		AssertOwnerThread();
+		if (!m_Registry.valid(entity) || m_Registry.all_of<PendingDestroyTag>(entity)) return;
+		m_Registry.emplace<PendingDestroyTag>(entity);
+		m_Changes.push_back({ ChangeKind::DestroyEntity, {}, {}, entity });
+		if (!IsActive() && !m_CallbackDepth && !m_Committing) FlushStructuralChanges();
+	}
+
+	void Scene::RequestRemove(entt::entity entity, entt::id_type component)
+	{
+		AssertOwnerThread();
+		if (!m_Registry.valid(entity) || IsPendingDestroy(entity) || IsPendingRemoval(entity, component)) return;
+		Entity target(this, entity);
+		if (!target.HasComponent(component)) return;
+		std::string reason;
+		if (!target.CanRemoveComponent(component, &reason)) throw std::logic_error(reason);
+		m_PendingRemove[entity].insert(component);
+		m_Changes.push_back({ ChangeKind::RemoveComponent, {}, {}, entity, component });
+		if (!IsActive() && !m_CallbackDepth && !m_Committing) FlushStructuralChanges();
+	}
+
+	bool Scene::CanApplyModuleReload() const
+	{
+		// 与 FlushStructuralChanges 的守卫同源:回调内/结构提交点内禁止改脚本实例,
+		// 停止流程中也不允许(即将销毁全部实例)。
+		return m_CallbackDepth == 0 && !m_Committing && m_ScriptWriteDepth == 0 && !m_StopRequested
+			&& m_State != SceneState::Stopping;
+	}
+
+	void Scene::FlushStructuralChanges()
+	{
+		AssertOwnerThread();
+		if (m_CallbackDepth || m_Committing || m_ScriptWriteDepth)
+			throw std::logic_error("Structural changes cannot be recursively committed");
+		if (m_StopRequested) { StopScene(); return; }
+		std::vector<StructuralChange> batch;
+		batch.swap(m_Changes);
+		m_Committing = true;
+		for (auto& change : batch)
+		{
+			const auto previousSource = m_CallbackSource;
+			// Commands submitted by a command retain its original script owner too.
+			m_CallbackSource = change.Source;
+			try
+			{
+				switch (change.Kind)
+				{
+					case ChangeKind::General:
+						if (m_State != SceneState::Stopping && IsSourceAlive(change.Source)) change.Command(*this);
+						break;
+					case ChangeKind::DestroyEntity: DestroyEntityNow(change.Target); break;
+					case ChangeKind::RemoveComponent: RemoveComponentNow(change.Target, change.Component); break;
+				}
+			}
+			catch (const std::exception& error) { FaultSource(change.Source, error.what()); }
+			catch (...) { FaultSource(change.Source, "Unknown exception in structural command"); }
+			m_CallbackSource = previousSource;
+			if (m_StopRequested) break;
+		}
+		m_Committing = false;
+		if (m_StopRequested) StopScene();
+	}
+
+	void Scene::InvokeCallback(const ScriptSource& source, const std::function<void()>& callback)
+	{
+		const auto previous = m_CallbackSource;
+		m_CallbackSource = source;
+		++m_CallbackDepth;
+		try { callback(); }
+		catch (...) { --m_CallbackDepth; m_CallbackSource = previous; throw; }
+		--m_CallbackDepth;
+		m_CallbackSource = previous;
+	}
+
+	void Scene::FaultSource(const ScriptSource& source, const std::string& error)
+	{
+		Report("[Scene] entity=" + std::to_string(static_cast<uint32_t>(source.EntityHandle)) +
+			" phase=StructuralChange: " + error);
+	}
+
+
+
+	void Scene::DestroyPhysicsJoint(entt::entity entity)
+	{
+		if (!m_Registry.try_get<JointComponent>(entity)) return;
+		const auto it = m_PhysicsJoints2D.find(entity);
+		if (it == m_PhysicsJoints2D.end()) return;
+		const b2JointId jointId = it->second;
+		m_PhysicsJoints2D.erase(it);   // 先断引用再销毁(重入/失败都不留悬垂)
+		if (b2Joint_IsValid(jointId)) b2DestroyJoint(jointId, true);
+	}
+
+	// 反向清理:某实体被删时,其它实体指向它的关节也要拆掉(否则 Box2D 里会留下悬垂 pair)。
+	void Scene::DestroyJointsReferencing(entt::entity entity)
+	{
+		for (const entt::entity owner : m_Registry.view<JointComponent>())
+			if (m_Registry.get<JointComponent>(owner).Connected == entity)
+				DestroyPhysicsJoint(owner);
+		for (const entt::entity owner : m_Registry.view<DistanceJoint2DComponent>())
+			if (m_Registry.get<DistanceJoint2DComponent>(owner).ConnectedEntity == entity)
+				DestroyPhysicsJoint2D(owner);
+		for (const entt::entity owner : m_Registry.view<RevoluteJoint2DComponent>())
+			if (m_Registry.get<RevoluteJoint2DComponent>(owner).ConnectedEntity == entity)
+				DestroyPhysicsJoint2D(owner);
+		for (const entt::entity owner : m_Registry.view<PrismaticJoint2DComponent>())
+			if (m_Registry.get<PrismaticJoint2DComponent>(owner).ConnectedEntity == entity)
+				DestroyPhysicsJoint2D(owner);
+		for (const entt::entity owner : m_Registry.view<WheelJoint2DComponent>())
+			if (m_Registry.get<WheelJoint2DComponent>(owner).ConnectedEntity == entity)
+				DestroyPhysicsJoint2D(owner);
+	}
+
+	void Scene::DestroyPhysicsJoint2D(entt::entity entity)
+	{
+		const auto it = m_PhysicsJoints2D.find(entity);
+		if (it != m_PhysicsJoints2D.end())
+		{
+			if (b2Joint_IsValid(it->second))
+				b2DestroyJoint(it->second, true);
+			m_PhysicsJoints2D.erase(it);
+		}
+	}
+
+	void Scene::EnsurePhysicsJoint2D(entt::entity entity)
+	{
+		if (!m_Registry.valid(entity) || !b2World_IsValid(m_PhysicsWorldId)) return;
+		if (b2Joint_IsValid(FindJoint2D(m_PhysicsJoints2D, entity))) return;
+
+		const b2BodyId ownerBodyId = FindBody2D(m_PhysicsBodies2D, entity);
+		if (!b2Body_IsValid(ownerBodyId)) return;
+
+		if (const auto* dist = m_Registry.try_get<DistanceJoint2DComponent>(entity))
+		{
+			const entt::entity other = dist->ConnectedEntity;
+			if (!m_Registry.valid(other) || other == entity) return;
+			b2BodyId otherBodyId = FindBody2D(m_PhysicsBodies2D, other);
+			if (!b2Body_IsValid(otherBodyId)) return;
+
+			b2DistanceJointDef def = b2DefaultDistanceJointDef();
+			def.base.bodyIdA = ownerBodyId;
+			def.base.bodyIdB = otherBodyId;
+			def.base.localFrameA = { { dist->AnchorSelf.x, dist->AnchorSelf.y }, b2Rot_identity };
+			def.base.localFrameB = { { dist->AnchorOther.x, dist->AnchorOther.y }, b2Rot_identity };
+
+			const b2Vec2 worldA = b2Body_GetWorldPoint(ownerBodyId, { dist->AnchorSelf.x, dist->AnchorSelf.y });
+			const b2Vec2 worldB = b2Body_GetWorldPoint(otherBodyId, { dist->AnchorOther.x, dist->AnchorOther.y });
+			def.length = b2Distance(worldA, worldB);
+
+			if (dist->EnableLimit)
+			{
+				def.enableLimit = true;
+				def.minLength = dist->MinDistance >= 0.0f ? dist->MinDistance : def.length;
+				def.maxLength = dist->MaxDistance >= dist->MinDistance ? dist->MaxDistance : def.length;
+			}
+			if (dist->EnableSpring && dist->Hertz > 0.0f)
+			{
+				def.enableSpring = true;
+				def.hertz = dist->Hertz;
+				def.dampingRatio = dist->DampingRatio;
+			}
+			b2JointId jointId = b2CreateDistanceJoint(m_PhysicsWorldId, &def);
+			if (b2Joint_IsValid(jointId))
+			{
+				b2Joint_SetCollideConnected(jointId, dist->EnableCollision);
+				m_PhysicsJoints2D[entity] = jointId;
+			}
+			return;
+		}
+
+		if (const auto* rev = m_Registry.try_get<RevoluteJoint2DComponent>(entity))
+		{
+			const entt::entity other = rev->ConnectedEntity;
+			if (!m_Registry.valid(other) || other == entity) return;
+			b2BodyId otherBodyId = FindBody2D(m_PhysicsBodies2D, other);
+			if (!b2Body_IsValid(otherBodyId)) return;
+
+			b2RevoluteJointDef def = b2DefaultRevoluteJointDef();
+			def.base.bodyIdA = ownerBodyId;
+			def.base.bodyIdB = otherBodyId;
+			def.base.localFrameA = { { rev->AnchorSelf.x, rev->AnchorSelf.y }, b2Rot_identity };
+			def.base.localFrameB = { { rev->AnchorOther.x, rev->AnchorOther.y }, b2Rot_identity };
+
+			if (rev->EnableLimit)
+			{
+				def.enableLimit = true;
+				def.lowerAngle = glm::radians(rev->LowerAngle);
+				def.upperAngle = glm::radians(rev->UpperAngle);
+			}
+			if (rev->EnableMotor)
+			{
+				def.enableMotor = true;
+				def.motorSpeed = glm::radians(rev->MotorSpeed);
+				def.maxMotorTorque = rev->MaxMotorTorque;
+			}
+			b2JointId jointId = b2CreateRevoluteJoint(m_PhysicsWorldId, &def);
+			if (b2Joint_IsValid(jointId))
+			{
+				b2Joint_SetCollideConnected(jointId, rev->EnableCollision);
+				m_PhysicsJoints2D[entity] = jointId;
+			}
+			return;
+		}
+
+		if (const auto* prism = m_Registry.try_get<PrismaticJoint2DComponent>(entity))
+		{
+			const entt::entity other = prism->ConnectedEntity;
+			if (!m_Registry.valid(other) || other == entity) return;
+			b2BodyId otherBodyId = FindBody2D(m_PhysicsBodies2D, other);
+			if (!b2Body_IsValid(otherBodyId)) return;
+
+			b2PrismaticJointDef def = b2DefaultPrismaticJointDef();
+			def.base.bodyIdA = ownerBodyId;
+			def.base.bodyIdB = otherBodyId;
+
+			glm::vec2 axis = glm::length(prism->Axis) > 1e-5f ? glm::normalize(prism->Axis) : glm::vec2(1.0f, 0.0f);
+			const float angle = std::atan2(axis.y, axis.x);
+			const b2Rot rot = b2MakeRot(angle);
+
+			def.base.localFrameA = { { prism->AnchorSelf.x, prism->AnchorSelf.y }, rot };
+			def.base.localFrameB = { { prism->AnchorOther.x, prism->AnchorOther.y }, rot };
+
+			if (prism->EnableLimit)
+			{
+				def.enableLimit = true;
+				def.lowerTranslation = prism->LowerTranslation;
+				def.upperTranslation = prism->UpperTranslation;
+			}
+			if (prism->EnableMotor)
+			{
+				def.enableMotor = true;
+				def.motorSpeed = prism->MotorSpeed;
+				def.maxMotorForce = prism->MaxMotorForce;
+			}
+			b2JointId jointId = b2CreatePrismaticJoint(m_PhysicsWorldId, &def);
+			if (b2Joint_IsValid(jointId))
+			{
+				b2Joint_SetCollideConnected(jointId, prism->EnableCollision);
+				m_PhysicsJoints2D[entity] = jointId;
+			}
+			return;
+		}
+
+		if (const auto* wheel = m_Registry.try_get<WheelJoint2DComponent>(entity))
+		{
+			const entt::entity other = wheel->ConnectedEntity;
+			if (!m_Registry.valid(other) || other == entity) return;
+			b2BodyId otherBodyId = FindBody2D(m_PhysicsBodies2D, other);
+			if (!b2Body_IsValid(otherBodyId)) return;
+
+			b2WheelJointDef def = b2DefaultWheelJointDef();
+			def.base.bodyIdA = ownerBodyId;
+			def.base.bodyIdB = otherBodyId;
+
+			glm::vec2 axis = glm::length(wheel->SuspensionAxis) > 1e-5f ? glm::normalize(wheel->SuspensionAxis) : glm::vec2(0.0f, 1.0f);
+			const float angle = std::atan2(axis.y, axis.x);
+			const b2Rot rot = b2MakeRot(angle);
+
+			def.base.localFrameA = { { wheel->AnchorSelf.x, wheel->AnchorSelf.y }, rot };
+			def.base.localFrameB = { { wheel->AnchorOther.x, wheel->AnchorOther.y }, rot };
+
+			if (wheel->Hertz > 0.0f)
+			{
+				def.enableSpring = true;
+				def.hertz = wheel->Hertz;
+				def.dampingRatio = wheel->DampingRatio;
+			}
+			if (wheel->EnableLimit)
+			{
+				def.enableLimit = true;
+				def.lowerTranslation = wheel->LowerTranslation;
+				def.upperTranslation = wheel->UpperTranslation;
+			}
+			if (wheel->EnableMotor)
+			{
+				def.enableMotor = true;
+				def.motorSpeed = glm::radians(wheel->MotorSpeed);
+				def.maxMotorTorque = wheel->MaxMotorTorque;
+			}
+			b2JointId jointId = b2CreateWheelJoint(m_PhysicsWorldId, &def);
+			if (b2Joint_IsValid(jointId))
+			{
+				b2Joint_SetCollideConnected(jointId, wheel->EnableCollision);
+				m_PhysicsJoints2D[entity] = jointId;
+			}
+			return;
+		}
+	}
+
+	void Scene::EnsurePhysicsJoint(entt::entity entity)
+	{
+		if (!m_Registry.valid(entity)) return;
+		auto* joint = m_Registry.try_get<JointComponent>(entity);
+		if (!joint) return;
+		// 已经建好(重复调用):与旧 BuildRuntimeJoint 的早退守卫同义。
+		if (b2Joint_IsValid(FindJoint2D(m_PhysicsJoints2D, entity))) return;
+
+		const bool has3D = m_Registry.all_of<RigidBody3DComponent>(entity);
+		if (m_Physics3D && has3D)
+		{
+			// 3D:交给 Jolt 约束。两端都必须已有活刚体,否则 Physics3DWorld::CreateJoint 会抛
+			// 可读错误 —— 这里先自己判一次,把"还没就绪"和"配置错误"分开(前者静默跳过)。
+			const entt::entity other = joint->Connected;
+			if (!m_Registry.valid(other) || other == entity) return;
+			if (!m_Registry.all_of<RigidBody3DComponent>(other)) return;
+			m_Physics3D->CreateJoint(entity, other, static_cast<int>(joint->Type),
+				joint->AnchorSelf, joint->AnchorOther, joint->Axis,
+				joint->MinDistance, joint->MaxDistance, joint->EnableCollision);
+			return;
+		}
+
+		if (!b2World_IsValid(m_PhysicsWorldId))
+		{
+			m_PhysicsJoints2D.erase(entity);
+			return;
+		}
+		const b2JointId created = BuildRuntimeJoint(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, entity);
+		// 目标还没就绪(对方没有活刚体/组件还没挂全):留空,下一次 Start 或补挂时再建。
+		if (b2Joint_IsValid(created)) m_PhysicsJoints2D[entity] = created;
+		else m_PhysicsJoints2D.erase(entity);
+	}
+
+	void Scene::DestroyPhysicsBody(entt::entity entity)
+	{
+		if (!m_Registry.try_get<RigidBody2DComponent>(entity)) return;
+		const auto it = m_PhysicsBodies2D.find(entity);
+		if (it == m_PhysicsBodies2D.end()) return;
+		const b2BodyId bodyId = it->second;
+		// P5:销毁"接触/重叠中"的刚体时,存活方必须收到配对的 End。
+		// 实测(tests/World/PhysicsEventsTests.cpp 的 destroy-while-touching):Box2D 在
+		// b2DestroyBody 时**不发** end 事件(3D 的 Jolt 会发)—— 所以这里在销毁前主动补发,
+		// 否则按 Begin/Persist 维护集合的订阅者会留下悬挂条目。
+		if (b2Body_IsValid(bodyId))
+		{
+			const int capacity = b2Body_GetContactCapacity(bodyId);
+			if (capacity > 0)
+			{
+				std::vector<b2ContactData> contacts(static_cast<size_t>(capacity));
+				const int count = b2Body_GetContactData(bodyId, contacts.data(), capacity);
+				for (int index = 0; index < count; ++index)
+				{
+					const b2ContactData& data = contacts[index];
+					const entt::entity entityA = ResolveShapeEntity(data.shapeIdA);
+					const entt::entity entityB = ResolveShapeEntity(data.shapeIdB);
+					if (entityA == entt::null || entityB == entt::null)
+						continue;
+					const bool sensorA = b2Shape_IsValid(data.shapeIdA) && b2Shape_IsSensor(data.shapeIdA);
+					const bool sensorB = b2Shape_IsValid(data.shapeIdB) && b2Shape_IsSensor(data.shapeIdB);
+					if (sensorA || sensorB)
+					{
+						Physics::TriggerEvent event;
+						event.SensorEntity = sensorA ? entityA : entityB;
+						event.OtherEntity = sensorA ? entityB : entityA;
+						event.Phase = Physics::ContactPhase::End;
+						m_TriggerEvents.push_back(event);
+						m_SensorOverlaps2D.erase(PackEntityPair(event.SensorEntity, event.OtherEntity));
+						continue;
+					}
+					Physics::ContactEvent event;
+					event.EntityA = entityA;
+					event.EntityB = entityB;
+					event.Phase = Physics::ContactPhase::End;
+					m_ContactEvents.push_back(event);
+				}
+			}
+		}
+		// 先把引用摘掉,再销毁 Box2D 刚体(失败/重入都不会留下悬垂句柄)。
+		m_PhysicsBodies2D.erase(it);
+		m_PhysicsFilter2D.erase(entity);
+		if (b2Body_IsValid(bodyId)) b2DestroyBody(bodyId);
+	}
+
+	// ---- W3f:2D 物理运行时 API ----
+	bool Scene::IsPhysics2DRunning() const
+	{
+		return b2World_IsValid(m_PhysicsWorldId);
+	}
+
+	// 组件 id 走 schema 的 StorageBinding(entt 类型 hash 已隐式注册,取不到不代表"没有该组件")。
+	bool Scene::TryGetPhysicsBody(entt::entity entity, b2BodyId* bodyId, std::string* error)
+	{
+		auto Fail = [&](const std::string& message)
+		{
+			if (error) *error = message;
+			return false;
+		};
+		if (bodyId) *bodyId = b2_nullBodyId;
+		if (error) error->clear();
+		if (!m_Registry.valid(entity))
+			return Fail("requires a live entity");
+		const Schema::TypeSchema* schema = m_Context->Schemas().Find("World::RigidBody2DComponent");
+		if (!schema || !schema->Storage)
+			return Fail("requires the RigidBody2DComponent schema to be registered");
+		if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+			return Fail("requires a 2D rigid body; this entity has no RigidBody2DComponent");
+		if (!b2World_IsValid(m_PhysicsWorldId))
+			return Fail("requires a running 2D physics world; start the runtime (Scene:OnRuntimeStart) first");
+		const b2BodyId bodyId2D = FindBody2D(m_PhysicsBodies2D, entity);
+		if (!b2Body_IsValid(bodyId2D))
+			return Fail("has a RigidBody2DComponent but no live Box2D body; the component was not added to the running world");
+		if (bodyId) *bodyId = bodyId2D;
+		return true;
+	}
+
+	void Scene::RegisterPlatformDropThrough(entt::entity platform, entt::entity target, float duration)
+	{
+		if (duration <= 0.0f) return;
+		for (auto& record : m_PlatformDropThroughs)
+		{
+			if (record.Platform == platform && record.Target == target)
+			{
+				record.RemainingTime = std::max(record.RemainingTime, duration);
+				return;
+			}
+		}
+		m_PlatformDropThroughs.push_back({ platform, target, duration });
+	}
+
+	bool Scene::IsPlatformDropThroughActive(entt::entity platform, entt::entity target) const
+	{
+		for (const auto& record : m_PlatformDropThroughs)
+		{
+			if (record.Target == target && (record.Platform == platform || record.Platform == entt::null))
+			{
+				if (record.RemainingTime > 0.0f)
+					return true;
+			}
+		}
+		return false;
+	}
+
+	b2BodyId Scene::GetPhysicsBody2D(entt::entity entity) const
+	{
+		return FindBody2D(m_PhysicsBodies2D, entity);
+	}
+
+	b2JointId Scene::GetPhysicsJoint2D(entt::entity entity) const
+	{
+		return FindJoint2D(m_PhysicsJoints2D, entity);
+	}
+
+	void Scene::SyncPhysicsBodyFromTransform(entt::entity entity)
+	{
+		b2BodyId bodyId = b2_nullBodyId;
+		std::string error;
+		if (!TryGetPhysicsBody(entity, &bodyId, &error))
+			throw std::logic_error("Entity:SyncPhysicsBody " + error);
+		auto* transform = m_Registry.try_get<TransformComponent>(entity);
+		if (!transform)
+			throw std::logic_error("Entity:SyncPhysicsBody requires a TransformComponent");
+		b2Body_SetTransform(bodyId, { transform->Location.x, transform->Location.y }, b2MakeRot(transform->GetEulerAngles().z));
+		b2Body_SetAwake(bodyId, true);
+	}
+
+	void Scene::EnsurePhysicsBody(entt::entity entity)
+	{
+		if (!m_Registry.valid(entity)) return;
+		auto* rigidBody = m_Registry.try_get<RigidBody2DComponent>(entity);
+		if (!rigidBody) return;
+		// P6:运行时补建刚体 ⇒ 同步补插值状态(本方法是结构提交点,允许结构写)。
+		if (m_PhysicsInterpolationEnabled && !m_Registry.all_of<PhysicsInterpolationState>(entity))
+			m_Registry.emplace<PhysicsInterpolationState>(entity);
+		if (!b2World_IsValid(m_PhysicsWorldId))
+		{
+			// 世界未启动:AddComponent 只落组件配置;下一次 OnRuntimeStart 会照配置建刚体。
+			m_PhysicsBodies2D.erase(entity);
+			return;
+		}
+		if (BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity)) return;
+		// 已存在的刚体:组件是唯一事实源,类型在脚本侧改过后同步给 Box2D
+		// (含 shape 的质量/惯量重算)。Transform 保持 Box2D 的权威状态,不在这里回推。
+		const b2BodyId bodyId = FindBody2D(m_PhysicsBodies2D, entity);
+		if (!b2Body_IsValid(bodyId)) return;
+		b2BodyType box2dType = b2_staticBody;
+		switch (rigidBody->Type)
+		{
+			case RigidBody2DComponent::BodyType::Static: box2dType = b2_staticBody; break;
+			case RigidBody2DComponent::BodyType::Dynamic: box2dType = b2_dynamicBody; break;
+			case RigidBody2DComponent::BodyType::Kinematic: box2dType = b2_kinematicBody; break;
+		}
+		if (b2Body_GetType(bodyId) != box2dType)
+			b2Body_SetType(bodyId, box2dType);
+
+		SyncBodyFilter2D(entity);
+
+		// 3D 侧同口径:运行时改 Layer/Mask 需要重映射 ObjectLayer。
+		if (m_Physics3D)
+			m_Physics3D->RefreshBodyFilter(entity);
+	}
+
+	// P5:运行时改 Layer/Mask ⇒ 逐 shape 重设 filter。旧实现只在建体时写一次 ⇒ 之后改组件
+	// **静默不生效**。这里按"组件值 vs 建体时记录"的整数比较做幂等同步;任何写入路径
+	// (脚本/属性面板/读档/复制)都因此生效。
+	void Scene::SyncBodyFilter2D(entt::entity entity)
+	{
+		const auto* rigidBody = m_Registry.try_get<RigidBody2DComponent>(entity);
+		if (rigidBody == nullptr) return;
+		const b2BodyId bodyId = FindBody2D(m_PhysicsBodies2D, entity);
+		if (!b2Body_IsValid(bodyId)) return;
+
+		const uint64_t filter = (static_cast<uint64_t>(rigidBody->Layer) << 32) |
+			static_cast<uint64_t>(rigidBody->Mask);
+		const auto recorded = m_PhysicsFilter2D.find(entity);
+		if (recorded != m_PhysicsFilter2D.end() && recorded->second == filter)
+			return;
+
+		const int shapeCount = b2Body_GetShapeCount(bodyId);
+		if (shapeCount <= 0)
+			return;
+		std::vector<b2ShapeId> shapes(static_cast<size_t>(shapeCount));
+		const int written = b2Body_GetShapes(bodyId, shapes.data(), shapeCount);
+		for (int index = 0; index < written; ++index)
+		{
+			b2Filter shapeFilter = b2Shape_GetFilter(shapes[index]);
+			shapeFilter.categoryBits = rigidBody->Layer;
+			shapeFilter.maskBits = rigidBody->Mask;
+			b2Shape_SetFilter(shapes[index], shapeFilter);
+		}
+		m_PhysicsFilter2D[entity] = filter;
+	}
+
+	void Scene::DestroyEntityNow(entt::entity entity)
+	{
+		if (m_Registry.valid(entity))
+		{
+			DestroyJointsReferencing(entity);
+			DestroyPhysicsJoint(entity);
+			DestroyPhysicsBody(entity);
+			if (m_Physics3D) { m_Physics3D->DestroyJoints(entity); m_Physics3D->DestroyBody(entity); }
+			m_Registry.destroy(entity);
+		}
+		m_PendingRemove.erase(entity);
+	}
+
+	void Scene::RemoveComponentNow(entt::entity entity, entt::id_type component)
+	{
+		if (m_Registry.valid(entity) && !IsPendingDestroy(entity))
+		{
+			Entity target(this, entity);
+			std::string reason;
+			if (target.HasComponent(component) && target.CanRemoveComponent(component, &reason))
+			{
+				if (component == entt::type_id<RigidBody2DComponent>().hash()) DestroyPhysicsBody(entity);
+				else if (component == entt::type_id<RigidBody3DComponent>().hash()) { if (m_Physics3D) m_Physics3D->DestroyBody(entity); }
+				else if (component == entt::type_id<JointComponent>().hash())
+				{
+					DestroyPhysicsJoint(entity);
+					if (m_Physics3D) m_Physics3D->DestroyJoints(entity);
+				}
+				if (auto* storage = m_Registry.storage(component))
+				{
+					storage->remove(entity);
+					NotifyComponentRemoved(target, component);
+				}
+			}
+			else if (!reason.empty()) Report("[Scene] RemoveComponent: " + reason);
+		}
+		auto it = m_PendingRemove.find(entity);
+		if (it != m_PendingRemove.end())
+		{
+			it->second.erase(component);
+			if (it->second.empty()) m_PendingRemove.erase(it);
+		}
+	}
+
+	// ---- PURE-ECS:帧内一次的三个步骤(见 Scene.h 的说明)----
+	void Scene::BeginFrame()
+	{
+		AssertOwnerThread();
+		m_WorldTransformsDone = false;
+		m_AnimationDone = false;
+		m_RenderExtractDone = false;
+		m_InterpolatedWorldsDone = false;
+	}
+
+	void Scene::EnsureWorldTransforms()
+	{
+		AssertOwnerThread();
+		if (m_WorldTransformsDone)
+			return;
+		m_WorldTransformsDone = true;
+		TransformSystem::UpdateWorldTransforms(m_Registry);
+	}
+
+	void Scene::EnsureAnimationAdvanced(Timestep dt)
+	{
+		AssertOwnerThread();
+		if (m_AnimationDone)
+			return;
+		m_AnimationDone = true;
+		// 互斥管线：AnimGraphSystem 驱动带 AnimGraphComponent 的实体；AnimationPlayerSystem 驱动简单播放器实体
+		AnimGraphSystem::Update(*this, dt.GetSeconds());
+		AnimationPlayerSystem::Update(*this, dt.GetSeconds());
+	}
+
+	void Scene::SetRenderExtractSink(IRenderExtractSink* sink)
+	{
+		AssertOwnerThread();
+		m_RenderExtractSink = sink;
+	}
+
+	FrameExtract& Scene::RenderExtract()
+	{
+		if (!m_RenderExtract)
+			m_RenderExtract = std::make_unique<FrameExtract>();
+		return *m_RenderExtract;
+	}
+
+	const FrameExtract& Scene::RenderExtract() const
+	{
+		// const 重载不惰性创建(不可能返回可写引用);没有缓冲时返回一个空壳。
+		static const FrameExtract kEmpty;
+		return m_RenderExtract ? *m_RenderExtract : kEmpty;
+	}
+
+	// P6:物理插值的**层级**合成。语义(与 Unity Rigidbody.interpolation / Bevy
+	// TransformInterpolation 同口径):
+	//   1) 每个实体的渲染局部变换 = 有插值状态 ? 在"上一固定步的局部"与"当前局部"之间插值
+	//      : 当前局部(未受物理驱动的实体本就不变);
+	//   2) 渲染世界矩阵 = 父渲染世界 * 渲染局部(按 InheritTransform)。
+	// 关键:插值作用在**局部**变换上,所以父子的相对关系在插值后仍然成立 ——
+	// 旧实现插值世界矩阵,子实体用权威世界矩阵,子相对父每固定步跳一次(可见抖动)。
+	// 只有"自身被插值"或"祖先被插值"的实体才需要槽位;其余实体的权威矩阵就是渲染矩阵。
+	void Scene::EnsureInterpolatedWorldTransforms(float alpha)
+	{
+		AssertOwnerThread();
+		if (m_InterpolatedWorldsDone)
+			return;
+		m_InterpolatedWorldsDone = true;
+
+		FrameExtract& extract = RenderExtract();
+		extract.InterpolatedModels.clear();
+		extract.InterpolatedIndex.clear();
+		if (!m_PhysicsInterpolationEnabled)
+			return;
+
+		extract.InterpolatedModels.reserve(m_Registry.view<PhysicsInterpolationState>().size() + 8);
+
+		// 前序遍历(与 Hierarchy::UpdateWorldTransforms 同序):保证父的渲染世界矩阵先算好。
+		struct Frame { entt::entity Entity; glm::mat4 ParentWorld; bool ParentInterpolated; };
+		std::vector<Frame> stack;
+		for (const entt::entity entity : m_Registry.view<TransformComponent>())
+		{
+			const auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);
+			if (!hierarchy || hierarchy->Parent == entt::null || !m_Registry.valid(hierarchy->Parent))
+				stack.push_back({ entity, glm::mat4(1.0f), false });
+		}
+
+		while (!stack.empty())
+		{
+			const Frame frame = stack.back();
+			stack.pop_back();
+			const entt::entity entity = frame.Entity;
+			const auto* transform = m_Registry.try_get<TransformComponent>(entity);
+			if (!transform)
+				continue;
+
+			const auto* state = m_Registry.try_get<PhysicsInterpolationState>(entity);
+			const bool interpolateSelf = state != nullptr && state->Valid;
+			const glm::mat4 currentLocal = transform->GetLocalMatrix();
+			const glm::mat4 renderLocal = interpolateSelf
+				? InterpolateRigidTransform(state->PreviousLocation, state->PreviousRotation,
+					state->PreviousScale, transform->Location, transform->Rotation, transform->Scale, alpha)
+				: currentLocal;
+
+			const auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);
+			const bool inherit = !hierarchy || hierarchy->InheritTransform;
+			const glm::mat4 renderWorld = inherit ? frame.ParentWorld * renderLocal : renderLocal;
+
+			// 该实体的渲染矩阵是否与权威世界矩阵不同(需要给 draw 一个替代矩阵)。
+			const bool differs = interpolateSelf || (inherit && frame.ParentInterpolated);
+			if (differs)
+			{
+				extract.InterpolatedIndex.emplace(entity, static_cast<uint32_t>(extract.InterpolatedModels.size()));
+				extract.InterpolatedModels.push_back(renderWorld);
+			}
+
+			for (const entt::entity child : Hierarchy::ChildrenOf(m_Registry, entity))
+				if (m_Registry.valid(child))
+					stack.push_back({ child, renderWorld, differs });
+		}
+	}
+
+	void Scene::EnsureRenderExtract(float deltaSeconds)
+	{
+		AssertOwnerThread();
+		if (m_RenderExtractDone)
+			return;
+		m_RenderExtractDone = true;
+		if (!m_RenderExtractSink)
+			return;   // 无渲染宿主(纯逻辑测试/工具):抽取不是必需的
+		RenderExtract().Clear();
+		m_RenderExtractSink->ExtractScene(*this, deltaSeconds);
+		BuildOctree();
+	}
+
+	void Scene::BuildOctree()
+	{
+		std::vector<OctreeElement> elements;
+
+		if (m_RenderExtract && !m_RenderExtract->Draws.empty())
+		{
+			std::unordered_map<uint32_t, size_t> entityMap;
+			for (const auto& draw : m_RenderExtract->Draws)
+			{
+				const uint32_t entId = static_cast<uint32_t>(draw.Entity);
+				auto it = entityMap.find(entId);
+				if (it == entityMap.end())
+				{
+					entityMap[entId] = elements.size();
+					OctreeElement elem;
+					elem.EntityId = entId;
+					elem.BoundsMin = draw.WorldMin;
+					elem.BoundsMax = draw.WorldMax;
+					elements.push_back(elem);
+				}
+				else
+				{
+					elements[it->second].BoundsMin = glm::min(elements[it->second].BoundsMin, draw.WorldMin);
+					elements[it->second].BoundsMax = glm::max(elements[it->second].BoundsMax, draw.WorldMax);
+				}
+			}
+		}
+		else
+		{
+			auto meshView = m_Registry.view<TransformComponent, MeshRendererComponent>();
+			for (auto entity : meshView)
+			{
+				if (!IsEntityInActiveDataLayers(entity))
+					continue;
+				glm::mat4 modelMat(1.0f);
+				if (const auto* wt = m_Registry.try_get<WorldTransformComponent>(entity))
+					modelMat = wt->Matrix;
+				else
+					modelMat = meshView.get<TransformComponent>(entity).GetLocalMatrix();
+
+				OctreeElement elem;
+				elem.EntityId = static_cast<uint32_t>(entity);
+				glm::vec3 bMin, bMax;
+				TransformAabb(modelMat, glm::vec3(-0.5f), glm::vec3(0.5f), bMin, bMax);
+				elem.BoundsMin = bMin;
+				elem.BoundsMax = bMax;
+				elements.push_back(elem);
+			}
+		}
+
+		auto boxView = m_Registry.view<TransformComponent, BoxCollider3DComponent>();
+		for (auto entity : boxView)
+		{
+			const uint32_t entId = static_cast<uint32_t>(entity);
+			const auto& [tc, box] = boxView.get<TransformComponent, BoxCollider3DComponent>(entity);
+			glm::mat4 modelMat(1.0f);
+			if (const auto* wt = m_Registry.try_get<WorldTransformComponent>(entity))
+				modelMat = wt->Matrix;
+			else
+				modelMat = tc.GetLocalMatrix();
+
+			glm::vec3 bMin, bMax;
+			TransformAabb(modelMat, box.Offset - box.HalfExtents, box.Offset + box.HalfExtents, bMin, bMax);
+
+			bool found = false;
+			for (auto& existing : elements)
+			{
+				if (existing.EntityId == entId)
+				{
+					existing.BoundsMin = glm::min(existing.BoundsMin, bMin);
+					existing.BoundsMax = glm::max(existing.BoundsMax, bMax);
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				OctreeElement elem;
+				elem.EntityId = entId;
+				elem.BoundsMin = bMin;
+				elem.BoundsMax = bMax;
+				elements.push_back(elem);
+			}
+		}
+
+		auto sphereView = m_Registry.view<TransformComponent, SphereCollider3DComponent>();
+		for (auto entity : sphereView)
+		{
+			const uint32_t entId = static_cast<uint32_t>(entity);
+			const auto& [tc, sphere] = sphereView.get<TransformComponent, SphereCollider3DComponent>(entity);
+			glm::mat4 modelMat(1.0f);
+			if (const auto* wt = m_Registry.try_get<WorldTransformComponent>(entity))
+				modelMat = wt->Matrix;
+			else
+				modelMat = tc.GetLocalMatrix();
+
+			glm::vec3 bMin, bMax;
+			TransformAabb(modelMat, sphere.Offset - glm::vec3(sphere.Radius), sphere.Offset + glm::vec3(sphere.Radius), bMin, bMax);
+
+			bool found = false;
+			for (auto& existing : elements)
+			{
+				if (existing.EntityId == entId)
+				{
+					existing.BoundsMin = glm::min(existing.BoundsMin, bMin);
+					existing.BoundsMax = glm::max(existing.BoundsMax, bMax);
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				OctreeElement elem;
+				elem.EntityId = entId;
+				elem.BoundsMin = bMin;
+				elem.BoundsMax = bMax;
+				elements.push_back(elem);
+			}
+		}
+
+		if (elements.empty())
+		{
+			m_Octree.Clear();
+			return;
+		}
+
+		glm::vec3 worldMin(1e9f);
+		glm::vec3 worldMax(-1e9f);
+		for (const auto& elem : elements)
+		{
+			worldMin = glm::min(worldMin, elem.BoundsMin);
+			worldMax = glm::max(worldMax, elem.BoundsMax);
+		}
+		const glm::vec3 center = (worldMin + worldMax) * 0.5f;
+		const float maxDim = std::max({ worldMax.x - worldMin.x, worldMax.y - worldMin.y, worldMax.z - worldMin.z, 20.0f });
+		const float halfSize = std::max(maxDim * 0.5f * 1.1f, 10.0f);
+		m_Octree.Build(elements, center, halfSize, 6, 16);
+	}
+
+	static void SimulateSceneVfx(entt::registry& reg, float dt)
+	{
+		dt = std::clamp(dt, 0.001f, 0.1f);
+		auto& partSys = GetGlobalParticleSystem();
+		for (auto entity : reg.view<VfxComponent>())
+		{
+			auto& vfx = reg.get<VfxComponent>(entity);
+			if (vfx.PlaybackState != VfxPlaybackState::Playing) continue;
+			if (!vfx.Effect.HasPath()) continue;
+
+			const std::string& path = StringPool::Get().PathOf(vfx.Effect.Path);
+			const auto* asset = ParticleAssetRegistry::Get().GetAssetByPath(path);
+			if (!asset)
+			{
+				uint64_t guid = ParticleAssetRegistry::Get().RegisterAsset(path);
+				asset = ParticleAssetRegistry::Get().GetAsset(guid);
+			}
+			if (!asset) continue;
+
+			glm::vec3 pos(0.0f);
+			glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
+			if (const auto* tc = reg.try_get<TransformComponent>(entity))
+			{
+				pos = tc->Location;
+				rot = tc->Rotation;
+			}
+
+			for (size_t i = 0; i < asset->Emitters.size(); ++i)
+			{
+				const auto& em = asset->Emitters[i];
+				if (!em.Enabled) continue;
+				uint32_t poolId = (static_cast<uint32_t>(entity) << 8) | static_cast<uint32_t>(i);
+				auto& pool = partSys.GetPoolForEntity(poolId, em.MaxParticles);
+				if (vfx.Seed != 0) pool.SetSeed(vfx.Seed);
+				pool.SetMaterialSettings(em.Material);
+				pool.SetCollisionSettings(em.Collision);
+
+				ParticleEmitterConfig emComp;
+				emComp.EmissionRate = (em.EmissionMode == VfxEmissionMode::Continuous) ? (em.EmissionRate * vfx.Intensity) : 0.0f;
+				emComp.Lifetime = em.Lifetime;
+				emComp.Speed = em.Speed;
+				emComp.SpeedVariance = em.SpeedVariance;
+				emComp.SizeStart = em.SizeStart;
+				emComp.SizeEnd = em.SizeEnd;
+				emComp.ColorStart = PackColor(em.ColorStart);
+				emComp.ColorEnd = PackColor(em.ColorEnd);
+				emComp.Gravity = em.Gravity;
+				emComp.EmitterType = em.EmitterType;
+				emComp.RenderMode = em.FacingMode;
+				emComp.BlendMode = em.Material.BlendMode;
+				emComp.IsPlaying = (vfx.PlaybackState == VfxPlaybackState::Playing) ? 1 : 0;
+				emComp.Looping = vfx.Looping && asset->Looping;
+				emComp.EmitterDuration = em.EmitterDuration;
+				emComp.Duration = asset->Duration;
+
+				// 【模块化动力学驱动】真正读取 em.Modules 堆栈并驱动全局粒子池！
+				float customDamping = 0.0f;
+				glm::vec3 attractorCenter(0.0f);
+				float attractorStrength = 0.0f;
+				float attractorMinDist = 0.2f;
+				float orbitSpeed = 0.0f;
+				glm::vec3 orbitAxis(0.0f, 1.0f, 0.0f);
+				glm::vec3 orbitCenter(0.0f);
+
+				for (const auto& mod : em.Modules)
+				{
+					if (!mod.Enabled) continue;
+
+					// 0. 发射与生成控制模块 (Emitter Stage)
+					if (mod.Id == "mod.emitter.spawn_rate")
+					{
+						emComp.EmissionRate = mod.GetFloat("SpawnRate", 50.0f) * vfx.Intensity;
+					}
+					else if (mod.Id == "mod.emitter.spawn_burst")
+					{
+						uint32_t bCount = static_cast<uint32_t>(mod.GetFloat("SpawnCount", 1.0f));
+						if (pool.ActiveCount() == 0)
+						{
+							pool.Emit(bCount > 0 ? bCount : 1, emComp, pos, rot);
+						}
+					}
+
+					// 1. 粒子初始化与几何分布模块 (Spawn Stage)
+					else if (mod.Id == "mod.spawn.init_particle")
+					{
+						emComp.Lifetime = mod.GetFloat("Lifetime", 2.0f);
+						emComp.SizeStart = mod.GetFloat("SizeStart", 0.3f);
+						emComp.SizeEnd = mod.GetFloat("SizeEnd", 0.05f);
+						const auto* pCS = mod.FindParam("ColorStart");
+						if (pCS)
+						{
+							if (pCS->Mode == VfxParamMode::RandomRange)
+							{
+								emComp.ColorStart = PackColor(pCS->RandomMinVec);
+								emComp.ColorStartMax = PackColor(pCS->RandomMaxVec);
+							}
+							else
+							{
+								emComp.ColorStart = PackColor(pCS->VecVal);
+								emComp.ColorStartMax = 0;
+							}
+							if (pCS->SplitColor || pCS->Mode == VfxParamMode::Curve)
+							{
+								pool.SetColorCurves(pCS->ColorCurves[0], pCS->ColorCurves[1], pCS->ColorCurves[2], pCS->ColorCurves[3]);
+							}
+							else if (pCS->Mode == VfxParamMode::Curve)
+							{
+								pool.SetColorCurve(pCS->Curve);
+							}
+						}
+						const auto* pCE = mod.FindParam("ColorEnd");
+						if (pCE)
+						{
+							if (pCE->Mode == VfxParamMode::RandomRange)
+							{
+								float r = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+								emComp.ColorEnd = PackColor(glm::mix(pCE->RandomMinVec, pCE->RandomMaxVec, r));
+							}
+							else
+							{
+								emComp.ColorEnd = PackColor(pCE->VecVal);
+							}
+						}
+					}
+					else if (mod.Id == "mod.spawn.cone")
+					{
+						emComp.EmitterType = ParticleEmitterType::Cone;
+						emComp.Speed = mod.GetFloat("InitialSpeed", em.Speed);
+						emComp.SpeedVariance = mod.GetFloat("SpeedVariance", em.SpeedVariance);
+					}
+					else if (mod.Id == "mod.spawn.sphere")
+					{
+						emComp.EmitterType = ParticleEmitterType::Sphere;
+						emComp.Speed = mod.GetFloat("OutwardSpeed", em.Speed);
+					}
+					else if (mod.Id == "mod.spawn.box")
+					{
+						emComp.EmitterType = ParticleEmitterType::Box;
+						emComp.Speed = mod.GetFloat("Speed", em.Speed);
+					}
+					else if (mod.Id == "mod.spawn.point")
+					{
+						emComp.EmitterType = ParticleEmitterType::Point;
+						emComp.Speed = mod.GetFloat("Speed", em.Speed);
+					}
+					else if (mod.Id == "mod.spawn.beam")
+					{
+						glm::vec3 bStart(0.0f, 0.4f, 0.0f);
+						glm::vec3 bEnd(0.0f, 0.4f, 8.0f);
+						float bJitter = 0.25f;
+						if (const auto* pS = mod.FindParam("BeamStart")) bStart = glm::vec3(pS->VecVal);
+						if (const auto* pE = mod.FindParam("BeamEnd")) bEnd = glm::vec3(pE->VecVal);
+						if (const auto* pJ = mod.FindParam("JitterStrength")) bJitter = pJ->FloatVal;
+						pool.SetBeamMode(true, bStart, bEnd, bJitter);
+					}
+					else if (mod.Id == "mod.update.gravity")
+					{
+						const auto* pG = mod.FindParam("Gravity");
+						if (pG)
+						{
+							if (pG->SplitAxes)
+							{
+								pool.SetGravityAxisCurves(pG->AxisCurve[0], pG->AxisCurve[1], pG->AxisCurve[2]);
+								emComp.Gravity = glm::vec3(pG->VecVal);
+							}
+							else if (pG->Mode == VfxParamMode::RandomRange)
+							{
+								float r = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+								emComp.Gravity = glm::mix(glm::vec3(pG->RandomMinVec), glm::vec3(pG->RandomMaxVec), r);
+							}
+							else
+							{
+								emComp.Gravity = glm::vec3(pG->VecVal.x, pG->VecVal.y, pG->VecVal.z);
+							}
+							if (!pG->SplitAxes && pG->Mode == VfxParamMode::Curve)
+							{
+								pool.SetGravityCurve(pG->Curve);
+							}
+						}
+					}
+					else if (mod.Id == "mod.update.drag")
+					{
+						pool.SetLinearDrag(mod.GetFloat("LinearDrag", 0.0f));
+					}
+					else if (mod.Id == "mod.update.curl_noise")
+					{
+						pool.SetCurlNoise(mod.GetFloat("NoiseStrength", 0.0f), mod.GetFloat("NoiseFrequency", 1.0f), 2);
+					}
+					else if (mod.Id == "mod.update.vortex")
+					{
+						const auto* pAx = mod.FindParam("VortexAxis");
+						glm::vec3 vAxis = pAx ? glm::vec3(pAx->VecVal) : glm::vec3(0.0f, 1.0f, 0.0f);
+						pool.SetVortex(mod.GetFloat("VortexStrength", 0.0f), vAxis);
+					}
+					else if (mod.Id == "mod.update.attractor")
+					{
+						const auto* pC = mod.FindParam("AttractorCenter");
+						attractorCenter = pC ? glm::vec3(pC->VecVal) : glm::vec3(0.0f, 1.0f, 0.0f);
+						attractorStrength = mod.GetFloat("AttractorStrength", 0.0f);
+						attractorMinDist = std::max(0.05f, mod.GetFloat("MinDistance", 0.2f));
+					}
+					else if (mod.Id == "mod.update.solve_velocity")
+					{
+						customDamping = mod.GetFloat("SpeedDamping", 0.0f);
+					}
+					else if (mod.Id == "mod.spawn.ring")
+					{
+						emComp.EmitterType = ParticleEmitterType::Circle;
+					}
+					else if (mod.Id == "mod.update.scale_over_life")
+					{
+						emComp.SizeStart = mod.GetFloat("StartScale", emComp.SizeStart);
+						emComp.SizeEnd = mod.GetFloat("EndScale", emComp.SizeEnd);
+					}
+					else if (mod.Id == "mod.update.color_over_life")
+					{
+						const auto* pCS = mod.FindParam("ColorStart");
+						if (pCS) emComp.ColorStart = PackColor(pCS->VecVal);
+						const auto* pCE = mod.FindParam("ColorEnd");
+						if (pCE) emComp.ColorEnd = PackColor(pCE->VecVal);
+						for (const auto& p : mod.Parameters)
+						{
+							if (p.SplitColor || p.Mode == VfxParamMode::Curve)
+							{
+								pool.SetColorCurves(p.ColorCurves[0], p.ColorCurves[1], p.ColorCurves[2], p.ColorCurves[3]);
+							}
+							else if (p.Mode == VfxParamMode::Curve)
+							{
+								pool.SetColorCurve(p.Curve);
+							}
+						}
+					}
+					else if (mod.Id == "mod.update.orbit")
+					{
+						orbitSpeed = mod.GetFloat("OrbitSpeed", 0.0f);
+						const auto* pAx = mod.FindParam("OrbitAxis");
+						if (pAx) orbitAxis = glm::vec3(pAx->VecVal);
+						const auto* pC = mod.FindParam("OrbitCenter");
+						if (pC) orbitCenter = glm::vec3(pC->VecVal);
+					}
+					// 3. 渲染器设置模块 (Render Stage)
+					else if (mod.Id == "mod.render.sprite")
+					{
+						int bMode = static_cast<int>(mod.GetFloat("BlendMode", 1.0f));
+						emComp.BlendMode = (bMode == 1) ? ParticleBlendMode::Additive : ParticleBlendMode::AlphaBlend;
+						int fMode = static_cast<int>(mod.GetFloat("FacingMode", 0.0f));
+						emComp.RenderMode = (fMode == 1) ? ParticleRenderMode::HorizontalQuad : ParticleRenderMode::Billboard;
+						auto mat = pool.GetMaterialSettings();
+						mat.BlendMode = emComp.BlendMode;
+						mat.FacingMode = emComp.RenderMode;
+						mat.EmissiveBoost = mod.GetFloat("EmissiveBoost", 2.0f);
+						pool.SetMaterialSettings(mat);
+					}
+					else if (mod.Id == "mod.update.rotation_over_life")
+					{
+						float rotSpeed = mod.GetFloat("RotationSpeed", 0.0f);
+						if (std::abs(rotSpeed) > 1e-4f)
+						{
+							float simDt = dt * vfx.PlaybackSpeed;
+							for (auto& p : pool.GetParticlesMut())
+							{
+								if (!p.Active) continue;
+								p.Rotation += rotSpeed * simDt;
+							}
+						}
+					}
+					else if (mod.Id == "mod.update.vortex_tornado")
+					{
+						float vStrength = mod.GetFloat("VortexStrength", 6.0f);
+						float uBuoyancy = mod.GetFloat("UpwardBuoyancy", 4.0f);
+						float cExpand = mod.GetFloat("ConeExpansion", 0.5f);
+						float simDt = dt * vfx.PlaybackSpeed;
+						for (auto& p : pool.GetParticlesMut())
+						{
+							if (!p.Active) continue;
+							p.Velocity.y += uBuoyancy * simDt;
+							float r = glm::length(glm::vec2(p.Position.x, p.Position.z));
+							if (r > 0.01f)
+							{
+								glm::vec2 tang(-p.Position.z / r, p.Position.x / r);
+								p.Velocity.x += tang.x * (vStrength * simDt);
+								p.Velocity.z += tang.y * (vStrength * simDt);
+								p.Velocity.x += (p.Position.x / r) * (cExpand * std::max(0.0f, p.Velocity.y) * simDt);
+								p.Velocity.z += (p.Position.z / r) * (cExpand * std::max(0.0f, p.Velocity.y) * simDt);
+							}
+						}
+					}
+					else if (mod.Id == "mod.update.shockwave_expansion")
+					{
+						float expSpd = mod.GetFloat("ExpansionSpeed", 5.0f);
+						float maxR = mod.GetFloat("MaxRadius", 8.0f);
+						float dissRate = mod.GetFloat("DissipationRate", 1.2f);
+						float simDt = dt * vfx.PlaybackSpeed;
+						for (auto& p : pool.GetParticlesMut())
+						{
+							if (!p.Active) continue;
+							float normLife = std::clamp(1.0f - (p.Life / std::max(0.001f, p.MaxLife)), 0.0f, 1.0f);
+							float curR = glm::mix(0.5f, maxR, std::sqrt(normLife));
+							p.Size = glm::vec2(curR);
+							p.Color.a *= std::max(0.0f, 1.0f - normLife * dissRate * simDt);
+						}
+					}
+					else if (mod.Id == "mod.render.flipbook")
+					{
+						uint32_t tX = static_cast<uint32_t>(mod.GetFloat("TilesX", 4.0f));
+						uint32_t tY = static_cast<uint32_t>(mod.GetFloat("TilesY", 4.0f));
+						float fps = mod.GetFloat("FPS", 16.0f);
+						int animMode = static_cast<int>(mod.GetFloat("AnimationMode", 0.0f));
+						auto mat = pool.GetMaterialSettings();
+						mat.SubUVTilesX = tX;
+						mat.SubUVTilesY = tY;
+						pool.SetMaterialSettings(mat);
+						uint32_t totalF = std::max(1u, tX * tY);
+						for (auto& p : pool.GetParticlesMut())
+						{
+							if (!p.Active) continue;
+							float progress = (animMode == 1) ? (1.0f - p.Life / std::max(0.001f, p.MaxLife)) : ((p.MaxLife - p.Life) * fps / totalF);
+							p.SubUVFrameIndex = static_cast<uint32_t>(progress * totalF) % totalF;
+						}
+					}
+										else if (mod.IsCustom)
+					{
+						for (const auto& param : mod.Parameters)
+						{
+							if (param.Name.find("Gravity") != std::string::npos && param.Type == VfxParamType::Vec3)
+								emComp.Gravity += glm::vec3(param.VecVal);
+							else if (param.Name.find("Drag") != std::string::npos && param.Type == VfxParamType::Float)
+								pool.SetLinearDrag(pool.GetLinearDrag() + param.FloatVal);
+						}
+					}
+				}
+
+				// 点引力黑洞向心加速度计算
+				if (std::abs(attractorStrength) > 1e-4f)
+				{
+					float simDt = dt * vfx.PlaybackSpeed;
+					for (auto& p : pool.GetParticlesMut())
+					{
+						if (!p.Active) continue;
+						glm::vec3 toCenter = attractorCenter - p.Position;
+						float distSq = std::max(glm::dot(toCenter, toCenter), attractorMinDist * attractorMinDist);
+						glm::vec3 pullDir = glm::normalize(toCenter);
+						p.Velocity += pullDir * (attractorStrength / distSq) * simDt;
+					}
+				}
+
+				// 速度阻尼
+				if (customDamping > 0.001f)
+				{
+					float simDt = dt * vfx.PlaybackSpeed;
+					for (auto& p : pool.GetParticlesMut())
+					{
+						if (!p.Active) continue;
+						p.Velocity *= std::max(0.0f, 1.0f - customDamping * simDt);
+					}
+				}
+
+				if (std::abs(orbitSpeed) > 1e-4f)
+				{
+					for (auto& p : pool.GetParticlesMut())
+					{
+						if (!p.Active) continue;
+						glm::vec3 toC = p.Position - orbitCenter;
+						float dist = glm::length(toC);
+						if (dist > 0.01f)
+						{
+							glm::vec3 tangent = glm::normalize(glm::cross(orbitAxis, toC));
+							p.Velocity = tangent * orbitSpeed;
+						}
+					}
+				}
+
+				// 单体常驻或瞬态爆发初始化 (当池内无活跃粒子时自动生成)
+				if (em.EmissionMode == VfxEmissionMode::Single && pool.ActiveCount() == 0)
+				{
+					pool.Emit(em.SingleCount > 0 ? em.SingleCount : 1, emComp, pos, rot);
+				}
+				else if (em.EmissionMode == VfxEmissionMode::Burst && pool.ActiveCount() == 0)
+				{
+					pool.Emit(em.SingleCount > 0 ? em.SingleCount : 20, emComp, pos, rot);
+				}
+
+				const float curPoolTime = pool.GetSimElapsedTime();
+				const float sysDur = (asset->Duration > 0.0f) ? asset->Duration : 5.0f;
+				const float curCycleTime = (emComp.Looping && sysDur > 0.0f) ? std::fmod(curPoolTime, sysDur) : curPoolTime;
+				if (em.EmitterDuration > 0.0f && curCycleTime > em.EmitterDuration)
+				{
+					emComp.EmissionRate = 0.0f;
+				}
+				if (!emComp.Looping && sysDur > 0.0f && curPoolTime > sysDur)
+				{
+					emComp.EmissionRate = 0.0f;
+				}
+
+				pool.Update(dt * vfx.PlaybackSpeed, emComp, pos, rot);
+			}
+		}
+	}
+
+
+	static void SimulateSceneWeather(entt::registry& reg, float dt)
+	{
+		for (auto entity : reg.view<WeatherSystemComponent>())
+		{
+			auto& comp = reg.get<WeatherSystemComponent>(entity);
+			WeatherSimulation::Update(comp, dt);
+		}
+	}
+
+	static void SimulateSceneWaterBuoyancy(entt::registry& reg, float dt, float time)
+	{
+		auto waterView = reg.view<TransformComponent, WaterBodyComponent>();
+		for (auto waterEntity : waterView)
+		{
+			const auto& [waterTrans, waterComp] = waterView.get<TransformComponent, WaterBodyComponent>(waterEntity);
+			if (!waterComp.EnableBuoyancy)
+				continue;
+
+			const float halfExtentX = (waterTrans.Scale.x > 1.0f) ? waterTrans.Scale.x * 0.5f : 50.0f;
+			const float halfExtentZ = (waterTrans.Scale.z > 1.0f) ? waterTrans.Scale.z * 0.5f : 50.0f;
+
+			for (auto candidate : reg.view<TransformComponent>())
+			{
+				if (candidate == waterEntity)
+					continue;
+				if (reg.all_of<WaterBodyComponent>(candidate))
+					continue;
+
+				// Entity-Component Parity: only RigidBody3D entities float
+				const bool isFloating = reg.all_of<RigidBody3DComponent>(candidate);
+				if (!isFloating)
+					continue;
+
+				auto& objTrans = reg.get<TransformComponent>(candidate);
+				const float relX = objTrans.Location.x - waterTrans.Location.x;
+				const float relZ = objTrans.Location.z - waterTrans.Location.z;
+
+				if (std::abs(relX) > halfExtentX || std::abs(relZ) > halfExtentZ)
+					continue;
+
+				glm::vec3 halfExtents(0.5f);
+				if (reg.all_of<BoxCollider3DComponent>(candidate))
+					halfExtents = reg.get<BoxCollider3DComponent>(candidate).HalfExtents;
+				else
+					halfExtents = glm::max(glm::abs(objTrans.Scale) * 0.5f, glm::vec3(0.1f));
+
+				float mass = 10.0f;
+				if (reg.all_of<RigidBody3DComponent>(candidate))
+					mass = reg.get<RigidBody3DComponent>(candidate).Mass;
+
+				glm::vec3 localCenter = objTrans.Location - glm::vec3(0.0f, waterTrans.Location.y, 0.0f);
+				glm::vec3 buoyancyForce(0.0f);
+				glm::vec3 torque(0.0f);
+				WaterSimulation::ComputeBuoyancy(localCenter, halfExtents, mass, time, waterComp, buoyancyForce, torque);
+
+				const float waveH = WaterSimulation::SampleWaveHeight(objTrans.Location.x, objTrans.Location.z, time, waterComp);
+				const float targetY = waterTrans.Location.y + waveH;
+				const glm::vec3 normal = WaterSimulation::SampleWaveNormal(objTrans.Location.x, objTrans.Location.z, time, waterComp);
+
+				const float smoothT = std::clamp(dt * 5.0f, 0.0f, 1.0f);
+				glm::vec3 newLoc = objTrans.Location;
+				newLoc.y = glm::mix(newLoc.y, targetY, smoothT);
+				TransformSystem::SetLocation(objTrans, newLoc);
+
+				const glm::vec3 up(0.0f, 1.0f, 0.0f);
+				const glm::vec3 norm = glm::normalize(normal);
+				const glm::vec3 rotAxis = glm::cross(up, norm);
+				const float dotVal = glm::clamp(glm::dot(up, norm), -1.0f, 1.0f);
+				glm::quat waveRot(1.0f, 0.0f, 0.0f, 0.0f);
+				if (glm::length(rotAxis) > 1e-4f)
+				{
+					const float rotAngle = std::acos(dotVal);
+					waveRot = glm::angleAxis(rotAngle, glm::normalize(rotAxis));
+				}
+				const glm::quat blendedRot = glm::slerp(objTrans.Rotation, waveRot, smoothT);
+				TransformSystem::SetRotation(objTrans, blendedRot);
+			}
+		}
+	}
+
+	void Scene::OnUpdateEditor(Timestep ts, const EditorCamera&)
+	{
+		AssertOwnerThread();
+		BeginFrame();
+		SimulateSceneVfx(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
+		SimulateSceneWeather(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
+	}
+
+	void Scene::EnsureDefaultFrameSystems()
+	{
+		if (!m_FrameSystemDefinitions.empty())
+			return;
+		// WP5:PreFixed 阶段此前是空的。固定步时间服务(步长/计数)由这个内置系统推进,
+		// Owner 显式标 Builtin,便于 SystemsPanel/自动化断言系统归属。
+		RegisterFrameSystem(Gameplay::TimerSystem::MakePreFixedSystem(*this));
+		// PURE-ECS(工业口径):**物理与移动跑固定步长**(`Fixed` 阶段)。
+		// 此前它们注册在默认的 `Update` 阶段、拿的是可变帧时间 ⇒ 同一段真实时间在不同帧率下
+		// 结果不同(物理不可复现)。引擎的累加器(GameApp 的 m_Accumulator / MaxFixedStepsPerFrame)
+		// 已经负责"一帧跑几步",这里只是把系统挪到它该在的阶段。
+		RegisterFrameSystem({ "physics-2d", false, [this](Timestep ts) { OnUpdatePhysics2D(ts); },
+			Gameplay::SystemPhase::Fixed, {} });
+		RegisterFrameSystem({ "physics-3d", false, [this](Timestep ts) { OnUpdatePhysics3D(ts); },
+			Gameplay::SystemPhase::Fixed, {} });
+		RegisterFrameSystem({ "movement-system", false, [this](Timestep ts) { MovementSystem().Update(*this, ts); },
+			Gameplay::SystemPhase::Fixed, { "physics-2d", "physics-3d" } });
+		RegisterFrameSystem({ "water-buoyancy-system", false, [this](Timestep ts) {
+			SimulateSceneWaterBuoyancy(m_Registry, ts.GetSeconds(), static_cast<float>(m_TimeService.ElapsedSeconds));
+		}, Gameplay::SystemPhase::Fixed, { "physics-3d" } });
+		RegisterFrameSystem({ "weather-system", false, [this](Timestep ts) {
+			WeatherSystem().Update(*this, ts);
+		}, Gameplay::SystemPhase::Update, {} });
+		RegisterFrameSystem({ "smart-object-system", false, [this](Timestep ts) {
+			Gameplay::SmartObjectSystem::Update(*this, ts.GetSeconds());
+		}, Gameplay::SystemPhase::Fixed, {} });
+		RegisterFrameSystem({ "behavior-tree-system", false, [this](Timestep ts) {
+			Gameplay::BehaviorTreeSystem::Update(*this, ts.GetSeconds());
+		}, Gameplay::SystemPhase::Fixed, { "smart-object-system" } });
+		RegisterFrameSystem({ "navmesh-system", false, [this](Timestep ts) {
+			if (m_NavMesh && m_NavMesh->GetPolygonCount() > 0)
+				NavMeshSystem::Update(*this, ts.GetSeconds(), *m_NavMesh);
+		}, Gameplay::SystemPhase::Fixed, { "physics-3d" } });
+		// 可变阶段(每帧一次):世界矩阵传播/相机/动画/抽取 —— 表现层,看到的是本帧
+		// **最后一次**物理步之后的位姿(GameApp 的顺序是 Fixed(0..N) → Update → Late → PreRender)。
+		RegisterFrameSystem({ "transform-system", false, [this](Timestep ts) { (void)ts; TransformSystem::UpdateWorldTransforms(m_Registry); } });
+		RegisterFrameSystem({ "eqs-tactical-system", false,
+			[this](Timestep ts) {
+				const float dt = std::clamp(ts.GetSeconds(), 1.0f / 120.0f, 1.0f / 15.0f);
+				EQS::EnvQueryManager::Get().Update(dt, 0.5f);
+			},
+			Gameplay::SystemPhase::Update, { "transform-system" } });
+		RegisterFrameSystem({ "virtual-camera-system", false, [this](Timestep ts) { VirtualCameraSystem::Update(*this, ts.GetSeconds()); },
+			Gameplay::SystemPhase::Late, { "transform-system" } });
+		RegisterFrameSystem({ "camera-system", false, [this](Timestep ts) { (void)ts; CameraSystem::UpdateAllCameras(m_Registry, m_ViewportWidth, m_ViewportHeight); },
+			Gameplay::SystemPhase::Late, { "virtual-camera-system" } });
+		RegisterFrameSystem({ "post-process-system", false, [this](Timestep ts) { PostProcessPipeline::Update(*this, ts.GetSeconds()); },
+			Gameplay::SystemPhase::PreRender, {} });
+		// PURE-ECS:骨骼动画采样进 `PreRender` 阶段 —— 它必须排在 transform-system 之后、
+		// 渲染之前;进管线后它出现在 Systems Pipeline 里,用户系统也能用 `after` 排序它。
+		// 幂等:编辑态不跑帧系统,由 SceneRenderer 兜底跑同一个 EnsureAnimationAdvanced。
+		RegisterFrameSystem({ "sprite-animation-system", false,
+			[this](Timestep ts) { ClearAnimationEvents(); SpriteAnimationSystem::Update(m_Registry, ts, this); },
+			Gameplay::SystemPhase::PreRender, {} });
+		RegisterFrameSystem({ "animation-system", false,
+			[this](Timestep ts) { EnsureAnimationAdvanced(ts); },
+			Gameplay::SystemPhase::PreRender, {} });
+		// PURE-ECS:渲染抽取也进管线(PreRender,**排在 animation-system 之后** ——
+		// 蒙皮绘制要拿本帧的调色板)。相机无关,所以这里做;剔除/阴影矩阵/pass 留在提交侧。
+		// 编辑态不跑帧系统 ⇒ SceneRenderer::SubmitScene 里兜底跑同一个 EnsureRenderExtract。
+		RegisterFrameSystem({ "foliage-interaction-system", false,
+			[this](Timestep ts) {
+				const float dt = std::clamp(ts.GetSeconds(), 1.0f / 120.0f, 1.0f / 30.0f);
+				FoliageInteractionSystem::BeginFrame(dt);
+				auto view = m_Registry.view<TransformComponent, FoliageInteractionComponent>();
+				for (auto entity : view)
+				{
+					auto& [tc, fic] = view.get<TransformComponent, FoliageInteractionComponent>(entity);
+					FoliageInteractorSource src;
+					src.SourceId = static_cast<uint64_t>(static_cast<uint32_t>(entity));
+					src.Position = tc.Location;
+					src.PushRadius = fic.PushRadius * std::max(tc.Scale.x, tc.Scale.z);
+					src.PushStrength = fic.PushStrength;
+					src.RecoverySpeed = fic.RecoverySpeed;
+					src.LeaveTracks = (fic.LeaveTracks != 0);
+					FoliageInteractionSystem::SubmitInteractor(src);
+				}
+				FoliageInteractionSystem::StepSimulation(dt);
+			},
+			Gameplay::SystemPhase::PreRender, { "transform-system" } });
+		RegisterFrameSystem({ "render-extract", false,
+			[this](Timestep ts) { EnsureRenderExtract(ts.GetSeconds()); },
+			Gameplay::SystemPhase::PreRender, { "animation-system" } });
+	}
+
+	void Scene::OnUpdateRuntime(Timestep ts)
+	{
+		BeginFrame();
+		EnsureDefaultFrameSystems();
+		if (ScriptEngine::IsInitialized())
+			ScriptEngine::PollSystemScriptReload(*this, ts.GetSeconds());
+		RunFrameSystems(ts);
+		SimulateSceneVfx(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
+		Audio::AudioSystem::Get().Update(ts.GetSeconds(), this);
+		FlushStructuralChanges();
+	}
+
+	void Scene::OnUpdateSimulation(Timestep ts, const EditorCamera&)
+	{
+		BeginFrame();
+		EnsureDefaultFrameSystems();
+		RunFrameSystems(ts);
+		SimulateSceneVfx(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds());
+		SimulateSceneWaterBuoyancy(const_cast<entt::registry&>(static_cast<const Scene&>(*this).GetRegistry()), ts.GetSeconds(), static_cast<float>(m_TimeService.ElapsedSeconds));
+	}
+
+	void Scene::OnRuntimeStart()
+	{
+		AssertOwnerThread();
+		if (IsActive()) return;
+		// P1b D6:2D/3D 物理同实体互斥 —— 在创建任何物理世界之前校验;失败时场景保持 Stopped
+		// 并抛出可读错误(编辑器 Play 捕获后回 Edit,日志里能看到原因)。
+		std::string physicsError;
+		if (!Physics3DWorld::ValidateScene(*this, &physicsError))
+		{
+			Report("[Physics3D] " + physicsError);
+			throw std::logic_error(physicsError);
+		}
+		OnPhysics2DStart();
+		OnPhysics3DStart();
+		// P7:两个物理世界都就绪后再建关节 —— 关节要求两端都已有活刚体,而 3D 分支依赖
+		// m_Physics3D 已存在(放在 OnPhysics2DStart 里会让 3D 关节永远建不出来)。
+		// 顺序按 registry 遍历 ⇒ 同一存档输入下确定。
+		for (const auto entity : m_Registry.view<JointComponent>())
+		{
+			EnsurePhysicsJoint(entity);
+		}
+		for (const auto entity : m_Registry.view<DistanceJoint2DComponent>())
+			EnsurePhysicsJoint2D(entity);
+		for (const auto entity : m_Registry.view<RevoluteJoint2DComponent>())
+			EnsurePhysicsJoint2D(entity);
+		for (const auto entity : m_Registry.view<PrismaticJoint2DComponent>())
+			EnsurePhysicsJoint2D(entity);
+		for (const auto entity : m_Registry.view<WheelJoint2DComponent>())
+			EnsurePhysicsJoint2D(entity);
+		// P6:为物理实体预建插值状态(结构写只允许在非运行态 / 提交点做;这里 m_State 还是 Stopped)。
+		if (m_PhysicsInterpolationEnabled)
+		{
+			for (const auto entity : m_Registry.view<RigidBody2DComponent>())
+				if (!m_Registry.all_of<PhysicsInterpolationState>(entity))
+					m_Registry.emplace<PhysicsInterpolationState>(entity);
+			for (const auto entity : m_Registry.view<RigidBody3DComponent>())
+				if (!m_Registry.all_of<PhysicsInterpolationState>(entity))
+					m_Registry.emplace<PhysicsInterpolationState>(entity);
+		}
+		// PECS(相机):进入 Running 之前为所有相机预建帧数据视图(结构写只允许在非运行态/提交点做)。
+		// 视图书里 Valid=false ⇒ 第 5 条隐患(FixedAspectRatio 相机读档后按默认投影渲染)在
+		// 本帧第一次 EnsureView 无条件重算时被修掉。
+		for (const auto entity : m_Registry.view<CameraComponent>())
+			EnsureCameraView(entity);
+		EnsureDefaultFrameSystems();
+		TryAutoLoadNavMesh();
+		if (ScriptEngine::IsInitialized())
+		{
+			ScriptEngine::LoadSystemScripts(*this);
+		}
+		// PURE-ECS:模块登记的场景系统(项目层 C++ 系统)在引擎内建帧系统之后挂上;
+		// 与 Lua 系统脚本同一时机、同一个 SystemRegistry。契约见 WorldContext.h。
+		m_Context->RunSceneAttachHooks(*this);
+		m_State = SceneState::Running;
+		RunStartupSystems();
+	}
+	void Scene::OnSimulationStart() { OnRuntimeStart(); }
+	void Scene::OnRuntimeStop() { StopScene(); }
+	void Scene::OnSimulationStop() { StopScene(); }
+
+
+
+	void Scene::StopScene()
+	{
+		AssertOwnerThread();
+		if (m_State == SceneState::Stopping) return;
+		// PURE-ECS:模块登记的场景系统先撤销(与 RunSceneAttachHooks 对称);只在真的从
+		// 运行态停下来时跑,重复 StopScene 不重复 Detach。
+		if (m_State == SceneState::Running)
+		{
+			RunTeardownSystems();
+			m_Context->RunSceneDetachHooks(*this);
+		}
+		m_State = SceneState::Stopping;
+		m_StopRequested = false;
+		m_Changes.clear();
+		// Pure ECS:场景停止时撤销系统脚本注册的帧系统,下一次启动重新装载。
+		if (ScriptEngine::IsInitialized())
+			ScriptEngine::UnloadSystemScripts(*this);
+		OnPhysics2DStop();
+		OnPhysics3DStop();
+		// Destruction callbacks may request further idempotent deletes/removals, but no general work.
+		while (m_Registry.view<PendingDestroyTag>().size() != 0 || !m_PendingRemove.empty())
+		{
+			std::vector<entt::entity> destroys;
+			for (const auto entity : m_Registry.view<PendingDestroyTag>())
+				destroys.push_back(entity);
+			for (const auto entity : destroys) DestroyEntityNow(entity);
+			const auto removals = m_PendingRemove;
+			for (const auto& [entity, components] : removals)
+				for (const auto component : components) RemoveComponentNow(entity, component);
+		}
+		m_Changes.clear();
+		m_StopRequested = false;
+		m_State = SceneState::Stopped;
+	}
+
+	void Scene::OnViewportResize(uint32_t width, uint32_t height)
+	{
+		AssertOwnerThread();
+		m_ViewportWidth = width;
+		m_ViewportHeight = height;
+		// PECS(相机):编辑态下相机帧数据视图可能还没建,这里按"结构写只允许在非运行态"
+		// 的既有口径懒创建;运行态的视图已在 OnRuntimeStart 预建。
+		if (!IsActive())
+			for (const auto entity : m_Registry.view<CameraComponent>())
+				EnsureCameraView(entity);
+		CameraSystem::UpdateAllCameras(m_Registry, width, height);
+	}
+
+	void Scene::EnsureCameraView(entt::entity entity)
+	{
+		if (!m_Registry.valid(entity)) return;
+		if (!m_Registry.all_of<CameraComponent>(entity)) return;
+		if (!m_Registry.all_of<CameraViewComponent>(entity))
+			m_Registry.emplace<CameraViewComponent>(entity);
+	}
+
+	const Camera& Scene::GetCameraView(entt::entity entity)
+	{
+		AssertOwnerThread();
+		// 编辑态(非运行态)允许懒创建;运行态的结构写受保护,视图由提交点预建。
+		if (!IsActive())
+			EnsureCameraView(entity);
+		return CameraSystem::EnsureView(m_Registry, entity, m_ViewportWidth, m_ViewportHeight);
+	}
+
+	Entity Scene::GetPrimaryCameraEntity()
+	{
+		AssertOwnerThread();
+		// 场景语义:跳过 pending 销毁/移除的实体继续找下一台 Primary(CameraSystem 的纯 registry
+		// 版本没有这层语义,所以这里保留自己的循环 —— 多 Primary 且首台 pending 时行为不同)。
+		for (const auto entity : m_Registry.view<CameraComponent, TransformComponent>())
+			if (!IsPendingDestroy(entity) && !IsPendingRemoval(entity, entt::type_id<CameraComponent>().hash()) &&
+				m_Registry.get<CameraComponent>(entity).Primary) return Entity(this, entity);
+		return {};
+	}
+
+	bool Scene::IsEntityInActiveDataLayers(entt::entity entity) const
+	{
+		const auto* level = m_Registry.try_get<LevelEntityComponent>(entity);
+		if (!level || level->DataLayerMask == 0)
+			return true;   // 没有归属标注 = 常驻可见(旧内容不因此消失)
+		return (level->DataLayerMask & m_ActiveDataLayers) != 0;
+	}
+
+	void Scene::DuplicateEntity(Entity entity)
+	{
+		AssertStructuralWrite();
+		if (!entity.IsValid() || entity.GetScene() != this || IsPendingDestroy(entity)) return;
+		if (IsActive() && (entity.HasComponent<RigidBody2DComponent>() || entity.HasComponent<BoxCollider2DComponent>() || entity.HasComponent<CircleCollider2DComponent>()))
+			throw std::logic_error("Duplicating physics components requires a stopped scene");
+		// 实体名走池:NameId → 池内文本(复制出来的实体用同一个驻留名字,不重新驻留)。
+		const std::string name = entity.HasComponent<TagComponent>()
+			? StringPool::Get().NameOf(entity.GetComponent<TagComponent>().Tag) : std::string("Empty Entity");
+		Entity copy = Entity::CreateEntity(this, name);
+		if (entity.HasComponent<TransformComponent>()) copy.AddComponent<TransformComponent>(entity.GetComponent<TransformComponent>());
+		for (const Schema::TypeSchema* schema : m_Context->Schemas().List(Schema::TypeCategory::Component))
+		{
+			if (!schema || !schema->Storage || !schema->Storage->Copy) continue;
+			if (entity.HasComponent(schema->Storage->ComponentId))
+				schema->Storage->Copy(static_cast<void*>(&copy), static_cast<void*>(&entity));
+		}
+	}
+
+	void Scene::CopyScene(Ref<Scene>& other, Ref<Scene>& newScene)
+	{
+		if (!other || !newScene || other == newScene) throw std::logic_error("Scene clone requires distinct source and destination scenes");
+		other->AssertOwnerThread();
+		newScene->AssertStructuralWrite();
+		if (newScene->IsActive()) throw std::logic_error("Scene clone destination must be stopped");
+		newScene->m_ViewportHeight = other->m_ViewportHeight;
+		newScene->m_ViewportWidth = other->m_ViewportWidth;
+		std::unordered_map<UUID, entt::entity> entityMap;
+		for (const auto entity : other->m_Registry.view<UUIDComponent>())
+		{
+			const auto id = other->m_Registry.get<UUIDComponent>(entity).ID;
+			const auto* tag = other->m_Registry.try_get<TagComponent>(entity);
+			entityMap[id] = Entity::CreateEntity(newScene.get(),
+				tag ? StringPool::Get().NameOf(tag->Tag) : std::string("Empty Entity"), id);
+		}
+		for (const Schema::TypeSchema* schema : other->m_Context->Schemas().List(Schema::TypeCategory::Component))
+		{
+			if (!schema || !schema->Storage || !schema->Storage->CopyAll) continue;
+			schema->Storage->CopyAll(static_cast<void*>(&newScene->m_Registry), static_cast<void*>(&other->m_Registry), static_cast<const void*>(&entityMap));
+		}
+		// P4-U13b:prefab 实例注册表跟着场景一起克隆(编辑器 Play 的活动场景就是这份副本),
+		// 句柄按 UUID 映射重定向——不复制的话 Play 期间层级/属性面板会看不到实例与覆盖。
+		newScene->m_PrefabInstances.clear();
+		for (const Gameplay::PrefabInstanceRecord& source : other->m_PrefabInstances)
+		{
+			const auto* sourceIdentity = other->m_Registry.try_get<UUIDComponent>(source.Root);
+			if (!sourceIdentity)
+				continue;
+			const auto rootIt = entityMap.find(sourceIdentity->ID);
+			if (rootIt == entityMap.end())
+				continue;
+			Gameplay::PrefabInstanceRecord& record =
+				newScene->AddPrefabInstance(source.PrefabPath, rootIt->second);
+			for (const auto& [handle, fields] : source.Overrides)
+			{
+				const auto* identity = other->m_Registry.try_get<UUIDComponent>(static_cast<entt::entity>(handle));
+				if (!identity)
+					continue;
+				const auto entityIt = entityMap.find(identity->ID);
+				if (entityIt == entityMap.end())
+					continue;
+				record.Overrides[static_cast<uint32_t>(entityIt->second)] = fields;
+			}
+		}
+		newScene->m_NavMesh = other->m_NavMesh;
+		newScene->m_ScenePath = other->m_ScenePath;
+	}
+
+			// P7: Box2D v3 单向平台效应器 (PlatformEffector2D) 预解算碰撞门禁
+		static bool OnPhysics2DPreSolve(b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, void* context)
+		{
+			(void)point;
+			Scene* scene = static_cast<Scene*>(context);
+			if (!scene) return true;
+			entt::entity entityA = Physics::UnpackEntityUserData(b2Shape_GetUserData(shapeIdA));
+			entt::entity entityB = Physics::UnpackEntityUserData(b2Shape_GetUserData(shapeIdB));
+
+			const Scene* constScene = scene;
+			const auto& reg = constScene->GetRegistry();
+			auto checkEffector = [&](entt::entity platformEnt, entt::entity otherEnt, b2ShapeId platformShape, b2ShapeId otherShape, const glm::vec2& normFromPlat) -> bool
+			{
+				if (!reg.valid(platformEnt)) return true;
+				const auto* effector = reg.try_get<PlatformEffector2DComponent>(platformEnt);
+				if (!effector || !effector->OneWay) return true;
+
+				if (scene->IsPlatformDropThroughActive(platformEnt, otherEnt))
+					return false;
+
+				const auto* transform = reg.try_get<TransformComponent>(platformEnt);
+				const float rotZ = transform ? transform->GetEulerAngles().z : 0.0f;
+
+				const b2BodyId bodyPlat = b2Shape_GetBody(platformShape);
+				const b2BodyId bodyOther = b2Shape_GetBody(otherShape);
+				const b2Vec2 vP = b2Body_IsValid(bodyPlat) ? b2Body_GetLinearVelocity(bodyPlat) : b2Vec2{ 0.0f, 0.0f };
+				const b2Vec2 vO = b2Body_IsValid(bodyOther) ? b2Body_GetLinearVelocity(bodyOther) : b2Vec2{ 0.0f, 0.0f };
+				const glm::vec2 relVel { vO.x - vP.x, vO.y - vP.y };
+
+				return Physics2D::EvaluatePlatformEffector(effector->SurfaceArc, effector->RotationalOffset, rotZ, normFromPlat, relVel);
+			};
+
+			const glm::vec2 normAtoB { normal.x, normal.y };
+			if (!checkEffector(entityA, entityB, shapeIdA, shapeIdB, normAtoB))
+				return false;
+			if (!checkEffector(entityB, entityA, shapeIdB, shapeIdA, -normAtoB))
+				return false;
+
+			return true;
+		}
+
+	void Scene::OnPhysics2DStart()
+	{
+		if (b2World_IsValid(m_PhysicsWorldId)) return;
+		b2WorldDef worldDef = b2DefaultWorldDef();
+		worldDef.gravity = { 0.0f, -9.8f };
+		worldDef.restitutionThreshold = 0.5f;
+		m_PhysicsWorldId = b2CreateWorld(&worldDef);
+		b2World_SetPreSolveCallback(m_PhysicsWorldId, OnPhysics2DPreSolve, this);
+		m_PhysicsBodies2D.clear();
+		m_PhysicsJoints2D.clear();
+		m_PhysicsFilter2D.clear();
+		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
+		{
+			BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
+		for (const auto entity : m_Registry.view<TilemapComponent>())
+		{
+			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
+		for (const auto entity : m_Registry.view<PolygonCollider2DComponent>())
+		{
+			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
+		for (const auto entity : m_Registry.view<ChainCollider2DComponent>())
+		{
+			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
+		for (const auto entity : m_Registry.view<CompositeCollider2DComponent>())
+		{
+			if (!m_Registry.all_of<RigidBody2DComponent>(entity))
+				BuildRuntimeBody(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_PhysicsFilter2D, entity);
+		}
+	}
+
+	void Scene::OnUpdatePhysics2D(Timestep ts)
+	{
+		if (!b2World_IsValid(m_PhysicsWorldId)) return;
+		// P6:步进前先记下"上一固定步"的渲染矩阵(插值起点)。
+		RecordPhysicsInterpolationState();
+		// P5:步进前同步 Layer/Mask(字段可被脚本/面板/读档改,任何写入路径都要生效)。
+		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
+			SyncBodyFilter2D(entity);
+		const float dt = ts.GetSeconds();
+		for (auto it = m_PlatformDropThroughs.begin(); it != m_PlatformDropThroughs.end(); )
+		{
+			it->RemainingTime -= dt;
+			if (it->RemainingTime <= 0.0f || !m_Registry.valid(it->Target))
+				it = m_PlatformDropThroughs.erase(it);
+			else
+				++it;
+		}
+		b2World_Step(m_PhysicsWorldId, ts.GetSeconds(), 4);
+		// P5:步进结束后立刻把 Box2D 的 begin/end/persist 翻译进场景事件队列
+		// (队列在"本帧第一个固定步"清空,由 RunFixedFrameSystems 负责)。
+		HarvestPhysics2DEvents(m_PhysicsWorldId, m_Registry, m_PhysicsBodies2D, m_ContactEvents, m_TriggerEvents, m_SensorOverlaps2D);
+		// Phase 11: Apply 2D Area & Buoyancy Effectors across active sensor overlaps
+		for (const uint64_t pair : m_SensorOverlaps2D)
+		{
+			const entt::entity entA = static_cast<entt::entity>(pair >> 32);
+			const entt::entity entB = static_cast<entt::entity>(pair & 0xFFFFFFFF);
+			if (!m_Registry.valid(entA) || !m_Registry.valid(entB)) continue;
+
+			auto applyEffectorPair = [&](entt::entity sensorEnt, entt::entity targetEnt)
+			{
+				const b2BodyId targetBody = FindBody2D(m_PhysicsBodies2D, targetEnt);
+				if (!b2Body_IsValid(targetBody) || b2Body_GetType(targetBody) != b2_dynamicBody) return;
+
+				const auto* sTr = m_Registry.try_get<TransformComponent>(sensorEnt);
+				if (!sTr) return;
+
+				if (const auto* area = m_Registry.try_get<AreaEffector2DComponent>(sensorEnt))
+				{
+					if (area->Enabled && area->ForceMagnitude > 0.0f)
+					{
+						const b2Vec2 bPos = b2Body_GetPosition(targetBody);
+						glm::vec2 forceDir = area->ForceDirection;
+						if (area->ForceMode == 0)
+						{
+							if (!area->UseGlobalCoordinates)
+							{
+								const float rotZ = sTr->GetEulerAngles().z;
+								forceDir = {
+									area->ForceDirection.x * std::cos(rotZ) - area->ForceDirection.y * std::sin(rotZ),
+									area->ForceDirection.x * std::sin(rotZ) + area->ForceDirection.y * std::cos(rotZ)
+								};
+							}
+							if (glm::length(forceDir) > 1e-4f)
+								forceDir = glm::normalize(forceDir);
+						}
+						else if (area->ForceMode == 1)
+						{
+							const glm::vec2 toCenter(sTr->Location.x - bPos.x, sTr->Location.y - bPos.y);
+							const float d = glm::length(toCenter);
+							forceDir = d > 1e-4f ? (toCenter / d) : glm::vec2(0.0f);
+						}
+						else if (area->ForceMode == 2)
+						{
+							const glm::vec2 fromCenter(bPos.x - sTr->Location.x, bPos.y - sTr->Location.y);
+							const float d = glm::length(fromCenter);
+							forceDir = d > 1e-4f ? (fromCenter / d) : glm::vec2(0.0f);
+						}
+
+						float forceMag = area->ForceMagnitude;
+						const float mass = b2Body_GetMass(targetBody);
+						if (area->AffectsInertia) forceMag *= mass;
+						glm::vec2 totalForce = forceDir * forceMag;
+
+						if (area->LinearDrag > 0.0f)
+						{
+							const b2Vec2 v = b2Body_GetLinearVelocity(targetBody);
+							totalForce.x -= v.x * area->LinearDrag * mass;
+							totalForce.y -= v.y * area->LinearDrag * mass;
+						}
+						b2Body_ApplyForceToCenter(targetBody, { totalForce.x, totalForce.y }, true);
+
+						if (area->AngularDrag > 0.0f)
+						{
+							const float w = b2Body_GetAngularVelocity(targetBody);
+							const float I = b2Body_GetRotationalInertia(targetBody);
+							b2Body_ApplyTorque(targetBody, -w * area->AngularDrag * I, true);
+						}
+					}
+				}
+
+				if (const auto* buoy = m_Registry.try_get<BuoyancyEffector2DComponent>(sensorEnt))
+				{
+					if (buoy->Enabled)
+					{
+						const b2Vec2 bPos = b2Body_GetPosition(targetBody);
+						const float waterSurfaceY = sTr->Location.y + buoy->SurfaceLevel;
+						if (bPos.y < waterSurfaceY)
+						{
+							const float depth = waterSurfaceY - bPos.y;
+							const float submerged = std::clamp(depth / 1.0f, 0.0f, 1.0f);
+							const float mass = b2Body_GetMass(targetBody);
+							const b2Vec2 grav = b2World_GetGravity(m_PhysicsWorldId);
+							const float buoyantForceY = -grav.y * buoy->Density * mass * submerged;
+							const b2Vec2 v = b2Body_GetLinearVelocity(targetBody);
+							const b2Vec2 relV = { v.x - buoy->FlowVelocity.x, v.y - buoy->FlowVelocity.y };
+							const float dragX = -relV.x * buoy->LinearDrag * mass * submerged;
+							const float dragY = -relV.y * buoy->LinearDrag * mass * submerged;
+							b2Body_ApplyForceToCenter(targetBody, { dragX, buoyantForceY + dragY }, true);
+							if (buoy->AngularDrag > 0.0f)
+							{
+								const float w = b2Body_GetAngularVelocity(targetBody);
+								const float I = b2Body_GetRotationalInertia(targetBody);
+								b2Body_ApplyTorque(targetBody, -w * buoy->AngularDrag * I * submerged, true);
+							}
+						}
+					}
+				}
+			};
+
+			applyEffectorPair(entA, entB);
+			applyEffectorPair(entB, entA);
+		}
+		for (const auto entity : m_Registry.view<RigidBody2DComponent>())
+		{
+			if (IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<RigidBody2DComponent>().hash())) continue;
+			const b2BodyId bodyId = FindBody2D(m_PhysicsBodies2D, entity);
+			auto* transform = m_Registry.try_get<TransformComponent>(entity);
+			if (!transform || !b2Body_IsValid(bodyId))
+			{
+				Report("[Physics] Skipping invalid body or missing Transform entity=" + std::to_string(static_cast<uint32_t>(entity)));
+				continue;
+			}
+			const b2Transform body = b2Body_GetTransform(bodyId);
+			transform->Location.x = body.p.x;
+			transform->Location.y = body.p.y;
+			transform->Rotation = glm::angleAxis(b2Rot_GetAngle(body.q), glm::vec3(0.0f, 0.0f, 1.0f));
+			transform->Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
+		}
+	}
+
+	void Scene::OnPhysics2DStop()
+	{
+		m_PhysicsJoints2D.clear();
+		if (b2World_IsValid(m_PhysicsWorldId)) b2DestroyWorld(m_PhysicsWorldId);
+		m_PhysicsWorldId = b2_nullWorldId;
+		m_SensorOverlaps2D.clear();   // 世界没了,重叠状态不能跨运行存活
+		m_PlatformDropThroughs.clear();
+		m_PhysicsBodies2D.clear();
+		m_PhysicsFilter2D.clear();
+	}
+
+	// ---- P1b D6:3D 物理(Jolt) ----
+	bool Scene::SyncPhysics3DTransform(entt::entity entity, const glm::vec3& location, const glm::quat& rotation)
+	{
+		AssertOwnerThread();
+		if (!m_Registry.valid(entity)) return false;
+		if (IsPendingDestroy(entity) || IsPendingRemoval(entity, entt::type_id<RigidBody3DComponent>().hash())) return false;
+		auto* transform = m_Registry.try_get<TransformComponent>(entity);
+		if (!transform) return false;
+		// 位姿变化才写:位置用绝对容差、旋转用四元数点积(避免浮点噪声导致每帧重算 Transform 矩阵、
+		// 打断层级/标脏)。
+		const bool locationChanged = glm::distance(transform->Location, location) > 1e-4f;
+		const bool rotationChanged = std::fabs(glm::dot(transform->Rotation, rotation)) < 1.0f - 1e-4f;
+		if (!locationChanged && !rotationChanged) return false;
+		transform->Location = location;
+		transform->Rotation = rotation;
+		transform->Flags |= (TransformFlags::DirtyLocal | TransformFlags::DirtyWorld);
+		return true;
+	}
+
+	void Scene::OnPhysics3DStart()
+	{
+		if (m_Physics3D) return;
+		auto world = std::make_unique<Physics3DWorld>();
+		// P5:物理步进里的回调只做"翻译进事件队列"这一件事 —— 事件在固定步长阶段产出、
+		// 由可变阶段的系统读取。队列操作本身不回调用户代码,所以不会把异常带进物理步进。
+		world->SetContactCallback([this](const Physics::ContactEvent& event) { EnqueueContactEvent(event); });
+		world->SetTriggerCallback([this](const Physics::TriggerEvent& event) { EnqueueTriggerEvent(event); });
+		world->Start(*this);
+		m_Physics3D = std::move(world);
+	}
+
+	void Scene::OnUpdatePhysics3D(Timestep ts)
+	{
+		if (!m_Physics3D) return;
+		// P6:步进前先记下"上一固定步"的渲染矩阵(插值起点)。
+		RecordPhysicsInterpolationState();
+		// P5:步进前同步 Layer/Mask(与 2D 同口径:改层立即生效,内部有整数比较做早退)。
+		for (const auto entity : m_Registry.view<RigidBody3DComponent>())
+			m_Physics3D->RefreshBodyFilter(entity);
+		m_Physics3D->Step(ts.GetSeconds());
+		m_Physics3D->SyncTransforms();
+	}
+
+	void Scene::OnPhysics3DStop()
+	{
+		if (!m_Physics3D) return;
+		m_Physics3D->Stop();
+		m_Physics3D.reset();
+	}
+
+	uint64_t Scene::AddComponentObserver(entt::id_type componentId, std::function<void(Entity)> onAdd, std::function<void(Entity)> onRemove)
+	{
+		AssertOwnerThread();
+		const uint64_t id = ++m_NextObserverId;
+		m_ComponentObservers.push_back({ id, componentId, std::move(onAdd), std::move(onRemove) });
+		return id;
+	}
+
+	void Scene::RemoveComponentObserver(uint64_t observerId)
+	{
+		AssertOwnerThread();
+		auto it = std::remove_if(m_ComponentObservers.begin(), m_ComponentObservers.end(),
+			[observerId](const ComponentObserverEntry& entry) {
+				return entry.Id == observerId;
+			});
+		m_ComponentObservers.erase(it, m_ComponentObservers.end());
+	}
+
+	void Scene::NotifyComponentAdded(Entity entity, entt::id_type componentId)
+	{
+		AssertOwnerThread();
+		// PECS(相机):相机组件提交后同步补建帧数据视图(与 2D 刚体 EnsurePhysicsBody 同一提交点口径)。
+		if (componentId == entt::type_id<CameraComponent>().hash())
+			EnsureCameraView(static_cast<entt::entity>(entity));
+		std::vector<std::function<void(Entity)>> callbacks;
+		callbacks.reserve(m_ComponentObservers.size());
+		for (const auto& observer : m_ComponentObservers)
+		{
+			if (observer.ComponentId == componentId && observer.OnAdd)
+				callbacks.push_back(observer.OnAdd);
+		}
+		for (const auto& cb : callbacks)
+		{
+			cb(entity);
+		}
+	}
+
+	void Scene::NotifyComponentRemoved(Entity entity, entt::id_type componentId)
+	{
+		AssertOwnerThread();
+		std::vector<std::function<void(Entity)>> callbacks;
+		callbacks.reserve(m_ComponentObservers.size());
+		for (const auto& observer : m_ComponentObservers)
+		{
+			if (observer.ComponentId == componentId && observer.OnRemove)
+				callbacks.push_back(observer.OnRemove);
+		}
+		for (const auto& cb : callbacks)
+		{
+			cb(entity);
+		}
+	}
+
+	std::shared_ptr<NavMesh> Scene::GetOrCreateNavMesh()
+	{
+		if (!m_NavMesh)
+			m_NavMesh = std::make_shared<NavMesh>();
+		return m_NavMesh;
+	}
+
+	void Scene::SetScenePath(const std::string& path)
+	{
+		m_ScenePath = path;
+		TryAutoLoadNavMesh();
+	}
+
+	void Scene::TryAutoLoadNavMesh()
+	{
+		if (m_NavMesh && m_NavMesh->GetPolygonCount() > 0)
+			return;
+
+		if (!m_ScenePath.empty())
+		{
+			std::filesystem::path p(m_ScenePath);
+			auto candidate1 = p;
+			candidate1.replace_extension(".wnavmesh");
+			std::error_code ec;
+			if (std::filesystem::exists(candidate1, ec) && !std::filesystem::is_directory(candidate1, ec))
+			{
+				if (GetOrCreateNavMesh()->LoadFromFile(candidate1.string()))
+					return;
+			}
+
+			auto candidate2 = p.parent_path() / (p.stem().string() + ".wnavmesh");
+			if (std::filesystem::exists(candidate2, ec) && !std::filesystem::is_directory(candidate2, ec))
+			{
+				if (GetOrCreateNavMesh()->LoadFromFile(candidate2.string()))
+					return;
+			}
+		}
+	}
+
+	bool Scene::SaveNavMesh(const std::string& path) const
+	{
+		if (!m_NavMesh)
+			return false;
+		std::string targetPath = path;
+		if (targetPath.empty())
+		{
+			if (m_ScenePath.empty())
+				return false;
+			std::filesystem::path p(m_ScenePath);
+			p.replace_extension(".wnavmesh");
+			targetPath = p.string();
+		}
+		return m_NavMesh->SaveToFile(targetPath);
+	}
+
+	bool Scene::LoadNavMesh(const std::string& path)
+	{
+		if (path.empty())
+		{
+			TryAutoLoadNavMesh();
+			return m_NavMesh && m_NavMesh->GetPolygonCount() > 0;
+		}
+		return GetOrCreateNavMesh()->LoadFromFile(path);
+	}
+}
+
+
+

@@ -1,0 +1,18 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 920000000000000004
+  World::TagComponent:
+    Tag: "Audio Demo Sun"
+  World::TransformComponent:
+    Location: [0, 10, 0]
+    Rotation: [-50, 30, 0]
+    Scale: [1, 1, 1]
+  World::DirectionalLightComponent:
+    Color: [1, 0.96, 0.9]
+    Intensity: 1.6
+    Direction: [0.3, -0.8, 0.4]
+    CastShadow: false
+  World::LevelEntityComponent:
+    DataLayerMask: 1

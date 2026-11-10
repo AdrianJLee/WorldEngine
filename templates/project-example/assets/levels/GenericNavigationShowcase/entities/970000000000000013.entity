@@ -1,0 +1,19 @@
+ChunkID: 0
+Entity:
+  World::UUIDComponent:
+    ID:
+      m_UUID: 970000000000000013
+  World::TagComponent:
+    Tag: "Entrance Lobby Beacon"
+  World::TransformComponent:
+    Location: [20.0, 0.8, 4.0]
+    Rotation: [0, 0, 0]
+    Scale: [1, 1, 1]
+  World::MeshRendererComponent:
+    Primitive: 1
+    MeshIndex: 0
+    Color: [0.95, 0.25, 0.25, 1.0]
+    Mesh: ""
+    Material: ""
+  World::LevelEntityComponent:
+    DataLayerMask: 1

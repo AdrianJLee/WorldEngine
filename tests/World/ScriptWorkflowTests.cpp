@@ -1,0 +1,831 @@
+// P2 W8:脚本工作流的 headless 回归(Scripts 面板/编辑器的宿主能力对应的世界侧逻辑)。
+//
+// 覆盖:
+//   1. ResolveScriptDiskPath:合法逻辑路径命中磁盘常规文件并返回绝对路径;"."/".."/绝对
+//      路径/盘符/空串被拒;缺失文件返回 false + error;
+//   2. 包内来源被拒(错误文本含"包内不可编辑")—— 只对已登记的内容上下文 Vfs 查询,
+//      与 ScriptEngine::ReadScriptBytes 的解析顺序一致(headless 只挂包 provider 也能复现);
+//   3. LSP 脚手架 create-if-missing:空目录生成两份文件且内容正确;已存在(改动过的内容)
+//      绝不覆盖。
+//
+// 全程只写自己创建的临时目录,不动工作树内的任何资产。
+
+#include "wldpch.h"
+
+#include "World/Core/Vfs/PackageProvider.h"
+#include "World/Core/WorldContext.h"
+#include "World/Script/Runtime/LuaStubGenerator.h"
+#include "World/Script/Runtime/HotReload.h"
+#include "World/Script/Bindings/BindECS.h"
+#include "World/Script/Bindings/BindEvents.h"
+#include "World/Script/Bindings/BindServices.h"
+#include "World/Script/Bindings/BindAudio.h"
+#include "World/Script/Bindings/BindUI.h"
+#include "World/Script/Runtime/ScriptEngine.h"
+#include "World/Script/Tooling/LuauFormatter.h"
+#include "World/Script/Tooling/LuauHighlighter.h"
+#include "World/Script/Tooling/LuauSyntax.h"
+#include "World/Utils/Paths.h"
+#include "World/WUI/WuiTextBuffer.h"
+
+#include "Generated/Game/GameSchemaRegistration.h"
+
+#include <fstream>
+
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace
+{
+	using namespace World;
+	namespace fs = std::filesystem;
+
+	void Check(bool condition, const char* expression, int line)
+	{
+		if (!condition)
+			throw std::runtime_error(std::string("line ") + std::to_string(line) + ": " + expression);
+	}
+#define CHECK(expression) Check(static_cast<bool>(expression), #expression, __LINE__)
+
+	std::string ReadText(const fs::path& path)
+	{
+		std::ifstream file(path, std::ios::binary);
+		if (!file)
+			throw std::runtime_error("cannot read " + path.generic_string());
+		return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
+	}
+
+	void WriteText(const fs::path& path, const std::string& text)
+	{
+		fs::create_directories(path.parent_path());
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		file.write(text.data(), static_cast<std::streamsize>(text.size()));
+		file.flush();
+		if (!file.good())
+			throw std::runtime_error("cannot write " + path.generic_string());
+	}
+
+	// 与其它 suite 同一模式:测试进程自持一个 WorldContext(无窗口/无 GPU)。
+	WorldContext& TestContext()
+	{
+		static WorldContext context;
+		return context;
+	}
+
+	fs::path RunDirectory()
+	{
+		return fs::temp_directory_path() /
+			("WorldScriptWorkflowTests-" + std::to_string(static_cast<unsigned long long>(GetCurrentProcessId())));
+	}
+
+	struct TempDirectory
+	{
+		fs::path Path;
+		~TempDirectory()
+		{
+			std::error_code ignored;
+			fs::remove_all(Path, ignored);
+		}
+	};
+
+	// ---- 1. 合法路径:命中磁盘上的常规文件,返回绝对路径 ----
+
+	void ResolveDiskPathHitsRealFile()
+	{
+		// 夹具 = 项目模板自带的系统脚本模板(语义仍然是当前的:纯系统脚本,无旧脚本组件)。
+		// 这条用例只要求"磁盘上一个真实存在的脚本",不关心它写什么。
+		const std::string logical = "scripts/templates/WorldScript.lua";
+		const fs::path expected = fs::path(WLD_TEST_ASSETPATH) / fs::path(logical);
+		CHECK(fs::is_regular_file(expected));   // 前提:入库的开发树脚本
+
+		fs::path resolved;
+		std::string error = "stale";
+		CHECK(ResolveScriptDiskPath(logical, resolved, &error));
+		CHECK(error.empty());
+		CHECK(resolved.is_absolute());
+		CHECK(fs::is_regular_file(resolved));
+		CHECK(fs::equivalent(resolved, expected));
+
+		// 反斜杠分隔与重复斜杠走同一条归一化:解析结果一致。
+		fs::path separated;
+		CHECK(ResolveScriptDiskPath("scripts\\templates//WorldScript.lua", separated, nullptr));
+		CHECK(fs::equivalent(separated, resolved));
+	}
+
+	// ---- 2. 非法路径:'.'/'..'/绝对路径/盘符/空串一律拒绝 ----
+
+	void ResolveDiskPathRejectsInvalidPaths()
+	{
+		const char* const invalid[] = {
+			"",
+			".",
+			"..",
+			"../outside.lua",
+			"scripts/../../escape.lua",
+			"/absolute/script.lua",
+			"\\absolute\\script.lua",
+			"C:/absolute/script.lua",
+			"scripts/./probe.lua",
+		};
+		for (const char* candidate : invalid)
+		{
+			fs::path resolved = "unchanged";
+			std::string error;
+			CHECK(!ResolveScriptDiskPath(candidate, resolved, &error));
+			CHECK(!error.empty());
+			CHECK(resolved == fs::path("unchanged"));   // 失败时 out 保持调用前内容
+		}
+	}
+
+	// ---- 3. 缺失文件:false + "not found" 一类的可读错误 ----
+
+	void ResolveDiskPathRejectsMissingFile()
+	{
+		fs::path resolved;
+		std::string error;
+		CHECK(!ResolveScriptDiskPath("scripts/__w8_not_on_disk.lua", resolved, &error));
+		CHECK(error.find("not found") != std::string::npos);
+		CHECK(resolved.empty());
+	}
+
+	// ---- 4. 包内来源:包 provider 命中的逻辑路径不可编辑 ----
+
+	void ResolveDiskPathRejectsPackageSource()
+	{
+		const fs::path directory = RunDirectory() / "package";
+		TempDirectory cleanup { directory };
+		const std::string logical = "scripts/w8/package_probe.luau";
+		// 与 ScriptBinaryLoadTests 同一夹具:先落 cooked 目录,再打成 WPAK2 包。
+		WriteText(directory / "cooked" / fs::path(logical), "return {}\n");
+		const fs::path package = directory / "w8.pak";
+		std::error_code error;
+		CHECK(World::Vfs::PackageProvider::BuildFromDirectory(directory / "cooked", package, error));
+		CHECK(!error);
+		std::shared_ptr<World::Vfs::PackageProvider> provider = World::Vfs::PackageProvider::Open(package, error);
+		CHECK(provider != nullptr);
+		CHECK(!error);
+
+		// 前提:磁盘(开发树)上不存在该逻辑路径 —— 命中只可能来自包。
+		CHECK(!fs::exists(fs::path(WLD_TEST_ASSETPATH) / fs::path(logical)));
+
+		WorldContext& context = TestContext();
+		const Vfs::MountId mountId = context.Vfs().Mount("w8-script-workflow-package", provider, 100);
+		CHECK(mountId != 0);
+		// 登记内容上下文:ResolveScriptDiskPath 与 ScriptEngine::ReadScriptBytes 同一查询顺序
+		// (内容上下文优先,未登记回退 Application),headless 才能复现包内来源。
+		ScriptEngine::Init(context);
+
+		fs::path resolved = "unchanged";
+		std::string message;
+		CHECK(!ResolveScriptDiskPath(logical, resolved, &message));
+		CHECK(message.find("包内不可编辑") != std::string::npos);
+		CHECK(resolved == fs::path("unchanged"));
+
+		context.Vfs().Unmount(mountId);
+	}
+
+	// ---- 5. LSP 脚手架 create-if-missing(空目录生成;已有文件绝不覆盖)----
+
+	void ScaffoldCreateIfMissing()
+	{
+		const fs::path directory = RunDirectory() / "scaffold";
+		TempDirectory cleanup { directory };
+		fs::create_directories(directory);
+
+		std::string error = "stale";
+		CHECK(EnsureScriptEditorScaffold(directory, &error));
+		CHECK(error.empty());
+		const fs::path settings = directory / ".vscode" / "settings.json";
+		const fs::path lspConfig = directory / ".luau-lsp" / "config.json";
+		CHECK(fs::is_regular_file(settings));
+		CHECK(fs::is_regular_file(lspConfig));
+
+		// 内容正确:与入库夹具里的期望样本逐字节一致(HotReload.cpp 的常量文本;`.vscode/`
+		// 与 `.luau-lsp/` 是代码生成物、不在任何项目/模板目录里,样本放在夹具的 scaffold-expected/)。
+		const fs::path expectedScaffold = fs::path(WLD_TEST_ASSETPATH) / "scaffold-expected";
+		CHECK(ReadText(settings) == ReadText(expectedScaffold / "vscode-settings.json"));
+		CHECK(ReadText(lspConfig) == ReadText(expectedScaffold / "luau-lsp-config.json"));
+		CHECK(ReadText(settings).find("assets/scripts/intermediate/WorldEngineAPI.luau") != std::string::npos);
+		CHECK(ReadText(lspConfig).find("assets/scripts/intermediate/WorldEngineAPI.luau") != std::string::npos);
+
+		// 已存在(模拟用户改过的配置)→ 第二次调用不覆盖。
+		const std::string userSettings = "{\n  \"user\": true\n}\n";
+		const std::string userConfig = "{\"mine\": 1}\n";
+		WriteText(settings, userSettings);
+		WriteText(lspConfig, userConfig);
+		CHECK(EnsureScriptEditorScaffold(directory, &error));
+		CHECK(error.empty());
+		CHECK(ReadText(settings) == userSettings);
+		CHECK(ReadText(lspConfig) == userConfig);
+	}
+
+	// ---- 6. 存根漂移门禁:入库的 WorldEngineAPI.luau 必须与"编辑器同一输入"的渲染逐字节一致 ----
+	//
+	// 编辑器启动时把 World + Game 两个 schema 模块都注册进内容上下文,再用
+	// LuaReflectionRegistry + 服务/UI/事件描述表渲染存根。这里复现同一组输入:
+	// 本目标额外编译 Game 的生成式 schema 注册源(见 tests/CMakeLists.txt),
+	// 于是"启动编辑器不会重写存根"在 headless 里等价为"渲染结果 == 入库文件"。
+	//
+	// 渲染入口单独抽出来:漂移门禁与 `--write-stub`(重生成)共用**同一份**输入,
+	// 所以"重生成过的文件必然过门禁",不存在两份实现漂移的余地。
+	std::string RenderStubWithEditorInputs()
+	{
+		WorldContext& context = TestContext();
+		// 与 GameAPI.cpp 的模块初始化同一条注册入口(Game 的 schema 模块)。
+		if (!World::Schema::RegisterGameSchemaModule(context.Schemas()))
+			throw std::runtime_error("could not register the Game schema module for stub rendering");
+
+		const std::vector<const Schema::TypeSchema*> components =
+			context.Schemas().List(Schema::TypeCategory::Component);
+		CHECK(components.size() >= 14);   // 13 个 World 组件 + Game 的 SampleDataComponent
+
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* services = GameplayServiceBindings(&serviceCount);
+		std::vector<const ScriptServiceBinding*> serviceList;
+		serviceList.reserve(serviceCount + 2);
+		for (std::size_t index = 0; index < serviceCount; ++index)
+			serviceList.push_back(&services[index]);
+		std::size_t audioCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&audioCount);
+		for (std::size_t index = 0; index < audioCount; ++index)
+			serviceList.push_back(&audioTables[index]);
+		// W4:events/timers 与 Input/Level/Save 共用服务块链路(ScriptEngine::GenerateLuaStubs 同序)。
+		std::size_t eventCount = 0;
+		const ScriptServiceBinding* eventTables = ScriptEventBindings(&eventCount);
+		for (std::size_t index = 0; index < eventCount; ++index)
+			serviceList.push_back(&eventTables[index]);
+		// Pure ECS:`ecs` / `world` 表与 events/timers 同一条渲染链路(描述表在 BindECS.cpp)。
+		std::size_t ecsCount = 0;
+		const ScriptServiceBinding* ecsTables = ScriptEcsBindings(&ecsCount);
+		for (std::size_t index = 0; index < ecsCount; ++index)
+			serviceList.push_back(&ecsTables[index]);
+
+		std::size_t uiCount = 0;
+		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);
+		std::vector<const ScriptServiceBinding*> uiList;
+		uiList.reserve(uiCount);
+		for (std::size_t index = 0; index < uiCount; ++index)
+			uiList.push_back(&uiTables[index]);
+
+		std::string rendered, error;
+		CHECK(LuaStubGenerator::Render(LuaReflectionRegistry::GetTable(), components, serviceList, uiList,
+			rendered, error));
+		World::Schema::UnregisterGameSchemaModule(context.Schemas());
+		return rendered;
+	}
+
+	fs::path CommittedStubPath()
+	{
+		return fs::path(WLD_TEST_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.luau";
+	}
+
+	void CommittedStubMatchesEditorRendering()
+	{
+		WorldContext& context = TestContext();
+		(void)context;
+		const std::string rendered = RenderStubWithEditorInputs();
+
+		const fs::path committed = CommittedStubPath();
+		CHECK(fs::is_regular_file(committed));
+		// 漂移门禁:逐字节一致(比较前统一 CRLF→LF —— 仓库走 core.autocrlf 时工作树可能是 CRLF,
+		// 那是行尾差异不是内容漂移;2026-09-23 实测过该误报,见 docs/dev/file-norms.md §R3)。
+		const auto normalizeEol = [](std::string text)
+		{
+			std::string out;
+			out.reserve(text.size());
+			for (std::size_t index = 0; index < text.size(); ++index)
+			{
+				if (text[index] == '\r' && index + 1 < text.size() && text[index + 1] == '\n')
+					continue;
+				out.push_back(text[index]);
+			}
+			return out;
+		};
+		CHECK(normalizeEol(ReadText(committed)) == normalizeEol(rendered));
+		// W8 新增:WorldScript 注解包含运行时就存在的 OnUI(self) 回调。
+		CHECK(rendered.find("---@field OnUI? fun(self: WorldScript)") != std::string::npos);
+		CHECK(rendered.find("---@field OnCreate? fun(self: WorldScript)") != std::string::npos);
+
+		// 旧文件名不得回归:入库制品只有 .luau 一份。
+		CHECK(!fs::exists(fs::path(WLD_TEST_ASSETPATH) / "scripts" / "intermediate" / "WorldEngineAPI.lua"));
+	}
+
+	// `--write-stub`:把**同一份**渲染结果写回入库文件(唯一的重生成入口 ——
+	// 手改生成物没有意义,而编辑器那条路径要求真有项目与 Game.dll,CI/无人值守下跑不了)。
+	// 正常测试运行**永不**写盘:只有显式带这个参数才会走到这里。
+	int WriteCommittedStub()
+	{
+		const fs::path committed = CommittedStubPath();
+		const std::string rendered = RenderStubWithEditorInputs();
+		const std::string previous = fs::is_regular_file(committed) ? ReadText(committed) : std::string();
+		std::error_code ec;
+		fs::create_directories(committed.parent_path(), ec);
+		std::ofstream out(committed, std::ios::binary | std::ios::trunc);
+		if (!out.is_open())
+		{
+			std::fprintf(stderr, "--write-stub: cannot write %s\n", committed.string().c_str());
+			return 1;
+		}
+		out << rendered;
+		out.close();
+		if (!out.good())
+		{
+			std::fprintf(stderr, "--write-stub: write failed: %s\n", committed.string().c_str());
+			return 1;
+		}
+		std::printf("--write-stub: %s %s (%zu bytes)\n",
+			previous == rendered ? "unchanged" : "updated", committed.string().c_str(), rendered.size());
+		return 0;
+	}
+
+	// ---- W9.7:语法检查 + 轻量格式化 ----
+
+	void LuauSyntaxFlagsErrors()
+	{
+		World::LuauSyntaxError error;
+		CHECK(World::CheckLuauSyntax("local x = 1\nreturn x\n", "probe", &error));
+		CHECK(!World::CheckLuauSyntax("local x = 1\nlocal y = \n", "probe", &error));
+		// Luau 对 "got <eof>" 报的是 EOF 所在行(带尾换行 = 第 3 行);调用方按缓冲行数夹取。
+		CHECK(error.Line == 3);
+		CHECK(!error.Message.empty());
+	}
+
+	void LuauFormatterReindentsAndTrims()
+	{
+		const std::string messy =
+			"   local a = 1   \n"
+			" function f()\n"
+			"      if a then\n"
+			"    return a\n"
+			"   else\n"
+			" return 0\n"
+			"     end\n"
+			"end\n";
+		const std::string formatted = World::FormatLuauSource(messy);
+		const std::string expected =
+			"local a = 1\n"
+			"function f()\n"
+			"    if a then\n"
+			"        return a\n"
+			"    else\n"
+			"        return 0\n"
+			"    end\n"
+			"end\n";
+		CHECK(formatted == expected);
+
+		// 长字符串内部原样保留(缩进/行尾空白都不改)。
+		const std::string raw =
+			"local s = [[\n"
+			"   keep   me   \n"
+			"]]\n";
+		CHECK(World::FormatLuauSource(raw) == raw);
+
+		// 行内多余空格折叠(用户实测:多打几个空格格式化没效果)。
+		CHECK(World::FormatLuauSource("local   a =    1\n") == "local a = 1\n");
+		CHECK(World::FormatLuauSource("f( a ,  b )\n") == "f(a, b)\n");
+		// 字符串内部空白不动。
+		CHECK(World::FormatLuauSource("local s = \"a   b\"\n") == "local s = \"a   b\"\n");
+	}
+
+	void ReplaceAllIsSingleUndo()
+	{
+		World::Wui::WuiTextBuffer buffer;
+		buffer.SetText("a\nb\n");
+		CHECK(buffer.ReplaceAll("a\nB\n"));
+		CHECK(buffer.Text() == "a\nB\n");
+		CHECK(buffer.Undo());
+		CHECK(buffer.Text() == "a\nb\n");
+		CHECK(buffer.Redo());
+		CHECK(buffer.Text() == "a\nB\n");
+	}
+
+	void AudioServiceBindingsExpose2DAndCombo()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		CHECK(audioTables != nullptr);
+		CHECK(serviceCount == 2);
+		CHECK(std::string(audioTables[0].Name) == "Audio");
+
+		const ScriptServiceMethod* postEvent2D = nullptr;
+		const ScriptServiceMethod* postCombo = nullptr;
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			if (std::string(audioTables[0].Methods[i].Name) == "PostEvent2D")
+				postEvent2D = &audioTables[0].Methods[i];
+			else if (std::string(audioTables[0].Methods[i].Name) == "PostCombo")
+				postCombo = &audioTables[0].Methods[i];
+		}
+		CHECK(postEvent2D != nullptr);
+		CHECK(postEvent2D->ParamCount == 6);
+		CHECK(std::string(postEvent2D->Params[0].Name) == "eventId");
+		CHECK(std::string(postEvent2D->Params[1].Name) == "screenX");
+		CHECK(std::string(postEvent2D->Params[2].Name) == "screenY");
+		CHECK(std::string(postEvent2D->Params[3].Name) == "volume");
+		CHECK(std::string(postEvent2D->Params[4].Name) == "pitch");
+		CHECK(std::string(postEvent2D->Params[5].Name) == "loop");
+
+		CHECK(postCombo != nullptr);
+		CHECK(postCombo->ParamCount == 5);
+		CHECK(std::string(postCombo->Params[0].Name) == "eventId");
+		CHECK(std::string(postCombo->Params[1].Name) == "comboGroup");
+		CHECK(std::string(postCombo->Params[2].Name) == "screenX");
+		CHECK(std::string(postCombo->Params[3].Name) == "screenY");
+		CHECK(std::string(postCombo->Params[4].Name) == "volume");
+	}
+
+	void AudioServiceBindingsExpose3DSpatialAndDspClock()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		CHECK(audioTables != nullptr);
+		CHECK(serviceCount == 2);
+		CHECK(std::string(audioTables[0].Name) == "Audio");
+
+		const ScriptServiceMethod* setVolumetric = nullptr;
+		const ScriptServiceMethod* setVelocity = nullptr;
+		const ScriptServiceMethod* setOcclusion = nullptr;
+		const ScriptServiceMethod* getDspTime = nullptr;
+
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			const std::string name = audioTables[0].Methods[i].Name;
+			if (name == "SetVoiceVolumetricRadius")
+				setVolumetric = &audioTables[0].Methods[i];
+			else if (name == "SetVoiceVelocity")
+				setVelocity = &audioTables[0].Methods[i];
+			else if (name == "SetVoiceOcclusion")
+				setOcclusion = &audioTables[0].Methods[i];
+			else if (name == "GetDspTime")
+				getDspTime = &audioTables[0].Methods[i];
+		}
+
+		CHECK(setVolumetric != nullptr);
+		CHECK(setVolumetric->ParamCount == 2);
+		CHECK(std::string(setVolumetric->Params[0].Name) == "voiceHandle");
+		CHECK(std::string(setVolumetric->Params[1].Name) == "radius");
+
+		CHECK(setVelocity != nullptr);
+		CHECK(setVelocity->ParamCount == 4);
+		CHECK(std::string(setVelocity->Params[0].Name) == "voiceHandle");
+		CHECK(std::string(setVelocity->Params[1].Name) == "vx");
+		CHECK(std::string(setVelocity->Params[2].Name) == "vy");
+		CHECK(std::string(setVelocity->Params[3].Name) == "vz");
+
+		CHECK(setOcclusion != nullptr);
+		CHECK(setOcclusion->ParamCount == 2);
+		CHECK(std::string(setOcclusion->Params[0].Name) == "voiceHandle");
+		CHECK(std::string(setOcclusion->Params[1].Name) == "occlusion");
+
+		CHECK(getDspTime != nullptr);
+		CHECK(getDspTime->ParamCount == 0);
+		CHECK(std::string(getDspTime->ReturnType) == "number");
+	}
+
+	void AudioServiceBindingsExposeRhythmFftAndAiStimulus()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		CHECK(audioTables != nullptr);
+		CHECK(serviceCount == 2);
+		CHECK(std::string(audioTables[0].Name) == "Audio");
+
+		const ScriptServiceMethod* getSpectrum = nullptr;
+		const ScriptServiceMethod* isBeat = nullptr;
+		const ScriptServiceMethod* broadcastStimulus = nullptr;
+		const ScriptServiceMethod* getProfilerStats = nullptr;
+
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			const std::string name = audioTables[0].Methods[i].Name;
+			if (name == "GetSpectrum")
+				getSpectrum = &audioTables[0].Methods[i];
+			else if (name == "IsBeat")
+				isBeat = &audioTables[0].Methods[i];
+			else if (name == "BroadcastAiStimulus")
+				broadcastStimulus = &audioTables[0].Methods[i];
+			else if (name == "GetProfilerStats")
+				getProfilerStats = &audioTables[0].Methods[i];
+		}
+
+		CHECK(getSpectrum != nullptr);
+		CHECK(getSpectrum->ParamCount == 1);
+		CHECK(std::string(getSpectrum->Params[0].Name) == "bandCount");
+		CHECK(!getSpectrum->Params[0].Required);
+		CHECK(std::string(getSpectrum->ReturnType) == "table");
+
+		CHECK(isBeat != nullptr);
+		CHECK(isBeat->ParamCount == 0);
+		CHECK(std::string(isBeat->ReturnType) == "boolean");
+
+		CHECK(broadcastStimulus != nullptr);
+		CHECK(broadcastStimulus->ParamCount == 6);
+		CHECK(std::string(broadcastStimulus->Params[0].Name) == "x");
+		CHECK(std::string(broadcastStimulus->Params[1].Name) == "y");
+		CHECK(std::string(broadcastStimulus->Params[2].Name) == "z");
+		CHECK(std::string(broadcastStimulus->Params[3].Name) == "radius");
+		CHECK(std::string(broadcastStimulus->Params[4].Name) == "loudness");
+		CHECK(std::string(broadcastStimulus->Params[5].Name) == "tag");
+		CHECK(std::string(broadcastStimulus->ReturnType) == "");
+
+		CHECK(getProfilerStats != nullptr);
+		CHECK(getProfilerStats->ParamCount == 0);
+		CHECK(std::string(getProfilerStats->ReturnType) == "table");
+	}
+
+	void AudioBroadcastAiStimulusRecordsCorrectly()
+	{
+		ClearRecentAiStimuli();
+		CHECK(GetRecentAiStimuli().empty());
+
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		const ScriptServiceMethod* broadcastMethod = nullptr;
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			if (std::string(audioTables[0].Methods[i].Name) == "BroadcastAiStimulus")
+			{
+				broadcastMethod = &audioTables[0].Methods[i];
+				break;
+			}
+		}
+		CHECK(broadcastMethod != nullptr);
+
+		const ScriptValue args[] = {
+			ScriptValue::Number(10.5),
+			ScriptValue::Number(2.0),
+			ScriptValue::Number(-15.0),
+			ScriptValue::Number(25.0),
+			ScriptValue::Number(0.85),
+			ScriptValue::String("gunshot")
+		};
+		ScriptValue result = broadcastMethod->Function(args, 6);
+		CHECK(result.IsNil());
+
+		auto stimuli = GetRecentAiStimuli();
+		CHECK(stimuli.size() == 1);
+		CHECK(std::abs(stimuli[0].position.x - 10.5f) < 0.001f);
+		CHECK(std::abs(stimuli[0].position.y - 2.0f) < 0.001f);
+		CHECK(std::abs(stimuli[0].position.z - (-15.0f)) < 0.001f);
+		CHECK(std::abs(stimuli[0].radius - 25.0f) < 0.001f);
+		CHECK(std::abs(stimuli[0].loudness - 0.85f) < 0.001f);
+		CHECK(stimuli[0].tag == "gunshot");
+
+		ClearRecentAiStimuli();
+		CHECK(GetRecentAiStimuli().empty());
+	}
+
+	void AudioIsBeatReturnsBoolean()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		const ScriptServiceMethod* isBeatMethod = nullptr;
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			if (std::string(audioTables[0].Methods[i].Name) == "IsBeat")
+			{
+				isBeatMethod = &audioTables[0].Methods[i];
+				break;
+			}
+		}
+		CHECK(isBeatMethod != nullptr);
+		ScriptValue result = isBeatMethod->Function(nullptr, 0);
+		CHECK(result.IsBoolean());
+	}
+
+	void AudioServiceBindingsExposeRtpcAndFootstep()
+	{
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		CHECK(audioTables != nullptr);
+		CHECK(serviceCount == 2);
+		CHECK(std::string(audioTables[0].Name) == "Audio");
+
+		const ScriptServiceMethod* setParameter = nullptr;
+		const ScriptServiceMethod* setVoiceParameter = nullptr;
+		const ScriptServiceMethod* getParameter = nullptr;
+		const ScriptServiceMethod* playFootstep = nullptr;
+
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			const std::string name = audioTables[0].Methods[i].Name;
+			if (name == "SetParameter")
+				setParameter = &audioTables[0].Methods[i];
+			else if (name == "SetVoiceParameter")
+				setVoiceParameter = &audioTables[0].Methods[i];
+			else if (name == "GetParameter")
+				getParameter = &audioTables[0].Methods[i];
+			else if (name == "PlayFootstep")
+				playFootstep = &audioTables[0].Methods[i];
+		}
+
+		CHECK(setParameter != nullptr);
+		CHECK(setParameter->ParamCount == 2);
+		CHECK(std::string(setParameter->Params[0].Name) == "name");
+		CHECK(std::string(setParameter->Params[1].Name) == "value");
+		CHECK(std::string(setParameter->ReturnType) == "");
+
+		CHECK(setVoiceParameter != nullptr);
+		CHECK(setVoiceParameter->ParamCount == 3);
+		CHECK(std::string(setVoiceParameter->Params[0].Name) == "voiceHandle");
+		CHECK(std::string(setVoiceParameter->Params[1].Name) == "name");
+		CHECK(std::string(setVoiceParameter->Params[2].Name) == "value");
+		CHECK(std::string(setVoiceParameter->ReturnType) == "");
+
+		CHECK(getParameter != nullptr);
+		CHECK(getParameter->ParamCount == 1);
+		CHECK(std::string(getParameter->Params[0].Name) == "name");
+		CHECK(std::string(getParameter->ReturnType) == "number");
+
+		CHECK(playFootstep != nullptr);
+		CHECK(playFootstep->ParamCount == 4);
+		CHECK(std::string(playFootstep->Params[0].Name) == "surface");
+		CHECK(playFootstep->Params[0].Required);
+		CHECK(std::string(playFootstep->Params[1].Name) == "x");
+		CHECK(!playFootstep->Params[1].Required);
+		CHECK(std::string(playFootstep->Params[2].Name) == "y");
+		CHECK(!playFootstep->Params[2].Required);
+		CHECK(std::string(playFootstep->Params[3].Name) == "z");
+		CHECK(!playFootstep->Params[3].Required);
+		CHECK(std::string(playFootstep->ReturnType) == "number");
+	}
+
+	void AudioRtpcAndFootstepFunctionality()
+	{
+		ClearAudioParameters();
+		CHECK(std::abs(GetAudioParameter("RainIntensity") - 0.0f) < 0.001f);
+
+		std::size_t serviceCount = 0;
+		const ScriptServiceBinding* audioTables = AudioServiceBindings(&serviceCount);
+		const ScriptServiceMethod* setParamMethod = nullptr;
+		const ScriptServiceMethod* getParamMethod = nullptr;
+		const ScriptServiceMethod* setVoiceParamMethod = nullptr;
+		const ScriptServiceMethod* playFootstepMethod = nullptr;
+
+		for (std::size_t i = 0; i < audioTables[0].MethodCount; ++i)
+		{
+			const std::string name = audioTables[0].Methods[i].Name;
+			if (name == "SetParameter")
+				setParamMethod = &audioTables[0].Methods[i];
+			else if (name == "GetParameter")
+				getParamMethod = &audioTables[0].Methods[i];
+			else if (name == "SetVoiceParameter")
+				setVoiceParamMethod = &audioTables[0].Methods[i];
+			else if (name == "PlayFootstep")
+				playFootstepMethod = &audioTables[0].Methods[i];
+		}
+
+		CHECK(setParamMethod != nullptr);
+		CHECK(getParamMethod != nullptr);
+		CHECK(setVoiceParamMethod != nullptr);
+		CHECK(playFootstepMethod != nullptr);
+
+		// Test SetParameter & GetParameter via script binding function
+		const ScriptValue setArgs[] = {
+			ScriptValue::String("RainIntensity"),
+			ScriptValue::Number(0.75)
+		};
+		ScriptValue setRes = setParamMethod->Function(setArgs, 2);
+		CHECK(setRes.IsNil());
+
+		const ScriptValue getArgs[] = {
+			ScriptValue::String("RainIntensity")
+		};
+		ScriptValue getRes = getParamMethod->Function(getArgs, 1);
+		CHECK(getRes.IsNumber());
+		double paramVal = 0.0;
+		CHECK(getRes.AsNumber(&paramVal));
+		CHECK(std::abs(paramVal - 0.75) < 0.001);
+
+		// Direct C++ API verification
+		CHECK(std::abs(GetAudioParameter("RainIntensity") - 0.75f) < 0.001f);
+
+		// Test SetVoiceParameter
+		const ScriptValue voiceArgs[] = {
+			ScriptValue::Number(1001.0),
+			ScriptValue::String("Cutoff"),
+			ScriptValue::Number(1200.0)
+		};
+		ScriptValue voiceRes = setVoiceParamMethod->Function(voiceArgs, 3);
+		CHECK(voiceRes.IsNil());
+		CHECK(std::abs(GetVoiceAudioParameter(1001, "Cutoff") - 1200.0f) < 0.001f);
+
+		// Test PlayFootstep with surface materials Grass, Stone, Wood
+		const ScriptValue stepGrass[] = {
+			ScriptValue::String("Grass"),
+			ScriptValue::Number(1.0),
+			ScriptValue::Number(0.0),
+			ScriptValue::Number(2.0)
+		};
+		ScriptValue grassRes = playFootstepMethod->Function(stepGrass, 4);
+		CHECK(grassRes.IsNumber());
+
+		const ScriptValue stepStone[] = {
+			ScriptValue::String("Stone")
+		};
+		ScriptValue stoneRes = playFootstepMethod->Function(stepStone, 1);
+		CHECK(stoneRes.IsNumber());
+
+		const ScriptValue stepWood[] = {
+			ScriptValue::String("Wood"),
+			ScriptValue::Number(5.0),
+			ScriptValue::Number(1.0)
+		};
+		ScriptValue woodRes = playFootstepMethod->Function(stepWood, 3);
+		CHECK(woodRes.IsNumber());
+
+		ClearAudioParameters();
+		CHECK(std::abs(GetAudioParameter("RainIntensity") - 0.0f) < 0.001f);
+		CHECK(std::abs(GetVoiceAudioParameter(1001, "Cutoff") - 0.0f) < 0.001f);
+	}
+
+	int RunAll()
+	{
+		const std::pair<const char*, void(*)()> tests[] = {
+			{ "Audio service descriptors expose 2D screen panning and combo escalation", AudioServiceBindingsExpose2DAndCombo },
+			{ "Audio service descriptors expose 3D spatial parameters and DSP clock", AudioServiceBindingsExpose3DSpatialAndDspClock },
+			{ "Audio service descriptors expose rhythm beat, FFT spectrum, AI stimulus, and profiler", AudioServiceBindingsExposeRhythmFftAndAiStimulus },
+			{ "Audio BroadcastAiStimulus records acoustic stimuli with tag and coordinates", AudioBroadcastAiStimulusRecordsCorrectly },
+			{ "Audio IsBeat returns valid boolean state", AudioIsBeatReturnsBoolean },
+			{ "Audio service descriptors expose RTPC parameter control and surface footstep", AudioServiceBindingsExposeRtpcAndFootstep },
+			{ "Audio SetParameter, GetParameter, SetVoiceParameter, and PlayFootstep execute correctly", AudioRtpcAndFootstepFunctionality },
+			{ "ResolveScriptDiskPath hits a real disk file", ResolveDiskPathHitsRealFile },
+			{ "ResolveScriptDiskPath rejects invalid logical paths", ResolveDiskPathRejectsInvalidPaths },
+			{ "ResolveScriptDiskPath rejects a missing file", ResolveDiskPathRejectsMissingFile },
+			{ "ResolveScriptDiskPath rejects package-sourced scripts", ResolveDiskPathRejectsPackageSource },
+			{ "LSP scaffold is created if missing and never overwritten", ScaffoldCreateIfMissing },
+			{ "committed WorldEngineAPI.luau matches the editor renderer", CommittedStubMatchesEditorRendering },
+			{ "CheckLuauSyntax flags the error line", LuauSyntaxFlagsErrors },
+			{ "FormatLuauSource reindents/trims but keeps long strings", LuauFormatterReindentsAndTrims },
+			{ "WuiTextBuffer::ReplaceAll is a single undo step", ReplaceAllIsSingleUndo },
+		};
+		int failures = 0;
+		for (const auto& [name, test] : tests)
+		{
+			try
+			{
+				test();
+				std::printf("[PASS] %s\n", name);
+			}
+			catch (const std::exception& error)
+			{
+				++failures;
+				std::fprintf(stderr, "[FAIL] %s: %s\n", name, error.what());
+			}
+			catch (...)
+			{
+				++failures;
+				std::fprintf(stderr, "[FAIL] %s: unknown exception\n", name);
+			}
+		}
+		return failures;
+	}
+}
+
+int main(int argc, char** argv)
+{
+	try
+	{
+		// PROJ-7/T1:内容根 = 仓库内测试夹具(tests/fixtures/content)。ResolveScriptDiskPath
+		// 走引擎的 World::Paths::AssetRoot() 磁盘回退,必须与夹具一致,否则下面断言到的
+		// 只是项目目录里的副本;脚手架期望样本与存根也都在夹具里。
+		World::Paths::SetAssetRootOverride(WLD_TEST_ASSETPATH);
+		World::Log::Init();
+		World::ScriptEngine::Init();
+		bool writeStub = false;
+		for (int index = 1; index < argc; ++index)
+		{
+			const std::string argument = argv[index] ? argv[index] : "";
+			if (argument == "--write-stub")
+				writeStub = true;
+		}
+		const int failures = writeStub ? WriteCommittedStub() : RunAll();
+		World::ScriptEngine::Shutdown();
+		if (failures == 0)
+		{
+			if (!writeStub)
+				std::printf("World.ScriptWorkflow: all checks passed\n");
+			return 0;
+		}
+		std::fprintf(stderr, "World.ScriptWorkflow: %d group(s) failed\n", failures);
+		return 1;
+	}
+	catch (const std::exception& error)
+	{
+		std::fprintf(stderr, "Test setup failed: %s\n", error.what());
+		if (World::ScriptEngine::IsInitialized())
+			World::ScriptEngine::Shutdown();
+		return 1;
+	}
+	catch (...)
+	{
+		std::fprintf(stderr, "Test setup failed: unknown exception\n");
+		if (World::ScriptEngine::IsInitialized())
+			World::ScriptEngine::Shutdown();
+		return 1;
+	}
+}
