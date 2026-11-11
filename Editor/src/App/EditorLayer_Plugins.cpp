@@ -1676,9 +1676,9 @@ void EditorLayer::OnEvent(Event& event){
 					else
 					{
 						// RotateInPlace 自由漫游模式(按住右键拖拽):
-						// 水平向右看, 鼠标向前推(dy < 0)俯视看地面, 向后拉(dy > 0)抬头看天。
+						// 行业标准第一人称视角: 鼠标向右看(dx > 0), 鼠标向前推(dy < 0)仰头看天, 向后拉(dy > 0)低头看地。
 						const float deltaYaw = dx * kSensitivity;
-						const float deltaPitch = -dy * kSensitivity;
+						const float deltaPitch = dy * kSensitivity;
 						m_EditorCamera3D.RotateInPlace(deltaYaw, deltaPitch);
 					}
 					return true;
