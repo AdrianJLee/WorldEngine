@@ -2397,7 +2397,7 @@ namespace World
 
 		// ---- 创作动词:AI 必须能在编辑器活动场景里真正建/删实体、加/删组件 ----
 		// 没有这些,模型只能调 scene.set 改已有对象,或者绕开 Editor 去写文件。
-		if (cmd == "scene.create_entity")
+		if (cmd == "scene.create_entity" || cmd == "scene.create.entity")
 		{
 			if (!m_ActiveScene) { error = "no active scene"; return false; }
 			if (m_SceneState != SceneState::Edit) { error = "scene is read-only in Play/Simulate; exit Play first"; return false; }

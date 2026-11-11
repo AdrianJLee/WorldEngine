@@ -205,19 +205,7 @@ namespace World::Ai
 					});
 				}
 
-				// 静态 API 契约审计：拦截面向对象冒号误用 (如 Input:Down, Input:IsKeyPressed)
-				if (source.find("Input:Down") != std::string::npos ||
-					source.find("Input:IsKeyPressed") != std::string::npos ||
-					source.find("Input:Pressed") != std::string::npos ||
-					source.find("Input:Released") != std::string::npos)
-				{
-					report.errors.push_back({
-						"ERR_LUAU_STATIC_API_VIOLATION",
-						entry.path().string(),
-						0,
-						"Static API Contract Violation: 'Input' library methods must be called statically via dot (e.g. Input.Down), NOT with colon (Input:Down)."
-					});
-				}
+				// 静态 API 契约审计：已全面支持 NormalizeArgs 冒号与点号自适应调用，无需语法阻断
 				++scriptsChecked;
 			}
 		}
@@ -934,6 +922,99 @@ namespace World::Ai
 
 	void SelfValidation::RegisterCommands(CommandRegistry& reg)
 	{
+		// 0. project.info
+		CommandDescriptor infoCmd;
+		infoCmd.name = "project.info";
+		infoCmd.description = "Query current project metadata, active level, content root and asset inventory.";
+		infoCmd.effect = CommandEffect::Read;
+		infoCmd.scope = CommandScope::Both;
+		infoCmd.owner = "engine";
+		infoCmd.paramsSchema = R"raw({"type":"object","properties":{"root":{"type":"string"}}})raw";
+		infoCmd.resultSchema = R"raw({"type":"object"})raw";
+		infoCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
+		{
+			const std::string root = args.count("root") ? args.at("root") : "";
+			const fs::path rootPath = root.empty() ? Paths::ProjectDir() : fs::path(root);
+			const fs::path assetRoot = Paths::AssetRoot();
+
+			std::vector<std::string> levels;
+			std::vector<std::string> scripts;
+			std::error_code ec;
+			if (fs::exists(assetRoot, ec))
+			{
+				for (const auto& entry : fs::recursive_directory_iterator(assetRoot, ec))
+				{
+					if (!entry.is_regular_file()) continue;
+					const auto ext = entry.path().extension().string();
+					std::string rel = fs::relative(entry.path(), assetRoot, ec).generic_string();
+					if (ext == ".wlevel") levels.push_back(rel);
+					else if (ext == ".luau" || ext == ".lua") scripts.push_back(rel);
+				}
+			}
+
+			std::ostringstream ss;
+			ss << "{\"project_dir\":\"" << rootPath.generic_string() << "\","
+			   << "\"asset_root\":\"" << assetRoot.generic_string() << "\","
+			   << "\"manifest_exists\":" << (fs::exists(rootPath / "project.we.yaml", ec) ? "true" : "false") << ","
+			   << "\"levels_count\":" << levels.size() << ","
+			   << "\"scripts_count\":" << scripts.size() << "}";
+			result = ss.str();
+			return true;
+		};
+		reg.RegisterCommand(std::move(infoCmd));
+
+		// 0.1 asset.list
+		CommandDescriptor assetListCmd;
+		assetListCmd.name = "asset.list";
+		assetListCmd.description = "List all assets in the project content root categorized by type.";
+		assetListCmd.effect = CommandEffect::Read;
+		assetListCmd.scope = CommandScope::Both;
+		assetListCmd.owner = "engine";
+		assetListCmd.paramsSchema = R"raw({"type":"object","properties":{"type":{"type":"string"}}})raw";
+		assetListCmd.resultSchema = R"raw({"type":"object"})raw";
+		assetListCmd.handler = [](const std::map<std::string, std::string>& args, std::string& result, std::string& /*error*/)
+		{
+			const fs::path assetRoot = Paths::AssetRoot();
+			std::string typeFilter = args.count("type") ? args.at("type") : "";
+			for (char& c : typeFilter) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+			std::error_code ec;
+			std::vector<std::string> items;
+			if (fs::exists(assetRoot, ec))
+			{
+				for (const auto& entry : fs::recursive_directory_iterator(assetRoot, ec))
+				{
+					if (!entry.is_regular_file()) continue;
+					const auto ext = entry.path().extension().string();
+					std::string rel = fs::relative(entry.path(), assetRoot, ec).generic_string();
+
+					bool match = true;
+					if (!typeFilter.empty())
+					{
+						if (typeFilter == "model" && ext != ".wmodel" && ext != ".glb" && ext != ".gltf") match = false;
+						else if (typeFilter == "material" && ext != ".wmat") match = false;
+						else if (typeFilter == "audio" && ext != ".wav" && ext != ".mp3" && ext != ".ogg" && ext != ".waudio" && ext != ".wsound") match = false;
+						else if (typeFilter == "script" && ext != ".luau" && ext != ".lua") match = false;
+						else if (typeFilter == "scene" && ext != ".wlevel") match = false;
+						else if (typeFilter == "ui" && ext != ".wui") match = false;
+					}
+					if (match) items.push_back(rel);
+				}
+			}
+
+			std::ostringstream ss;
+			ss << "{\"count\":" << items.size() << ",\"assets\":[";
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				if (i > 0) ss << ",";
+				ss << "\"" << items[i] << "\"";
+			}
+			ss << "]}";
+			result = ss.str();
+			return true;
+		};
+		reg.RegisterCommand(std::move(assetListCmd));
+
 		// 1. project.validate
 		CommandDescriptor projCmd;
 		projCmd.name = "project.validate";

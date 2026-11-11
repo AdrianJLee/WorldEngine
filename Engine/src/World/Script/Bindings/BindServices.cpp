@@ -1007,6 +1007,12 @@ namespace World
 				if (str == "TAB") return KeyCodes::Tab;
 				if (str == "ESCAPE" || str == "ESC") return KeyCodes::Escape;
 				if (str == "ENTER" || str == "RETURN") return KeyCodes::Enter;
+				if (str == "SHIFT" || str == "LSHIFT" || str == "LEFTSHIFT") return KeyCodes::LeftShift;
+				if (str == "RSHIFT" || str == "RIGHTSHIFT") return KeyCodes::RightShift;
+				if (str == "CTRL" || str == "LCTRL" || str == "CONTROL") return KeyCodes::LeftControl;
+				if (str == "ALT" || str == "LALT") return KeyCodes::LeftAlt;
+				if (str == "BACKSPACE") return KeyCodes::Backspace;
+				if (str == "DELETE" || str == "DEL") return KeyCodes::Delete;
 				if (str == "LEFT") return KeyCodes::Left;
 				if (str == "RIGHT") return KeyCodes::Right;
 				if (str == "UP") return KeyCodes::Up;
@@ -1159,6 +1165,124 @@ namespace World
 			(void)count;
 			return ScriptValue::String(std::string(EngineEnvironment::GetHostModeName()));
 		}
+
+		double ReadNumber(const ScriptValue* args, std::size_t count, std::size_t index, double fallback = 0.0)
+		{
+			if (index < count && args[index].IsNumber())
+			{
+				double v = 0.0;
+				if (args[index].AsNumber(&v)) return v;
+			}
+			return fallback;
+		}
+
+		ScriptValue MathLerpImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			double a = ReadNumber(args, count, 0, 0.0);
+			double b = ReadNumber(args, count, 1, 0.0);
+			double t = ReadNumber(args, count, 2, 0.0);
+			return ScriptValue::Number(a + (b - a) * t);
+		}
+
+		ScriptValue MathClampImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			double v = ReadNumber(args, count, 0, 0.0);
+			double minVal = ReadNumber(args, count, 1, 0.0);
+			double maxVal = ReadNumber(args, count, 2, 1.0);
+			return ScriptValue::Number(std::clamp(v, minVal, maxVal));
+		}
+
+		ScriptValue MathApproachImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			double current = ReadNumber(args, count, 0, 0.0);
+			double target = ReadNumber(args, count, 1, 0.0);
+			double maxDelta = ReadNumber(args, count, 2, 0.0);
+			if (current < target) return ScriptValue::Number(std::min(current + maxDelta, target));
+			return ScriptValue::Number(std::max(current - maxDelta, target));
+		}
+
+		ScriptValue MathSmoothDampImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			float current = static_cast<float>(ReadNumber(args, count, 0, 0.0));
+			float target = static_cast<float>(ReadNumber(args, count, 1, 0.0));
+			float currentVelocity = static_cast<float>(ReadNumber(args, count, 2, 0.0));
+			float smoothTime = static_cast<float>(ReadNumber(args, count, 3, 0.1));
+			float maxSpeed = static_cast<float>(ReadNumber(args, count, 4, 1e9));
+			float dt = static_cast<float>(ReadNumber(args, count, 5, 0.0166667));
+
+			smoothTime = std::max(0.0001f, smoothTime);
+			float omega = 2.0f / smoothTime;
+			float x = omega * dt;
+			float expVal = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
+			float change = current - target;
+			float originalTo = target;
+			float maxChange = maxSpeed * smoothTime;
+			change = std::clamp(change, -maxChange, maxChange);
+			target = current - change;
+			float temp = (currentVelocity + omega * change) * dt;
+			currentVelocity = (currentVelocity - omega * temp) * expVal;
+			float output = target + (change + temp) * expVal;
+			if ((originalTo - current > 0.0f) == (output > originalTo))
+			{
+				output = originalTo;
+				currentVelocity = (output - originalTo) / (dt > 1e-6f ? dt : 1e-6f);
+			}
+
+			ScriptTableRef res = MakeScriptTable();
+			if (res.IsValid())
+			{
+				res.SetField("value", ScriptValue::Number(static_cast<double>(output)));
+				res.SetField("velocity", ScriptValue::Number(static_cast<double>(currentVelocity)));
+				return res.ToValue();
+			}
+			return ScriptValue::Number(static_cast<double>(output));
+		}
+
+		ScriptValue MathEaseInImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			double t = std::clamp(ReadNumber(args, count, 0, 0.0), 0.0, 1.0);
+			return ScriptValue::Number(t * t);
+		}
+
+		ScriptValue MathEaseOutImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			double t = std::clamp(ReadNumber(args, count, 0, 0.0), 0.0, 1.0);
+			return ScriptValue::Number(t * (2.0 - t));
+		}
+
+		ScriptValue MathEaseInOutImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			double t = std::clamp(ReadNumber(args, count, 0, 0.0), 0.0, 1.0);
+			return ScriptValue::Number(t < 0.5 ? 2.0 * t * t : -1.0 + (4.0 - 2.0 * t) * t);
+		}
+
+		ScriptValue MathBounceOutImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			float t = static_cast<float>(std::clamp(ReadNumber(args, count, 0, 0.0), 0.0, 1.0));
+			if (t < (1.0f / 2.75f))
+				return ScriptValue::Number(7.5625 * t * t);
+			if (t < (2.0f / 2.75f))
+			{
+				t -= (1.5f / 2.75f);
+				return ScriptValue::Number(7.5625 * t * t + 0.75);
+			}
+			if (t < (2.5f / 2.75f))
+			{
+				t -= (2.25f / 2.75f);
+				return ScriptValue::Number(7.5625 * t * t + 0.9375);
+			}
+			t -= (2.625f / 2.75f);
+			return ScriptValue::Number(7.5625 * t * t + 0.984375);
+		}
+
 
 const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 	{
@@ -1519,6 +1643,44 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 			}, nullptr, 0, 0, "string",
 				"Last save/load error; empty when the last operation succeeded." },
 		};
+		static const ScriptServiceParam mathLerpParams[] = {
+			{ "a", "number", ScriptServiceArgType::Number, true, "Start value." },
+			{ "b", "number", ScriptServiceArgType::Number, true, "End value." },
+			{ "t", "number", ScriptServiceArgType::Number, true, "Alpha factor [0, 1]." },
+		};
+		static const ScriptServiceParam mathClampParams[] = {
+			{ "v", "number", ScriptServiceArgType::Number, true, "Input value." },
+			{ "min", "number", ScriptServiceArgType::Number, true, "Minimum limit." },
+			{ "max", "number", ScriptServiceArgType::Number, true, "Maximum limit." },
+		};
+		static const ScriptServiceParam mathApproachParams[] = {
+			{ "current", "number", ScriptServiceArgType::Number, true, "Current value." },
+			{ "target", "number", ScriptServiceArgType::Number, true, "Target value." },
+			{ "maxDelta", "number", ScriptServiceArgType::Number, true, "Maximum step delta." },
+		};
+		static const ScriptServiceParam mathSmoothDampParams[] = {
+			{ "current", "number", ScriptServiceArgType::Number, true, "Current position/value." },
+			{ "target", "number", ScriptServiceArgType::Number, true, "Target position/value." },
+			{ "currentVelocity", "number", ScriptServiceArgType::Number, true, "Current velocity (rate of change)." },
+			{ "smoothTime", "number", ScriptServiceArgType::Number, true, "Approximate time to reach target." },
+			{ "maxSpeed", "number", ScriptServiceArgType::Number, false, "Optionally clamp maximum speed." },
+			{ "dt", "number", ScriptServiceArgType::Number, false, "Delta time in seconds (default ~0.0166s)." },
+		};
+		static const ScriptServiceParam mathTParam[] = {
+			{ "t", "number", ScriptServiceArgType::Number, true, "Normalized progress [0, 1]." },
+		};
+
+		static const ScriptServiceMethod mathMethods[] = {
+			{ "Lerp", [](const ScriptValue* args, std::size_t count) -> ScriptValue { return MathLerpImpl(args, count); }, mathLerpParams, 3, 3, "number", "Linear interpolation between a and b by t." },
+			{ "Clamp", [](const ScriptValue* args, std::size_t count) -> ScriptValue { return MathClampImpl(args, count); }, mathClampParams, 3, 3, "number", "Clamp value between min and max." },
+			{ "Approach", [](const ScriptValue* args, std::size_t count) -> ScriptValue { return MathApproachImpl(args, count); }, mathApproachParams, 3, 3, "number", "Step current towards target by maxDelta without overshooting." },
+			{ "SmoothDamp", [](const ScriptValue* args, std::size_t count) -> ScriptValue { return MathSmoothDampImpl(args, count); }, mathSmoothDampParams, 6, 6, "table", "Critically damped spring-damper interpolation; returns {value, velocity} table." },
+			{ "EaseIn", [](const ScriptValue* args, std::size_t count) -> ScriptValue { return MathEaseInImpl(args, count); }, mathTParam, 1, 1, "number", "Quadratic Ease-In curve." },
+			{ "EaseOut", [](const ScriptValue* args, std::size_t count) -> ScriptValue { return MathEaseOutImpl(args, count); }, mathTParam, 1, 1, "number", "Quadratic Ease-Out curve." },
+			{ "EaseInOut", [](const ScriptValue* args, std::size_t count) -> ScriptValue { return MathEaseInOutImpl(args, count); }, mathTParam, 1, 1, "number", "Quadratic Ease-In-Out curve." },
+			{ "BounceOut", [](const ScriptValue* args, std::size_t count) -> ScriptValue { return MathBounceOutImpl(args, count); }, mathTParam, 1, 1, "number", "Elastic bounce-out easing curve." },
+		};
+
 		static const ScriptServiceMethod appMethods[] = {
 			{ "Quit", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -1567,6 +1729,7 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 			{ "Save", "Read-only save service table; migrations, traits and paths are not exposed.", saveMethods, sizeof(saveMethods) / sizeof(saveMethods[0]) },
 			{ "Time", "Read-only frame-time service table; advancement stays engine-side and scripts cannot write it.", timeMethods, sizeof(timeMethods) / sizeof(timeMethods[0]) },
 			{ "App", "Application lifecycle service table; manages graceful shutdown and process lifecycle.", appMethods, sizeof(appMethods) / sizeof(appMethods[0]) },
+			{ "Math", "Game math and tween interpolation service for smooth animations, easing, and damping.", mathMethods, sizeof(mathMethods) / sizeof(mathMethods[0]) },
 		};
 		if (count)
 			*count = sizeof(services) / sizeof(services[0]);

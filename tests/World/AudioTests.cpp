@@ -1516,6 +1516,28 @@ static void TestAudioFileMultiFormatLoader()
 	assert(oggBuf.GetSampleRate() == 44100);
 	std::filesystem::remove(tempOgg);
 
+	// 3. Direct Audio File Bypass & Extensionless Candidate Verification
+	{
+		SoundEvent emptyEvt("dummy", kBusMaster);
+		assert(!emptyEvt.DeserializeYaml(""));
+		assert(!emptyEvt.DeserializeYaml("RIFF\x24\x00\x00\x00WAVEfmt "));
+
+		std::string directWav = "test_direct_sound.wav";
+		AudioBuffer sine = AudioBuffer::GenerateSineWave(440.0f, 0.2f, 0.5f, 44100);
+		bool saveOk = AudioCooker::SaveWavFile(directWav, sine);
+		assert(saveOk);
+
+		AudioSystem& audio = AudioSystem::Get();
+		VoiceHandle vh = audio.PostEvent2D(directWav, 0.8f, 1.0f);
+		assert(vh != kInvalidVoiceHandle);
+
+		auto buf = audio.FindAudioBuffer("test_direct_sound");
+		assert(buf != nullptr);
+		assert(buf->GetFrameCount() > 0);
+
+		std::filesystem::remove(directWav);
+	}
+
 	std::cout << "  -> Passed." << std::endl;
 }
 

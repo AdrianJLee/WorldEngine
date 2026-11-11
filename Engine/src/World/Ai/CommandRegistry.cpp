@@ -131,10 +131,21 @@ namespace World::Ai
 		}
 	}
 
+	static std::string ResolveCommandAlias(const std::string& name)
+	{
+		if (name == "scene.create.entity") return "scene.create_entity";
+		if (name == "scene.delete.entity") return "scene.delete_entity";
+		if (name == "scene.create.level") return "scene.create_level";
+		if (name == "schema.list.commands") return "ai.capabilities";
+		if (name == "project.status") return "project.info";
+		return name;
+	}
+
 	bool CommandRegistry::HasCommand(const std::string& name) const
 	{
 		std::lock_guard<std::mutex> lock(m_Mutex);
-		return m_Commands.find(name) != m_Commands.end();
+		if (m_Commands.find(name) != m_Commands.end()) return true;
+		return m_Commands.find(ResolveCommandAlias(name)) != m_Commands.end();
 	}
 
 	const CommandDescriptor* CommandRegistry::GetDescriptor(const std::string& name) const
@@ -167,6 +178,10 @@ namespace World::Ai
 		{
 			std::lock_guard<std::mutex> lock(m_Mutex);
 			auto it = m_Commands.find(name);
+			if (it == m_Commands.end())
+			{
+				it = m_Commands.find(ResolveCommandAlias(name));
+			}
 			if (it == m_Commands.end())
 			{
 				error = "unknown command '" + name + "'";

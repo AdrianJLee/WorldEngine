@@ -937,6 +937,168 @@ namespace World
 		// -------------------------------------------------------------------------
 		// ecs:CreateRawEntity() 实现 (零 Tag / 零 UUID 的轻量匿名实体)
 		// -------------------------------------------------------------------------
+		void NormalizeArgs(const ScriptValue*& args, std::size_t& count)
+		{
+			if (count > 0 && args[0].IsTable())
+			{
+				++args;
+				--count;
+			}
+		}
+
+		ScriptValue CreateMeshImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 2)
+				throw std::logic_error("ecs:CreateMesh expects at least (name, meshPath)");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateMesh requires an active scene");
+
+			std::string name = "Mesh";
+			args[0].AsString(&name);
+			std::string meshPath;
+			args[1].AsString(&meshPath);
+			std::string matPath;
+			if (count >= 3 && args[2].IsString()) args[2].AsString(&matPath);
+
+			float x = 0, y = 0, z = 0;
+			if (count >= 4 && args[3].IsNumber()) { double v; args[3].AsNumber(&v); x = static_cast<float>(v); }
+			if (count >= 5 && args[4].IsNumber()) { double v; args[4].AsNumber(&v); y = static_cast<float>(v); }
+			if (count >= 6 && args[5].IsNumber()) { double v; args[5].AsNumber(&v); z = static_cast<float>(v); }
+
+			float rx = 0, ry = 0, rz = 0;
+			if (count >= 7 && args[6].IsNumber()) { double v; args[6].AsNumber(&v); rx = static_cast<float>(v); }
+			if (count >= 8 && args[7].IsNumber()) { double v; args[7].AsNumber(&v); ry = static_cast<float>(v); }
+			if (count >= 9 && args[8].IsNumber()) { double v; args[8].AsNumber(&v); rz = static_cast<float>(v); }
+
+			float sx = 1, sy = 1, sz = 1;
+			if (count >= 10 && args[9].IsNumber()) { double v; args[9].AsNumber(&v); sx = static_cast<float>(v); }
+			if (count >= 11 && args[10].IsNumber()) { double v; args[10].AsNumber(&v); sy = static_cast<float>(v); }
+			if (count >= 12 && args[11].IsNumber()) { double v; args[11].AsNumber(&v); sz = static_cast<float>(v); }
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			auto& tc = entity.AddComponent<TransformComponent>(glm::vec3{ x, y, z }, glm::vec3{ rx, ry, rz }, glm::vec3{ sx, sy, sz });
+
+			auto& mc = entity.AddComponent<MeshRendererComponent>();
+			mc.Mesh = AssetRef::FromPath(meshPath);
+			if (!matPath.empty()) mc.Material = AssetRef::FromPath(matPath);
+
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
+		ScriptValue CreateLightImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateLight requires an active scene");
+
+			std::string name = "Light";
+			if (count >= 1 && args[0].IsString()) args[0].AsString(&name);
+			std::string type = "directional";
+			if (count >= 2 && args[1].IsString()) args[1].AsString(&type);
+			for (char& c : type) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+			glm::vec3 col{ 1.0f, 0.98f, 0.92f };
+			if (count >= 3 && args[2].IsString())
+			{
+				std::string hex;
+				args[2].AsString(&hex);
+				if (!hex.empty() && hex[0] == '#') hex = hex.substr(1);
+				if (hex.length() >= 6)
+				{
+					try {
+						unsigned long val = std::stoul(hex.substr(0, 6), nullptr, 16);
+						col.r = ((val >> 16) & 0xFF) / 255.0f;
+						col.g = ((val >> 8) & 0xFF) / 255.0f;
+						col.b = (val & 0xFF) / 255.0f;
+					} catch (...) {}
+				}
+			}
+
+			float intensity = 1.0f;
+			if (count >= 4 && args[3].IsNumber()) { double v; args[3].AsNumber(&v); intensity = static_cast<float>(v); }
+
+			float x = 0, y = 10, z = 0;
+			if (count >= 5 && args[4].IsNumber()) { double v; args[4].AsNumber(&v); x = static_cast<float>(v); }
+			if (count >= 6 && args[5].IsNumber()) { double v; args[5].AsNumber(&v); y = static_cast<float>(v); }
+			if (count >= 7 && args[6].IsNumber()) { double v; args[6].AsNumber(&v); z = static_cast<float>(v); }
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			auto& tc = entity.AddComponent<TransformComponent>(glm::vec3{ x, y, z });
+
+			if (type == "point")
+			{
+				auto& plc = entity.AddComponent<PointLightComponent>();
+				plc.Color = col;
+				plc.Intensity = intensity;
+			}
+			else if (type == "ambient")
+			{
+				auto& alc = entity.AddComponent<AmbientLightComponent>();
+				alc.Color = col;
+				alc.Intensity = intensity;
+			}
+			else
+			{
+				auto& dlc = entity.AddComponent<DirectionalLightComponent>();
+				dlc.Color = col;
+				dlc.Intensity = intensity;
+				float dx = -0.42f, dy = -0.84f, dz = -0.34f;
+				if (count >= 8 && args[7].IsNumber()) { double v; args[7].AsNumber(&v); dx = static_cast<float>(v); }
+				if (count >= 9 && args[8].IsNumber()) { double v; args[8].AsNumber(&v); dy = static_cast<float>(v); }
+				if (count >= 10 && args[9].IsNumber()) { double v; args[9].AsNumber(&v); dz = static_cast<float>(v); }
+				float len = std::sqrt(dx*dx + dy*dy + dz*dz);
+				if (len > 1e-4f) { dx /= len; dy /= len; dz /= len; }
+				dlc.Direction = glm::vec3{ dx, dy, dz };
+				dlc.CastShadow = true;
+			}
+
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
+		ScriptValue CreateCameraImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateCamera requires an active scene");
+
+			std::string name = "Camera";
+			if (count >= 1 && args[0].IsString()) args[0].AsString(&name);
+
+			float x = 0, y = 5, z = 10;
+			if (count >= 2 && args[1].IsNumber()) { double v; args[1].AsNumber(&v); x = static_cast<float>(v); }
+			if (count >= 3 && args[2].IsNumber()) { double v; args[2].AsNumber(&v); y = static_cast<float>(v); }
+			if (count >= 4 && args[3].IsNumber()) { double v; args[3].AsNumber(&v); z = static_cast<float>(v); }
+
+			float fov = 45.0f;
+			if (count >= 5 && args[4].IsNumber()) { double v; args[4].AsNumber(&v); fov = static_cast<float>(v); }
+
+			bool isPrimary = true;
+			if (count >= 6 && args[5].IsBoolean()) args[5].AsBool(&isPrimary);
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			auto& tc = entity.AddComponent<TransformComponent>(glm::vec3{ x, y, z });
+
+			auto& cc = entity.AddComponent<CameraComponent>();
+			cc.Primary = isPrimary;
+			cc.Camera.m_ProjectionType = CameraSettings::ProjectionType::Perspective;
+			cc.Camera.m_PerspectiveFOV = fov;
+			cc.Camera.m_PerspectiveNearClip = 0.1f;
+			cc.Camera.m_PerspectiveFarClip = 1000.0f;
+
+			auto& alc = entity.AddComponent<AudioListenerComponent>();
+			alc.Active = isPrimary;
+
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
 		ScriptValue CreateRawEntityImpl(const ScriptValue*, std::size_t)
 		{
 			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
@@ -1612,6 +1774,40 @@ namespace World
 		static const ScriptServiceParam createEntityParams[] = {
 			{ "name", "string", ScriptServiceArgType::String, false, "Optional entity name; defaults to \"Empty Entity\"." },
 		};
+		static const ScriptServiceParam createMeshParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "Entity tag name." },
+			{ "meshPath", "string", ScriptServiceArgType::String, true, "Asset path to .wmodel." },
+			{ "materialPath", "string", ScriptServiceArgType::String, false, "Optional asset path to .wmat." },
+			{ "x", "number", ScriptServiceArgType::Number, false, "X position (default 0)." },
+			{ "y", "number", ScriptServiceArgType::Number, false, "Y position (default 0)." },
+			{ "z", "number", ScriptServiceArgType::Number, false, "Z position (default 0)." },
+			{ "rx", "number", ScriptServiceArgType::Number, false, "Rotation pitch/X in degrees (default 0)." },
+			{ "ry", "number", ScriptServiceArgType::Number, false, "Rotation yaw/Y in degrees (default 0)." },
+			{ "rz", "number", ScriptServiceArgType::Number, false, "Rotation roll/Z in degrees (default 0)." },
+			{ "sx", "number", ScriptServiceArgType::Number, false, "Scale X (default 1)." },
+			{ "sy", "number", ScriptServiceArgType::Number, false, "Scale Y (default 1)." },
+			{ "sz", "number", ScriptServiceArgType::Number, false, "Scale Z (default 1)." },
+		};
+		static const ScriptServiceParam createLightParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, false, "Entity tag name (default 'Light')." },
+			{ "type", "string", ScriptServiceArgType::String, false, "Light type: 'directional', 'point', or 'ambient'." },
+			{ "color", "string", ScriptServiceArgType::String, false, "Hex color string (e.g. '#FFF8E7')." },
+			{ "intensity", "number", ScriptServiceArgType::Number, false, "Brightness multiplier (default 1.0)." },
+			{ "x", "number", ScriptServiceArgType::Number, false, "X position." },
+			{ "y", "number", ScriptServiceArgType::Number, false, "Y position." },
+			{ "z", "number", ScriptServiceArgType::Number, false, "Z position." },
+			{ "dx", "number", ScriptServiceArgType::Number, false, "Direction X (for directional light)." },
+			{ "dy", "number", ScriptServiceArgType::Number, false, "Direction Y (for directional light)." },
+			{ "dz", "number", ScriptServiceArgType::Number, false, "Direction Z (for directional light)." },
+		};
+		static const ScriptServiceParam createCameraParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, false, "Entity tag name (default 'Camera')." },
+			{ "x", "number", ScriptServiceArgType::Number, false, "X position." },
+			{ "y", "number", ScriptServiceArgType::Number, false, "Y position." },
+			{ "z", "number", ScriptServiceArgType::Number, false, "Z position." },
+			{ "fov", "number", ScriptServiceArgType::Number, false, "Perspective field of view in degrees (default 45)." },
+			{ "isPrimary", "boolean", ScriptServiceArgType::Boolean, false, "Whether this camera is the active scene camera (default true)." },
+		};
 		static const ScriptServiceParam destroyEntityParams[] = {
 			{ "entity", "userdata", ScriptServiceArgType::None, true, "Entity to destroy; queued, committed at the next safe point." },
 		};
@@ -1655,6 +1851,12 @@ namespace World
 				"Unregister a named system; false when no such system is registered." },
 			{ "CreateEntity", &CreateEntityImpl, createEntityParams, 1, 1, "Entity",
 				"Create an entity (Tag + UUID) in the active scene and return its handle." },
+			{ "CreateMesh", &CreateMeshImpl, createMeshParams, 12, 12, "Entity",
+				"Create an entity with Transform and MeshRendererComponent in one step; returns Entity handle." },
+			{ "CreateLight", &CreateLightImpl, createLightParams, 10, 10, "Entity",
+				"Create an entity with Transform and LightComponent ('directional', 'point', 'ambient'); returns Entity handle." },
+			{ "CreateCamera", &CreateCameraImpl, createCameraParams, 6, 6, "Entity",
+				"Create an entity with Transform, CameraComponent and AudioListenerComponent; returns Entity handle." },
 			{ "CreateRawEntity", &CreateRawEntityImpl, nullptr, 0, 0, "Entity",
 				"Create a lightweight anonymous entity (no Tag, no UUID) in the active scene and return its handle." },
 			{ "DestroyEntity", &DestroyEntityImpl, destroyEntityParams, 1, 1, "boolean",

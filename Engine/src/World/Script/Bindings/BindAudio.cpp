@@ -201,6 +201,46 @@ namespace World
 			return ScriptValue::Number(static_cast<double>(handle));
 		}
 
+		ScriptValue AudioPlayImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[29];
+			CheckArgumentCount("Audio", method, count, 1);
+			const std::string soundPath = RequireString("Audio", method, args, count, 0);
+			const double volume = OptionalNumber("Audio", method, args, count, 1, 1.0);
+			const double pitch = OptionalNumber("Audio", method, args, count, 2, 1.0);
+			const bool loop = OptionalBool("Audio", method, args, count, 3, false);
+
+			Audio::VoiceHandle handle = Audio::AudioSystem::Get().PostEvent2D(
+				soundPath,
+				static_cast<float>(volume),
+				static_cast<float>(pitch),
+				loop);
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
+		ScriptValue AudioPlayAtImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[30];
+			CheckArgumentCount("Audio", method, count, 4);
+			const std::string soundPath = RequireString("Audio", method, args, count, 0);
+			const double x = RequireNumber("Audio", method, args, count, 1);
+			const double y = RequireNumber("Audio", method, args, count, 2);
+			const double z = RequireNumber("Audio", method, args, count, 3);
+			const double volume = OptionalNumber("Audio", method, args, count, 4, 1.0);
+			const double pitch = OptionalNumber("Audio", method, args, count, 5, 1.0);
+			const bool loop = OptionalBool("Audio", method, args, count, 6, false);
+
+			Audio::VoiceHandle handle = Audio::AudioSystem::Get().PostEvent(
+				soundPath,
+				glm::vec3(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)),
+				static_cast<float>(volume),
+				static_cast<float>(pitch),
+				loop);
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
 		ScriptValue AudioPostEvent2DImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
@@ -480,9 +520,12 @@ namespace World
 			if (stats.IsValid())
 			{
 				stats.SetField("physical_voices", ScriptValue::Number(static_cast<double>(snapshot.activePhysicalVoices)));
+				stats.SetField("activeVoices", ScriptValue::Number(static_cast<double>(snapshot.activePhysicalVoices)));
+				stats.SetField("active_voices", ScriptValue::Number(static_cast<double>(snapshot.activePhysicalVoices)));
 				stats.SetField("virtual_voices", ScriptValue::Number(static_cast<double>(snapshot.activeVirtualVoices)));
 				stats.SetField("clipping", ScriptValue::Boolean(snapshot.masterClipping));
 				stats.SetField("dsp_time", ScriptValue::Number(dspTime));
+				stats.SetField("dspTime", ScriptValue::Number(dspTime));
 				return stats.ToValue();
 			}
 			return ScriptValue::Nil();
@@ -762,6 +805,23 @@ namespace World
 			{ "x", "number", ScriptServiceArgType::Number, false, "World X position (default 0)." },
 			{ "y", "number", ScriptServiceArgType::Number, false, "World Y position (default 0)." },
 			{ "z", "number", ScriptServiceArgType::Number, false, "World Z position (default 0)." },
+			{ "volume", "number", ScriptServiceArgType::Number, false, "Volume scale multiplier (default 1.0)." },
+			{ "pitch", "number", ScriptServiceArgType::Number, false, "Pitch scale multiplier (default 1.0)." },
+			{ "loop", "boolean", ScriptServiceArgType::Boolean, false, "Whether playback loops (default false)." },
+		};
+
+		static const ScriptServiceParam audioPlayParams[] = {
+			{ "soundPath", "string", ScriptServiceArgType::String, true, "Sound file path or event identifier." },
+			{ "volume", "number", ScriptServiceArgType::Number, false, "Volume scale multiplier (default 1.0)." },
+			{ "pitch", "number", ScriptServiceArgType::Number, false, "Pitch scale multiplier (default 1.0)." },
+			{ "loop", "boolean", ScriptServiceArgType::Boolean, false, "Whether playback loops (default false)." },
+		};
+
+		static const ScriptServiceParam audioPlayAtParams[] = {
+			{ "soundPath", "string", ScriptServiceArgType::String, true, "Sound file path or event identifier." },
+			{ "x", "number", ScriptServiceArgType::Number, true, "World X position." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "World Y position." },
+			{ "z", "number", ScriptServiceArgType::Number, true, "World Z position." },
 			{ "volume", "number", ScriptServiceArgType::Number, false, "Volume scale multiplier (default 1.0)." },
 			{ "pitch", "number", ScriptServiceArgType::Number, false, "Pitch scale multiplier (default 1.0)." },
 			{ "loop", "boolean", ScriptServiceArgType::Boolean, false, "Whether playback loops (default false)." },
@@ -1087,6 +1147,20 @@ namespace World
 				return AudioSetVoicePitchImpl(args, count);
 			}, audioSetVoicePitchParams, 2, 2, "",
 				"Set pitch multiplier for an active voice instance." },
+
+			// Index 29: Play
+			{ "Play", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioPlayImpl(args, count);
+			}, audioPlayParams, 4, 4, "number",
+				"Play a sound asset directly (2D audio); returns voice handle or 0 on failure." },
+
+			// Index 30: PlayAt
+			{ "PlayAt", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioPlayAtImpl(args, count);
+			}, audioPlayAtParams, 7, 7, "number",
+				"Play a sound asset at 3D world position; returns voice handle or 0 on failure." },
 		};
 
 		static const ScriptServiceParam musicPlayParams[] = {

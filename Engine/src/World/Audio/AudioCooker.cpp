@@ -2,6 +2,21 @@
 #include <fstream>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <objbase.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#endif
 
 namespace World::Audio
 {
@@ -673,6 +688,126 @@ namespace World::Audio
 		return true;
 	}
 
+	bool AudioCooker::LoadMediaFoundationFile(const std::string& path, AudioBuffer& outBuffer)
+	{
+#if defined(_WIN32)
+		if (path.empty()) return false;
+		int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+		if (wideLen <= 0) return false;
+		std::wstring wpath(static_cast<size_t>(wideLen - 1), L'\0');
+		MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &wpath[0], wideLen);
+
+		std::error_code ec;
+		std::filesystem::path absPath = std::filesystem::absolute(std::filesystem::path(wpath), ec);
+		if (!ec) wpath = absPath.wstring();
+		if (!std::filesystem::exists(wpath, ec) || std::filesystem::is_directory(wpath, ec))
+			return false;
+
+		HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+		const bool didComInit = SUCCEEDED(hrCom);
+
+		HRESULT hrMf = MFStartup(MF_VERSION);
+		if (FAILED(hrMf))
+		{
+			if (didComInit) CoUninitialize();
+			return false;
+		}
+
+		bool decoded = false;
+		IMFSourceReader* pReader = nullptr;
+		HRESULT hr = MFCreateSourceReaderFromURL(wpath.c_str(), nullptr, &pReader);
+		if (SUCCEEDED(hr) && pReader)
+		{
+			pReader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
+			pReader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
+
+			IMFMediaType* pPartialType = nullptr;
+			hr = MFCreateMediaType(&pPartialType);
+			if (SUCCEEDED(hr) && pPartialType)
+			{
+				pPartialType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+				pPartialType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+				hr = pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pPartialType);
+				pPartialType->Release();
+			}
+
+			if (SUCCEEDED(hr))
+			{
+				IMFMediaType* pActualType = nullptr;
+				hr = pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pActualType);
+				if (SUCCEEDED(hr) && pActualType)
+				{
+					UINT32 channels = 0;
+					UINT32 sampleRate = 0;
+					UINT32 bitsPerSample = 0;
+					pActualType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
+					pActualType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
+					pActualType->GetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, &bitsPerSample);
+					pActualType->Release();
+
+					if (channels > 0 && sampleRate > 0 && bitsPerSample == 16)
+					{
+						std::vector<uint8_t> pcmData;
+						while (true)
+						{
+							DWORD flags = 0;
+							IMFSample* pSample = nullptr;
+							hr = pReader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, nullptr, &pSample);
+							if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM))
+							{
+								if (pSample) pSample->Release();
+								break;
+							}
+							if (pSample)
+							{
+								IMFMediaBuffer* pBuffer = nullptr;
+								if (SUCCEEDED(pSample->ConvertToContiguousBuffer(&pBuffer)) && pBuffer)
+								{
+									BYTE* pAudio = nullptr;
+									DWORD cbLen = 0;
+									if (SUCCEEDED(pBuffer->Lock(&pAudio, nullptr, &cbLen)) && pAudio && cbLen > 0)
+									{
+										size_t prev = pcmData.size();
+										pcmData.resize(prev + cbLen);
+										std::memcpy(pcmData.data() + prev, pAudio, cbLen);
+										pBuffer->Unlock();
+									}
+									pBuffer->Release();
+								}
+								pSample->Release();
+							}
+						}
+
+						uint32_t frameCount = static_cast<uint32_t>(pcmData.size()) / (2 * channels);
+						if (frameCount > 0)
+						{
+							outBuffer.Resize(sampleRate, channels, frameCount);
+							const int16_t* pcm16 = reinterpret_cast<const int16_t*>(pcmData.data());
+							for (uint32_t f = 0; f < frameCount; ++f)
+							{
+								for (uint32_t c = 0; c < channels; ++c)
+								{
+									outBuffer.SetSample(c, f, static_cast<float>(pcm16[f * channels + c]) / 32768.0f);
+								}
+							}
+							decoded = true;
+						}
+					}
+				}
+			}
+			pReader->Release();
+		}
+
+		MFShutdown();
+		if (didComInit) CoUninitialize();
+		return decoded;
+#else
+		(void)path;
+		(void)outBuffer;
+		return false;
+#endif
+	}
+
 	bool AudioCooker::LoadAudioFile(const std::string& path, AudioBuffer& outBuffer)
 	{
 		std::string lowerPath = path;
@@ -680,11 +815,11 @@ namespace World::Audio
 
 		if (lowerPath.rfind(".wav") != std::string::npos)
 		{
-			return LoadWavFile(path, outBuffer);
+			if (LoadWavFile(path, outBuffer)) return true;
 		}
 		if (lowerPath.rfind(".ogg") != std::string::npos)
 		{
-			return LoadOggVorbisFile(path, outBuffer);
+			if (LoadOggVorbisFile(path, outBuffer)) return true;
 		}
 		if (lowerPath.rfind(".waudioc") != std::string::npos || lowerPath.rfind(".waudio") != std::string::npos)
 		{
@@ -695,10 +830,17 @@ namespace World::Audio
 				return true;
 			}
 		}
+		if (lowerPath.rfind(".mp3") != std::string::npos || lowerPath.rfind(".m4a") != std::string::npos ||
+			lowerPath.rfind(".wma") != std::string::npos || lowerPath.rfind(".aac") != std::string::npos ||
+			lowerPath.rfind(".flac") != std::string::npos)
+		{
+			if (LoadMediaFoundationFile(path, outBuffer)) return true;
+		}
 
 		// Fallback detection
 		if (LoadWavFile(path, outBuffer)) return true;
 		if (LoadOggVorbisFile(path, outBuffer)) return true;
+		if (LoadMediaFoundationFile(path, outBuffer)) return true;
 		auto buf = LoadCookedFile(path);
 		if (buf)
 		{

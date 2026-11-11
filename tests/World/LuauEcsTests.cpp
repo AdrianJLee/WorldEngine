@@ -14,6 +14,7 @@
 #include "World/Script/Vm/ScriptValue.h"
 #include "World/Utils/Paths.h"
 #include "World/WUI/WuiContext.h"
+#include "World/Audio/AudioSystem.h"
 
 #include <cmath>
 #include <cstdio>
@@ -1376,6 +1377,101 @@ int main()
 			ScriptEngine::UnloadSystemScripts(scene);
 			std::filesystem::remove(probeScript, cleanEc);
 			ScriptEngine::SetActiveScene(nullptr);
+		}
+
+				// =====================================================================
+		// 16. 高阶创作套件验证 (Audio.Play, Math 补间插值, ecs 实体工厂, ui 样式控件)
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+			World::Audio::AudioSystem::Get().Initialize(true);
+			
+			// 1. Audio.Play 与 Math 补间验证
+			RunOk(
+				"local h1 = Audio.Play('ui_click', 0.8)\n"
+				"local h2 = Audio:Play('ui_click')\n"
+				"assert(h1 > 0 and h2 > 0)\n"
+				"local v = Math.Lerp(10, 20, 0.5)\n"
+				"assert(math.abs(v - 15) < 0.001)\n"
+				"local cl = Math.Clamp(25, 0, 10)\n"
+				"assert(cl == 10)\n"
+				"local app = Math.Approach(5, 10, 2)\n"
+				"assert(app == 7)\n"
+				"local damp = Math.SmoothDamp(0, 10, 0, 0.2, 100, 0.016)\n"
+				"assert(damp.value > 0 and damp.velocity > 0)\n"
+				"assert(Math.EaseIn(0.5) == 0.25)\n"
+				"assert(Math.EaseOut(0.5) == 0.75)\n",
+				"Test16AudioMath", __LINE__);
+
+			// 2. 高阶实体工厂验证
+			RunOk(
+				"local frog = ecs.CreateMesh('Frog', 'models/frog.wmodel', 'materials/frog.wmat', 1, 2, 3)\n"
+				"assert(frog ~= nil)\n"
+				"assert(frog:HasComponent('TransformComponent'))\n"
+				"assert(frog:HasComponent('MeshRendererComponent'))\n"
+				"local sun = ecs.CreateLight('Sun', 'directional', '#FFF8E7', 1.5, 0, 10, 0, -0.5, -1, -0.5)\n"
+				"assert(sun ~= nil)\n"
+				"assert(sun:HasComponent('TransformComponent'))\n"
+				"assert(sun:HasComponent('DirectionalLightComponent'))\n"
+				"local cam = ecs.CreateCamera('MainCam', 0, 5, 10, 60, true)\n"
+				"assert(cam ~= nil)\n"
+				"assert(cam:HasComponent('TransformComponent'))\n"
+				"assert(cam:HasComponent('CameraComponent'))\n"
+				"assert(cam:HasComponent('AudioListenerComponent'))\n",
+				"Test16EntityFactories", __LINE__);
+
+			bool foundFrog = false;
+			bool foundSun = false;
+			bool foundCam = false;
+			auto tagView = scene.GetRegistry().view<TagComponent>();
+			for (auto entityHandle : tagView)
+			{
+				const auto& tag = tagView.get<TagComponent>(entityHandle);
+				if (tag.Tag == StringPool::Get().InternName("Frog")) foundFrog = true;
+				if (tag.Tag == StringPool::Get().InternName("Sun")) foundSun = true;
+				if (tag.Tag == StringPool::Get().InternName("MainCam")) foundCam = true;
+			}
+			CHECK(foundFrog);
+			CHECK(foundSun);
+			CHECK(foundCam);
+
+			// 3. UI 锚点与样式化组件 (通过真实系统脚本加载)
+			const std::filesystem::path systemsDir = World::Paths::AssetRoot() / "scripts/systems";
+			std::filesystem::create_directories(systemsDir);
+			const std::filesystem::path uiProbeScript = systemsDir / "GodotKitUiProbe.luau";
+			{
+				std::ofstream out(uiProbeScript, std::ios::binary | std::ios::trunc);
+				out << "ui.onDraw(function()\n"
+					<< "    local pos = ui.anchor('top_center', 200, 40)\n"
+					<< "    assert(pos.x > 0 and pos.y >= 0)\n"
+					<< "    local clicked = ui.button('Click Me', pos.x, pos.y, 200, 40, {\n"
+					<< "        bgColor = '#3B82F6FF',\n"
+					<< "        textColor = '#FFFFFFFF',\n"
+					<< "        borderRadius = 8\n"
+					<< "    })\n"
+					<< "    assert(type(clicked) == 'boolean')\n"
+					<< "    local badgeSize = ui.badge('Score: 100', 10, 10, { bgColor = '#10B981FF' })\n"
+					<< "    assert(badgeSize.w > 0 and badgeSize.h > 0)\n"
+					<< "end)\n"
+					<< "ecs:AddSystem('GodotKitUiSystem', function(dt) end)\n";
+			}
+
+			ScriptEngine::UnloadSystemScripts(scene);
+			CHECK(ScriptEngine::LoadSystemScripts(scene, systemsDir) == 1);
+
+			Wui::WuiContext ui;
+			Wui::WuiInputState input;
+			input.ViewportSize = glm::vec2 { 1280.0f, 720.0f };
+			ui.BeginFrame(input);
+			CHECK(ScriptEngine::DrawScriptUi(scene, ui) == 0);
+			CHECK(!ui.Commands().empty());
+
+			ScriptEngine::UnloadSystemScripts(scene);
+			std::error_code cleanEc;
+			std::filesystem::remove(uiProbeScript, cleanEc);
+			ScriptEngine::SetActiveScene(nullptr);
+			World::Audio::AudioSystem::Get().Shutdown();
 		}
 
 		ScriptEngine::Shutdown();

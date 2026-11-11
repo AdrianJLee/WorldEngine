@@ -253,6 +253,9 @@ target_link_libraries(World PRIVATE
     imm32
     winmm
     winhttp
+    mfplat
+    mfreadwrite
+    mfuuid
     cgltf
     Luau.VM
     Luau.Compiler

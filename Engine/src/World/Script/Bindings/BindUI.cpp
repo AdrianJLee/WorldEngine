@@ -3,6 +3,7 @@
 
 #include "World/Renderer/Texture/TextureLibrary.h"
 #include "World/Script/Bindings/BindUI.h"
+#include "World/Core/Application.h"
 
 #include "World/Renderer/Renderer.h"
 #include "World/Renderer/Texture/TextureLibrary.h"
@@ -341,13 +342,118 @@ namespace World
 		ScriptValue UiButtonImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
-			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[2];
-			CheckArgumentCount("ui", method, count, 6);
-			const std::string id = RequireId("ui", method, args, count, 0);
-			const Wui::WuiRect rect = RequireRect("ui", method, args, count, 1);
-			const std::string label = RequireString("ui", method, args, count, 5);
-			const bool clicked = Wui::Button(CurrentUiContext(), HashUiId(id), rect, label, Wui::WuiDefaultTheme());
-			return ScriptValue::Boolean(clicked);
+			if (count < 5)
+				throw std::logic_error("ui.button expects at least (label, x, y, w, h) or (id, x, y, w, h, label)");
+
+			std::string id;
+			Wui::WuiRect rect{};
+			std::string label;
+			const ScriptValue* optionsTable = nullptr;
+
+			if (args[0].IsString() && args[1].IsNumber() && args[2].IsNumber() && args[3].IsNumber() && args[4].IsNumber())
+			{
+				// 现代便捷用法: ui.button(label, x, y, w, h, [options])
+				args[0].AsString(&label);
+				double x = 0, y = 0, w = 100, h = 30;
+				args[1].AsNumber(&x);
+				args[2].AsNumber(&y);
+				args[3].AsNumber(&w);
+				args[4].AsNumber(&h);
+				rect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(w), static_cast<float>(h) };
+				id = label + "@" + std::to_string(static_cast<int>(rect.X)) + "," + std::to_string(static_cast<int>(rect.Y));
+				if (count >= 6 && args[5].IsTable())
+				{
+					optionsTable = &args[5];
+				}
+			}
+			else
+			{
+				// 兼容传统方法签名: ui.button(id, x, y, w, h, label, [options])
+				args[0].AsString(&id);
+				double x = 0, y = 0, w = 100, h = 30;
+				if (count >= 2 && args[1].IsNumber()) args[1].AsNumber(&x);
+				if (count >= 3 && args[2].IsNumber()) args[2].AsNumber(&y);
+				if (count >= 4 && args[3].IsNumber()) args[3].AsNumber(&w);
+				if (count >= 5 && args[4].IsNumber()) args[4].AsNumber(&h);
+				rect = { static_cast<float>(x), static_cast<float>(y), static_cast<float>(w), static_cast<float>(h) };
+				if (count >= 6 && args[5].IsString()) args[5].AsString(&label);
+				if (count >= 7 && args[6].IsTable()) optionsTable = &args[6];
+			}
+
+			auto& ctx = CurrentUiContext();
+			const Wui::WuiId widgetId = HashUiId(id);
+			const bool hovered = ctx.IsHovered(rect);
+			const bool clicked = hovered && ctx.Input().MouseClicked[0];
+			const bool pressed = hovered && ctx.Input().MouseDown[0];
+
+			ScriptTableRef optTable;
+			if (optionsTable && optionsTable->AsTable(&optTable) && optTable.IsValid())
+			{
+				Wui::WuiColor bgCol{ 0.18f, 0.22f, 0.28f, 0.95f };
+				Wui::WuiColor hoverCol{ 0.25f, 0.35f, 0.50f, 1.0f };
+				Wui::WuiColor pressCol{ 0.12f, 0.18f, 0.25f, 1.0f };
+				Wui::WuiColor textCol{ 1.0f, 1.0f, 1.0f, 1.0f };
+				Wui::WuiColor borderCol{ 0.35f, 0.45f, 0.60f, 0.8f };
+				float radius = 4.0f;
+				float borderThick = 1.0f;
+				float fontSize = 13.0f;
+
+				auto readStr = [&](const char* f1, const char* f2 = nullptr, const char* f3 = nullptr) -> std::string {
+					ScriptValue v = optTable.GetField(f1);
+					std::string res;
+					if (v.AsString(&res)) return res;
+					if (f2) { v = optTable.GetField(f2); if (v.AsString(&res)) return res; }
+					if (f3) { v = optTable.GetField(f3); if (v.AsString(&res)) return res; }
+					return "";
+				};
+				auto readNum = [&](const char* f1, const char* f2 = nullptr) -> double {
+					ScriptValue v = optTable.GetField(f1);
+					double res = 0;
+					if (v.AsNumber(&res)) return res;
+					if (f2) { v = optTable.GetField(f2); if (v.AsNumber(&res)) return res; }
+					return -1e9;
+				};
+
+				std::string bgStr = readStr("bgColor", "bg_color", "color");
+				if (!bgStr.empty()) TryParseHexColor(bgStr, bgCol);
+
+				std::string hoverStr = readStr("hoverColor", "hover_color");
+				if (!hoverStr.empty()) TryParseHexColor(hoverStr, hoverCol);
+				else hoverCol = { std::min(1.0f, bgCol.R * 1.25f), std::min(1.0f, bgCol.G * 1.25f), std::min(1.0f, bgCol.B * 1.25f), 1.0f };
+
+				std::string pressStr = readStr("pressColor", "press_color");
+				if (!pressStr.empty()) TryParseHexColor(pressStr, pressCol);
+				else pressCol = { bgCol.R * 0.8f, bgCol.G * 0.8f, bgCol.B * 0.8f, 1.0f };
+
+				std::string textStr = readStr("textColor", "text_color");
+				if (!textStr.empty()) TryParseHexColor(textStr, textCol);
+
+				std::string borderStr = readStr("borderColor", "border_color");
+				if (!borderStr.empty()) TryParseHexColor(borderStr, borderCol);
+
+				double r = readNum("borderRadius", "radius");
+				if (r > -1e8) radius = static_cast<float>(r);
+				double bw = readNum("borderWidth", "border_width");
+				if (bw > -1e8) borderThick = static_cast<float>(bw);
+				double fs = readNum("fontSize", "font_size");
+				if (fs > -1e8) fontSize = static_cast<float>(fs);
+
+				const Wui::WuiColor currentBg = pressed ? pressCol : (hovered ? hoverCol : bgCol);
+				auto& cmds = ctx.Commands();
+				cmds.push_back({ Wui::WuiDrawKind::Rect, rect, currentBg, radius });
+				if (borderThick > 0.0f)
+				{
+					cmds.push_back({ Wui::WuiDrawKind::RectOutline, rect, borderCol, radius, borderThick });
+				}
+				const float estimatedTextWidth = static_cast<float>(label.length()) * (fontSize * 0.55f);
+				const float textX = std::max(rect.X + 4.0f, rect.X + (rect.W - estimatedTextWidth) * 0.5f);
+				const float textY = rect.Y + (rect.H - fontSize) * 0.5f;
+				cmds.push_back({ Wui::WuiDrawKind::Text, { textX, textY, 0, 0 }, textCol, 0, 1.0f, label, fontSize, true });
+				return ScriptValue::Boolean(clicked);
+			}
+
+			const bool res = Wui::Button(ctx, widgetId, rect, label, Wui::WuiDefaultTheme());
+			return ScriptValue::Boolean(res);
 		}
 
 		ScriptValue UiCheckboxImpl(const ScriptValue* args, std::size_t count)
@@ -574,6 +680,102 @@ namespace World
 				return ScriptValue::Boolean(true);
 			}
 			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue UiAnchorImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			std::string anchor = "center";
+			if (count >= 1 && args[0].IsString()) args[0].AsString(&anchor);
+			for (char& c : anchor) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+			float w = 0.0f;
+			float h = 0.0f;
+			if (count >= 2 && args[1].IsNumber()) { double v; args[1].AsNumber(&v); w = static_cast<float>(v); }
+			if (count >= 3 && args[2].IsNumber()) { double v; args[2].AsNumber(&v); h = static_cast<float>(v); }
+
+			float vw = 1280.0f;
+			float vh = 720.0f;
+			if (Application::HasInstance())
+			{
+				vw = static_cast<float>(Application::Get().GetWindow().GetWidth());
+				vh = static_cast<float>(Application::Get().GetWindow().GetHeight());
+			}
+			float scale = Wui::UiScale() > 0.0f ? Wui::UiScale() : 1.0f;
+			vw /= scale;
+			vh /= scale;
+			float margin = 16.0f;
+
+			float x = 0.0f;
+			float y = 0.0f;
+			if (anchor == "top_left") { x = margin; y = margin; }
+			else if (anchor == "top_center") { x = (vw - w) * 0.5f; y = margin; }
+			else if (anchor == "top_right") { x = vw - w - margin; y = margin; }
+			else if (anchor == "center_left") { x = margin; y = (vh - h) * 0.5f; }
+			else if (anchor == "center") { x = (vw - w) * 0.5f; y = (vh - h) * 0.5f; }
+			else if (anchor == "center_right") { x = vw - w - margin; y = (vh - h) * 0.5f; }
+			else if (anchor == "bottom_left") { x = margin; y = vh - h - margin; }
+			else if (anchor == "bottom_center") { x = (vw - w) * 0.5f; y = vh - h - margin; }
+			else if (anchor == "bottom_right") { x = vw - w - margin; y = vh - h - margin; }
+			else { x = (vw - w) * 0.5f; y = (vh - h) * 0.5f; }
+
+			ScriptTableRef res = ScriptEngine::GetState().CreateTable();
+			res.SetField("x", ScriptValue::Number(static_cast<double>(x)));
+			res.SetField("y", ScriptValue::Number(static_cast<double>(y)));
+			res.SetField("w", ScriptValue::Number(static_cast<double>(w)));
+			res.SetField("h", ScriptValue::Number(static_cast<double>(h)));
+			return res.ToValue();
+		}
+
+		ScriptValue UiBadgeImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 3 || !args[0].IsString()) return ScriptValue::Nil();
+			std::string text;
+			args[0].AsString(&text);
+			double x = 0.0, y = 0.0;
+			args[1].AsNumber(&x);
+			args[2].AsNumber(&y);
+
+			Wui::WuiColor bgCol{ 0.15f, 0.20f, 0.28f, 0.85f };
+			Wui::WuiColor textCol{ 0.95f, 0.95f, 0.95f, 1.0f };
+			float fontSize = 12.0f;
+			float padX = 8.0f;
+			float padY = 4.0f;
+			float radius = 999.0f;
+
+			ScriptTableRef badgeTable;
+			if (count >= 4 && args[3].IsTable() && args[3].AsTable(&badgeTable) && badgeTable.IsValid())
+			{
+				ScriptValue bgVal = badgeTable.GetField("bgColor");
+				std::string s;
+				if (bgVal.AsString(&s)) TryParseHexColor(s, bgCol);
+				else {
+					bgVal = badgeTable.GetField("color");
+					if (bgVal.AsString(&s)) TryParseHexColor(s, bgCol);
+				}
+				ScriptValue textVal = badgeTable.GetField("textColor");
+				if (textVal.AsString(&s)) TryParseHexColor(s, textCol);
+				double n = 0;
+				ScriptValue fsVal = badgeTable.GetField("fontSize");
+				if (fsVal.AsNumber(&n)) fontSize = static_cast<float>(n);
+				ScriptValue radVal = badgeTable.GetField("radius");
+				if (radVal.AsNumber(&n)) radius = static_cast<float>(n);
+			}
+
+			float textW = static_cast<float>(text.length()) * (fontSize * 0.55f);
+			float totalW = textW + padX * 2.0f;
+			float totalH = fontSize + padY * 2.0f;
+			Wui::WuiRect rect{ static_cast<float>(x), static_cast<float>(y), totalW, totalH };
+
+			auto& cmds = CurrentUiContext().Commands();
+			cmds.push_back({ Wui::WuiDrawKind::Rect, rect, bgCol, radius });
+			cmds.push_back({ Wui::WuiDrawKind::Text, { rect.X + padX, rect.Y + padY, 0, 0 }, textCol, 0, 1.0f, text, fontSize, true });
+
+			ScriptTableRef res = ScriptEngine::GetState().CreateTable();
+			res.SetField("w", ScriptValue::Number(static_cast<double>(totalW)));
+			res.SetField("h", ScriptValue::Number(static_cast<double>(totalH)));
+			return res.ToValue();
 		}
 
 		ScriptValue UiGetImpl(const ScriptValue* args, std::size_t count)
@@ -916,6 +1118,18 @@ namespace World
 			{ "nodeId", "string", ScriptServiceArgType::String, true, "Node ID in active .wui document." },
 			{ "prop", "string", ScriptServiceArgType::String, true, "Property name to query." },
 		};
+		static const ScriptServiceParam anchorParams[] = {
+			{ "anchor", "string", ScriptServiceArgType::String, false, "Screen anchor name ('top_center', 'center', 'bottom_right', etc.)." },
+			{ "w", "number", ScriptServiceArgType::Number, false, "Element width in UI pixels." },
+			{ "h", "number", ScriptServiceArgType::Number, false, "Element height in UI pixels." },
+		};
+		static const ScriptServiceParam badgeParams[] = {
+			{ "text", "string", ScriptServiceArgType::String, true, "Badge label text." },
+			{ "x", "number", ScriptServiceArgType::Number, true, "X position in UI pixels." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "Y position in UI pixels." },
+			{ "options", "table", ScriptServiceArgType::Table, false, "Styling options {bgColor, textColor, fontSize, radius}." },
+		};
+
 		static const ScriptServiceMethod uiMethods[] = {
 			{ "panel", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -1013,6 +1227,16 @@ namespace World
 				return UiGetImpl(args, count);
 			}, getPropParams, 2, 2, "string|nil",
 				"Get the effective property value of an active .wui document node." },
+			{ "anchor", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiAnchorImpl(args, count);
+			}, anchorParams, 3, 3, "table",
+				"Calculate auto-anchored screen coordinates for a HUD element (e.g. 'top_center', 'bottom_right')." },
+			{ "badge", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiBadgeImpl(args, count);
+			}, badgeParams, 4, 4, "table",
+				"Draw a styled pill tag / badge for scores, streaks and combos; returns {w, h}." },
 		};
 		static const ScriptServiceBinding uiTables[] = {
 			{ "ui", "Immediate-mode script UI table and declarative .wui document control.",

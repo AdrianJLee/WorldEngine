@@ -291,7 +291,7 @@ namespace
 		const ScriptServiceBinding* services = GameplayServiceBindings(&serviceCount);
 		std::size_t uiCount = 0;
 		const ScriptServiceBinding* uiTables = ScriptUiBindings(&uiCount);
-		CHECK(serviceCount == 5);   // Input / Level / Save / Time + App
+		CHECK(serviceCount == 6);   // Input / Level / Save / Time + App + Math
 		CHECK(uiCount == 1);
 
 		std::vector<const ScriptServiceBinding*> serviceList;

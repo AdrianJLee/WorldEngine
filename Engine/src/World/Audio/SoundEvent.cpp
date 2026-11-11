@@ -319,6 +319,7 @@ namespace World::Audio
 
 	bool SoundEvent::DeserializeYaml(const std::string& yamlText)
 	{
+		bool parsedAnyField = false;
 		if (!m_RootContainer)
 		{
 			m_RootContainer = std::make_shared<SoundContainerNode>();
@@ -362,6 +363,7 @@ namespace World::Audio
 			if (key == "BlendPoints") { section = YamlSection::BlendPoints; continue; }
 			if (key == "LayerTracks") { section = YamlSection::LayerTracks; continue; }
 
+			parsedAnyField = true;
 			if (key == "Id")
 			{
 				auto q1 = line.find('"', colonPos);
@@ -505,6 +507,11 @@ namespace World::Audio
 				}
 			}
 		}
-		return true;
+		const bool hasContent = !m_Id.empty() || (m_RootContainer && (
+			!m_RootContainer->variations.empty() ||
+			!m_RootContainer->switchBranches.empty() ||
+			!m_RootContainer->blendPoints.empty() ||
+			!m_RootContainer->layerChildren.empty()));
+		return parsedAnyField && hasContent;
 	}
 }

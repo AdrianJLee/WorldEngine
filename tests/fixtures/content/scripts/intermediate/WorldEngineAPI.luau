@@ -611,6 +611,62 @@ function App:IsPackaged() end
 ---@return string
 function App:HostMode() end
 
+-- Global service table 'Math': read-only; there is no runtime constructor.
+---Game math and tween interpolation service for smooth animations, easing, and damping.
+---@class Math
+Math = {}
+
+---Linear interpolation between a and b by t.
+---@param a number Start value.
+---@param b number End value.
+---@param t number Alpha factor [0, 1].
+---@return number
+function Math:Lerp(a, b, t) end
+
+---Clamp value between min and max.
+---@param v number Input value.
+---@param min number Minimum limit.
+---@param max number Maximum limit.
+---@return number
+function Math:Clamp(v, min, max) end
+
+---Step current towards target by maxDelta without overshooting.
+---@param current number Current value.
+---@param target number Target value.
+---@param maxDelta number Maximum step delta.
+---@return number
+function Math:Approach(current, target, maxDelta) end
+
+---Critically damped spring-damper interpolation; returns {value, velocity} table.
+---@param current number Current position/value.
+---@param target number Target position/value.
+---@param currentVelocity number Current velocity (rate of change).
+---@param smoothTime number Approximate time to reach target.
+---@param maxSpeed number? Optionally clamp maximum speed.
+---@param dt number? Delta time in seconds (default ~0.0166s).
+---@return table
+function Math:SmoothDamp(current, target, currentVelocity, smoothTime, maxSpeed, dt) end
+
+---Quadratic Ease-In curve.
+---@param t number Normalized progress [0, 1].
+---@return number
+function Math:EaseIn(t) end
+
+---Quadratic Ease-Out curve.
+---@param t number Normalized progress [0, 1].
+---@return number
+function Math:EaseOut(t) end
+
+---Quadratic Ease-In-Out curve.
+---@param t number Normalized progress [0, 1].
+---@return number
+function Math:EaseInOut(t) end
+
+---Elastic bounce-out easing curve.
+---@param t number Normalized progress [0, 1].
+---@return number
+function Math:BounceOut(t) end
+
 -- Global service table 'Audio': read-only; there is no runtime constructor.
 ---Read-only audio service table for sound events, playback control, bus volumes, and snapshots.
 ---@class Audio
@@ -781,6 +837,25 @@ function Audio:SetVoiceVolume(voiceHandle, volume) end
 ---@param pitch number Pitch scale multiplier.
 function Audio:SetVoicePitch(voiceHandle, pitch) end
 
+---Play a sound asset directly (2D audio); returns voice handle or 0 on failure.
+---@param soundPath string Sound file path or event identifier.
+---@param volume number? Volume scale multiplier (default 1.0).
+---@param pitch number? Pitch scale multiplier (default 1.0).
+---@param loop boolean? Whether playback loops (default false).
+---@return number
+function Audio:Play(soundPath, volume, pitch, loop) end
+
+---Play a sound asset at 3D world position; returns voice handle or 0 on failure.
+---@param soundPath string Sound file path or event identifier.
+---@param x number World X position.
+---@param y number World Y position.
+---@param z number World Z position.
+---@param volume number? Volume scale multiplier (default 1.0).
+---@param pitch number? Pitch scale multiplier (default 1.0).
+---@param loop boolean? Whether playback loops (default false).
+---@return number
+function Audio:PlayAt(soundPath, x, y, z, volume, pitch, loop) end
+
 -- Global service table 'Music': read-only; there is no runtime constructor.
 ---Read-only interactive music service table for playback and transitions.
 ---@class Music
@@ -872,6 +947,46 @@ function ecs:RemoveSystem(name) end
 ---@param name string? Optional entity name; defaults to "Empty Entity".
 ---@return Entity
 function ecs:CreateEntity(name) end
+
+---Create an entity with Transform and MeshRendererComponent in one step; returns Entity handle.
+---@param name string Entity tag name.
+---@param meshPath string Asset path to .wmodel.
+---@param materialPath string? Optional asset path to .wmat.
+---@param x number? X position (default 0).
+---@param y number? Y position (default 0).
+---@param z number? Z position (default 0).
+---@param rx number? Rotation pitch/X in degrees (default 0).
+---@param ry number? Rotation yaw/Y in degrees (default 0).
+---@param rz number? Rotation roll/Z in degrees (default 0).
+---@param sx number? Scale X (default 1).
+---@param sy number? Scale Y (default 1).
+---@param sz number? Scale Z (default 1).
+---@return Entity
+function ecs:CreateMesh(name, meshPath, materialPath, x, y, z, rx, ry, rz, sx, sy, sz) end
+
+---Create an entity with Transform and LightComponent ('directional', 'point', 'ambient'); returns Entity handle.
+---@param name string? Entity tag name (default 'Light').
+---@param type string? Light type: 'directional', 'point', or 'ambient'.
+---@param color string? Hex color string (e.g. '#FFF8E7').
+---@param intensity number? Brightness multiplier (default 1.0).
+---@param x number? X position.
+---@param y number? Y position.
+---@param z number? Z position.
+---@param dx number? Direction X (for directional light).
+---@param dy number? Direction Y (for directional light).
+---@param dz number? Direction Z (for directional light).
+---@return Entity
+function ecs:CreateLight(name, type, color, intensity, x, y, z, dx, dy, dz) end
+
+---Create an entity with Transform, CameraComponent and AudioListenerComponent; returns Entity handle.
+---@param name string? Entity tag name (default 'Camera').
+---@param x number? X position.
+---@param y number? Y position.
+---@param z number? Z position.
+---@param fov number? Perspective field of view in degrees (default 45).
+---@param isPrimary boolean? Whether this camera is the active scene camera (default true).
+---@return Entity
+function ecs:CreateCamera(name, x, y, z, fov, isPrimary) end
 
 ---Create a lightweight anonymous entity (no Tag, no UUID) in the active scene and return its handle.
 ---@return Entity
@@ -1112,6 +1227,21 @@ function ui:set(nodeId, prop, value) end
 ---@param prop string Property name to query.
 ---@return string|nil
 function ui:get(nodeId, prop) end
+
+---Calculate auto-anchored screen coordinates for a HUD element (e.g. 'top_center', 'bottom_right').
+---@param anchor string? Screen anchor name ('top_center', 'center', 'bottom_right', etc.).
+---@param w number? Element width in UI pixels.
+---@param h number? Element height in UI pixels.
+---@return table
+function ui:anchor(anchor, w, h) end
+
+---Draw a styled pill tag / badge for scores, streaks and combos; returns {w, h}.
+---@param text string Badge label text.
+---@param x number X position in UI pixels.
+---@param y number Y position in UI pixels.
+---@param options table? Styling options {bgColor, textColor, fontSize, radius}.
+---@return table
+function ui:badge(text, x, y, options) end
 
 -- Component fields are exposed through Entity:GetComponent("AmbientLightComponent"); there is no runtime global named AmbientLightComponent.
 ---@class AmbientLightComponent

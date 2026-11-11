@@ -12,6 +12,7 @@
 #include "World/Scene/Scene.h"
 #include "World/Scene/Components.h"
 #include "World/Utils/Paths.h"
+#include "World/Core/Log.h"
 
 namespace World::Audio
 {
@@ -1226,6 +1227,14 @@ namespace World::Audio
 		std::error_code ec;
 		for (const auto& candidate : candidates)
 		{
+			std::string lower = candidate;
+			std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+			if (lower.rfind(".wav") != std::string::npos || lower.rfind(".ogg") != std::string::npos ||
+				lower.rfind(".mp3") != std::string::npos || lower.rfind(".waudio") != std::string::npos ||
+				lower.rfind(".waudioc") != std::string::npos)
+			{
+				continue;
+			}
 			if (std::filesystem::exists(candidate, ec) && !std::filesystem::is_directory(candidate, ec))
 			{
 				std::ifstream in(candidate);
@@ -1285,7 +1294,7 @@ namespace World::Audio
 			normalizedPath.erase(normalizedPath.begin());
 		}
 
-		const std::vector<std::string> candidates = {
+		std::vector<std::string> candidates = {
 			path,
 			normalizedPath,
 			(World::Paths::AssetRoot() / normalizedPath).string(),
@@ -1297,6 +1306,48 @@ namespace World::Audio
 			"templates/project-example/assets/" + normalizedPath,
 			"templates/project-example/assets/audio/" + normalizedPath
 		};
+
+		auto hasKnownExt = [](const std::string& p) {
+			std::string l = p;
+			std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+			return l.rfind(".wav") != std::string::npos || l.rfind(".mp3") != std::string::npos ||
+				l.rfind(".ogg") != std::string::npos || l.rfind(".waudio") != std::string::npos ||
+				l.rfind(".waudioc") != std::string::npos;
+		};
+
+		const char* const kAudioExts[] = { ".wav", ".mp3", ".ogg", ".waudio" };
+		if (!hasKnownExt(normalizedPath))
+		{
+			for (const char* ext : kAudioExts)
+			{
+				candidates.push_back(path + ext);
+				candidates.push_back(normalizedPath + ext);
+				candidates.push_back((World::Paths::AssetRoot() / (normalizedPath + ext)).string());
+				candidates.push_back((World::Paths::AssetRoot() / "audio" / (normalizedPath + ext)).string());
+				candidates.push_back("assets/" + normalizedPath + ext);
+				candidates.push_back("assets/audio/" + normalizedPath + ext);
+			}
+		}
+		else
+		{
+			auto dotPos = normalizedPath.rfind('.');
+			if (dotPos != std::string::npos)
+			{
+				std::string stem = normalizedPath.substr(0, dotPos);
+				std::string curExt = normalizedPath.substr(dotPos);
+				std::transform(curExt.begin(), curExt.end(), curExt.begin(), ::tolower);
+				for (const char* ext : kAudioExts)
+				{
+					if (curExt != ext)
+					{
+						candidates.push_back((World::Paths::AssetRoot() / (stem + ext)).string());
+						candidates.push_back((World::Paths::AssetRoot() / "audio" / (stem + ext)).string());
+						candidates.push_back("assets/" + stem + ext);
+						candidates.push_back("assets/audio/" + stem + ext);
+					}
+				}
+			}
+		}
 
 		std::error_code ec;
 		for (const auto& candidate : candidates)
