@@ -7,6 +7,8 @@
 
 #include "RuntimeLayer.h"
 #include "World/Events/KeyEvent.h"
+#include "World/Core/KeyCodes.h"
+#include "World/Core/Input.h"
 #include "GameHud.h"
 #include "World/Agent/WeAgentCore.h"
 #include "World/Ai/CommandRegistry.h"
@@ -306,6 +308,7 @@ namespace World
 
 		// 渲染基线捕获(仅开发验证):WLD_CAPTURE_FRAMES=N 后读默认帧缓冲写 PPM。
 		CaptureFrameIfRequested();
+		Input::UpdateFrameInputState();
 	}
 
 	void RuntimeLayer::CaptureFrameIfRequested()
@@ -452,6 +455,40 @@ namespace World
 		//   WLD_CAPTURE_PRESENT=<path>    整窗抓图写 PPM(绝对路径,或相对当前工作目录)
 		//   WLD_CAPTURE_PRESENT_FRAME=<n> 抓图发生在第 n 个 UI 帧
 		//   WLD_CAPTURE_PRESENT_QUIT=<n>  抓图落盘后第 n 个 UI 帧自动退出(0 = 落盘即退)
+		struct ScriptedKeyAction
+		{
+			uint32_t StartFrame = 10;
+			uint32_t Duration = 5;
+			int KeyCode = -1;
+			std::string Name;
+			bool Active = false;
+			bool Finished = false;
+		};
+
+		static int ParseDevKeyString(const std::string& keyStr)
+		{
+			std::string s = keyStr;
+			for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+			if (s == "SPACE") return KeyCodes::Space;
+			if (s == "ENTER" || s == "RETURN") return KeyCodes::Enter;
+			if (s == "ESCAPE" || s == "ESC") return KeyCodes::Escape;
+			if (s == "W") return KeyCodes::W;
+			if (s == "A") return KeyCodes::A;
+			if (s == "S") return KeyCodes::S;
+			if (s == "D") return KeyCodes::D;
+			if (s == "UP") return KeyCodes::Up;
+			if (s == "DOWN") return KeyCodes::Down;
+			if (s == "LEFT") return KeyCodes::Left;
+			if (s == "RIGHT") return KeyCodes::Right;
+			if (s == "SHIFT" || s == "LSHIFT") return KeyCodes::LeftShift;
+			if (s == "RSHIFT") return KeyCodes::RightShift;
+			if (s == "CTRL" || s == "LCTRL") return KeyCodes::LeftControl;
+			if (s == "ALT" || s == "LALT") return KeyCodes::LeftAlt;
+			if (s.length() == 1 && s[0] >= 'A' && s[0] <= 'Z') return KeyCodes::A + (s[0] - 'A');
+			if (s.length() == 1 && s[0] >= '0' && s[0] <= '9') return KeyCodes::D0 + (s[0] - '0');
+			try { return std::stoi(s); } catch (...) { return -1; }
+		}
+
 		struct DevUiConfig
 		{
 			glm::vec2 ClickPosition { 0, 0 };
@@ -461,6 +498,7 @@ namespace World
 			std::string CapturePath;
 			int CaptureFrame = 40;
 			int CaptureQuit = 0;
+			std::vector<ScriptedKeyAction> KeyScript;
 		};
 
 		struct DevUiState
@@ -502,6 +540,53 @@ namespace World
 				if (const char* quit = std::getenv("WLD_CAPTURE_PRESENT_QUIT"))
 					config.CaptureQuit = std::atoi(quit);
 
+				if (const char* script = std::getenv("WLD_INPUT_SCRIPT"))
+				{
+					std::string raw(script);
+					std::istringstream stream(raw);
+					std::string token;
+					uint32_t defaultFrame = 10;
+					while (std::getline(stream, token, ','))
+					{
+						while (!token.empty() && (token.front() == ' ' || token.front() == '	')) token.erase(token.begin());
+						while (!token.empty() && (token.back() == ' ' || token.back() == '	')) token.pop_back();
+						if (token.empty()) continue;
+
+						std::vector<std::string> parts;
+						std::istringstream tokenStream(token);
+						std::string sub;
+						while (std::getline(tokenStream, sub, ':')) parts.push_back(sub);
+
+						ScriptedKeyAction action;
+						if (parts.size() >= 3)
+						{
+							action.StartFrame = static_cast<uint32_t>(std::max(1, std::atoi(parts[0].c_str())));
+							action.Name = parts[1];
+							action.Duration = static_cast<uint32_t>(std::max(1, std::atoi(parts[2].c_str())));
+						}
+						else if (parts.size() == 2)
+						{
+							action.StartFrame = static_cast<uint32_t>(std::max(1, std::atoi(parts[0].c_str())));
+							action.Name = parts[1];
+							action.Duration = 5;
+						}
+						else
+						{
+							action.StartFrame = defaultFrame;
+							action.Name = parts[0];
+							action.Duration = 5;
+							defaultFrame += 15;
+						}
+						action.KeyCode = ParseDevKeyString(action.Name);
+						if (action.KeyCode >= 0 || !action.Name.empty())
+						{
+							config.KeyScript.push_back(action);
+							WLD_CORE_INFO("[dev-ui] scheduled key injection '{0}' (code {1}) at frame {2} (duration {3})",
+								action.Name, action.KeyCode, action.StartFrame, action.Duration);
+						}
+					}
+				}
+
 				if (config.HasClick)
 					WLD_CORE_INFO("[dev-ui] click ({0},{1}) queued at UI frame {2} (quit +{3})",
 						config.ClickPosition.x, config.ClickPosition.y, config.ClickFrame, config.ClickQuit);
@@ -517,6 +602,36 @@ namespace World
 	void RuntimeLayer::ApplyDevUiActions()
 	{
 		DevUiState& devUi = DevUi();
+		for (auto& act : devUi.Config.KeyScript)
+		{
+			if (!act.Active && !act.Finished && m_UiFrame >= act.StartFrame && m_UiFrame < act.StartFrame + act.Duration)
+			{
+				act.Active = true;
+				if (act.KeyCode >= 0)
+				{
+					Input::SetSimulatedKeyState(act.KeyCode, true);
+					KeyPressedEvent e(act.KeyCode, 0);
+					Application::Get().OnEvent(e);
+				}
+				if (Gameplay::GameApp* app = Gameplay::GameApp::TryGet())
+				{
+					app->Input().InjectAction(0, StringPool::Get().InternName(act.Name), 1.0f, act.Duration);
+				}
+				WLD_CORE_INFO("[dev-ui] Injected key press '{0}' (code {1}) on UI frame {2}", act.Name, act.KeyCode, m_UiFrame);
+			}
+			else if (act.Active && m_UiFrame >= act.StartFrame + act.Duration)
+			{
+				act.Active = false;
+				act.Finished = true;
+				if (act.KeyCode >= 0)
+				{
+					Input::SetSimulatedKeyState(act.KeyCode, false);
+					KeyReleasedEvent e(act.KeyCode);
+					Application::Get().OnEvent(e);
+				}
+				WLD_CORE_INFO("[dev-ui] Injected key release '{0}' (code {1}) on UI frame {2}", act.Name, act.KeyCode, m_UiFrame);
+			}
+		}
 
 		if (devUi.Config.HasClick && !devUi.ClickInjected &&
 			static_cast<int>(m_UiFrame) >= devUi.Config.ClickFrame)

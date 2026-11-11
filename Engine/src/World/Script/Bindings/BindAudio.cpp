@@ -2,6 +2,7 @@
 #include "World/Script/Bindings/BindAudio.h"
 
 #include "World/Audio/AudioSystem.h"
+#include "World/Audio/AudioDsp.h"
 #include "World/Audio/AudioTypes.h"
 #include "World/Audio/InteractiveMusic.h"
 #include "World/Script/Bindings/BindServices.h"
@@ -238,6 +239,44 @@ namespace World
 				static_cast<float>(volume),
 				static_cast<float>(pitch),
 				loop);
+			return ScriptValue::Number(static_cast<double>(handle));
+		}
+
+		ScriptValue AudioPlayToneImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = AudioServiceBindings(nullptr)[0].Methods[31];
+			CheckArgumentCount("Audio", method, count, 2);
+			std::string waveTypeStr = RequireString("Audio", method, args, count, 0);
+			for (char& c : waveTypeStr) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+			Audio::ProceduralSynth::WaveType wType = Audio::ProceduralSynth::WaveType::Sine;
+			if (waveTypeStr == "square") wType = Audio::ProceduralSynth::WaveType::Square;
+			else if (waveTypeStr == "triangle") wType = Audio::ProceduralSynth::WaveType::Triangle;
+			else if (waveTypeStr == "saw" || waveTypeStr == "sawtooth") wType = Audio::ProceduralSynth::WaveType::Sawtooth;
+			else if (waveTypeStr == "noise") wType = Audio::ProceduralSynth::WaveType::Noise;
+			else if (waveTypeStr == "pulse") wType = Audio::ProceduralSynth::WaveType::Pulse;
+
+			double freq = RequireNumber("Audio", method, args, count, 1);
+			double duration = OptionalNumber("Audio", method, args, count, 2, 0.2);
+			double volume = OptionalNumber("Audio", method, args, count, 3, 0.7);
+
+			Audio::AudioBuffer buf = Audio::ProceduralSynth::GenerateTone(
+				wType,
+				static_cast<float>(freq),
+				static_cast<float>(duration),
+				0.5f,
+				static_cast<float>(volume));
+
+			auto pBuf = std::make_shared<Audio::AudioBuffer>(std::move(buf));
+			Audio::VoiceHandle handle = Audio::AudioSystem::Get().GetVoicePool().AllocateVoice(
+				pBuf,
+				Audio::kBusSfx,
+				1.0f,
+				1.0f,
+				false,
+				128,
+				Audio::StealPolicy::StealOldest);
 			return ScriptValue::Number(static_cast<double>(handle));
 		}
 
@@ -817,6 +856,13 @@ namespace World
 			{ "loop", "boolean", ScriptServiceArgType::Boolean, false, "Whether playback loops (default false)." },
 		};
 
+		static const ScriptServiceParam audioPlayToneParams[] = {
+			{ "waveType", "string", ScriptServiceArgType::String, true, "Synthesizer waveform ('sine', 'square', 'triangle', 'saw', 'noise')." },
+			{ "freqHz", "number", ScriptServiceArgType::Number, true, "Oscillator frequency in Hz." },
+			{ "duration", "number", ScriptServiceArgType::Number, false, "Duration in seconds (default 0.2s)." },
+			{ "volume", "number", ScriptServiceArgType::Number, false, "Volume scaling factor (default 0.7)." },
+		};
+
 		static const ScriptServiceParam audioPlayAtParams[] = {
 			{ "soundPath", "string", ScriptServiceArgType::String, true, "Sound file path or event identifier." },
 			{ "x", "number", ScriptServiceArgType::Number, true, "World X position." },
@@ -1161,6 +1207,13 @@ namespace World
 				return AudioPlayAtImpl(args, count);
 			}, audioPlayAtParams, 7, 7, "number",
 				"Play a sound asset at 3D world position; returns voice handle or 0 on failure." },
+
+			// Index 31: PlayTone
+			{ "PlayTone", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return AudioPlayToneImpl(args, count);
+			}, audioPlayToneParams, 4, 4, "number",
+				"Synthesize and play an instant procedural tone (sine, square, triangle, saw, noise); returns voice handle." },
 		};
 
 		static const ScriptServiceParam musicPlayParams[] = {

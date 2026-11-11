@@ -1391,7 +1391,8 @@ int main()
 			RunOk(
 				"local h1 = Audio.Play('ui_click', 0.8)\n"
 				"local h2 = Audio:Play('ui_click')\n"
-				"assert(h1 > 0 and h2 > 0)\n"
+				"local h3 = Audio.PlayTone('square', 440, 0.1, 0.5)\n"
+				"assert(h1 > 0 and h2 > 0 and h3 > 0)\n"
 				"local v = Math.Lerp(10, 20, 0.5)\n"
 				"assert(math.abs(v - 15) < 0.001)\n"
 				"local cl = Math.Clamp(25, 0, 10)\n"
@@ -1418,7 +1419,13 @@ int main()
 				"assert(cam ~= nil)\n"
 				"assert(cam:HasComponent('TransformComponent'))\n"
 				"assert(cam:HasComponent('CameraComponent'))\n"
-				"assert(cam:HasComponent('AudioListenerComponent'))\n",
+				"assert(cam:HasComponent('AudioListenerComponent'))\n"
+				"local sp = ecs.CreateSprite('MySprite', '', 5, 6, 2, 3, '#38BDF8FF', 10)\n"
+				"assert(sp ~= nil and sp:HasComponent('SpriteComponent'))\n"
+				"local cam2 = ecs.CreateCamera2D('Cam2D', 0, 0, 12, false)\n"
+				"assert(cam2 ~= nil and cam2:HasComponent('CameraComponent'))\n"
+				"local box2 = ecs.CreateBox2D('Box2D', 10, 20, 4, 2, true, '#F59E0BFF', false)\n"
+				"assert(box2 ~= nil and box2:HasComponent('RigidBody2DComponent') and box2:HasComponent('BoxCollider2DComponent'))\n",
 				"Test16EntityFactories", __LINE__);
 
 			bool foundFrog = false;
@@ -1451,6 +1458,7 @@ int main()
 					<< "        borderRadius = 8\n"
 					<< "    })\n"
 					<< "    assert(type(clicked) == 'boolean')\n"
+					<< "    ui.circle(250, 250, 30, '#FF5500FF', '#FFFFFFFF', 2)\n"
 					<< "    local badgeSize = ui.badge('Score: 100', 10, 10, { bgColor = '#10B981FF' })\n"
 					<< "    assert(badgeSize.w > 0 and badgeSize.h > 0)\n"
 					<< "end)\n"

@@ -1099,6 +1099,149 @@ namespace World
 			return NewUserdataOf(bindings, "Entity", entity);
 		}
 
+		static glm::vec4 ParseHexColor4(const std::string& hexIn, glm::vec4 fallback)
+		{
+			std::string hex = hexIn;
+			if (!hex.empty() && hex[0] == '#') hex = hex.substr(1);
+			if (hex.length() == 6 || hex.length() == 8)
+			{
+				try {
+					unsigned long val = std::stoul(hex, nullptr, 16);
+					if (hex.length() == 6)
+					{
+						return { ((val >> 16) & 0xFF) / 255.0f, ((val >> 8) & 0xFF) / 255.0f, (val & 0xFF) / 255.0f, 1.0f };
+					}
+					return { ((val >> 24) & 0xFF) / 255.0f, ((val >> 16) & 0xFF) / 255.0f, ((val >> 8) & 0xFF) / 255.0f, (val & 0xFF) / 255.0f };
+				} catch (...) {}
+			}
+			return fallback;
+		}
+
+		ScriptValue CreateSpriteImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateSprite requires an active scene");
+
+			std::string name = "Sprite";
+			if (count >= 1 && args[0].IsString()) args[0].AsString(&name);
+			std::string texPath;
+			if (count >= 2 && args[1].IsString()) args[1].AsString(&texPath);
+
+			float x = 0, y = 0, w = 1.0f, h = 1.0f;
+			if (count >= 3 && args[2].IsNumber()) { double v; args[2].AsNumber(&v); x = static_cast<float>(v); }
+			if (count >= 4 && args[3].IsNumber()) { double v; args[3].AsNumber(&v); y = static_cast<float>(v); }
+			if (count >= 5 && args[4].IsNumber()) { double v; args[4].AsNumber(&v); w = static_cast<float>(v); }
+			if (count >= 6 && args[5].IsNumber()) { double v; args[5].AsNumber(&v); h = static_cast<float>(v); }
+
+			glm::vec4 col { 1.0f, 1.0f, 1.0f, 1.0f };
+			if (count >= 7 && args[6].IsString())
+			{
+				std::string hex;
+				args[6].AsString(&hex);
+				col = ParseHexColor4(hex, col);
+			}
+			int32_t sortingOrder = 0;
+			if (count >= 8 && args[7].IsNumber()) { double v; args[7].AsNumber(&v); sortingOrder = static_cast<int32_t>(v); }
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			entity.AddComponent<TransformComponent>(glm::vec3{ x, y, 0.0f }, glm::vec3{ 0.0f }, glm::vec3{ w, h, 1.0f });
+			auto& sc = entity.AddComponent<SpriteComponent>(col);
+			if (!texPath.empty()) sc.Texture = AssetRef::FromPath(texPath);
+			sc.OrderInLayer = sortingOrder;
+
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
+		ScriptValue CreateCamera2DImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateCamera2D requires an active scene");
+
+			std::string name = "Camera2D";
+			if (count >= 1 && args[0].IsString()) args[0].AsString(&name);
+
+			float x = 0, y = 0, zoom = 10.0f;
+			if (count >= 2 && args[1].IsNumber()) { double v; args[1].AsNumber(&v); x = static_cast<float>(v); }
+			if (count >= 3 && args[2].IsNumber()) { double v; args[2].AsNumber(&v); y = static_cast<float>(v); }
+			if (count >= 4 && args[3].IsNumber()) { double v; args[3].AsNumber(&v); zoom = static_cast<float>(v); }
+
+			bool isPrimary = true;
+			if (count >= 5 && args[4].IsBoolean()) args[4].AsBool(&isPrimary);
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			entity.AddComponent<TransformComponent>(glm::vec3{ x, y, 10.0f });
+
+			auto& cc = entity.AddComponent<CameraComponent>();
+			cc.Primary = isPrimary;
+			cc.Camera.m_ProjectionType = CameraSettings::ProjectionType::Orthographic;
+			cc.Camera.m_OrthographicZoom = zoom;
+			cc.Camera.m_OrthographicNearClip = -10.0f;
+			cc.Camera.m_OrthographicFarClip = 100.0f;
+
+			auto& alc = entity.AddComponent<AudioListenerComponent>();
+			alc.Active = isPrimary;
+
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
+		ScriptValue CreateBox2DImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 5)
+				throw std::logic_error("ecs:CreateBox2D expects at least (name, x, y, w, h)");
+
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateBox2D requires an active scene");
+
+			std::string name = "Box2D";
+			args[0].AsString(&name);
+			double x = 0, y = 0, w = 1, h = 1;
+			args[1].AsNumber(&x);
+			args[2].AsNumber(&y);
+			args[3].AsNumber(&w);
+			args[4].AsNumber(&h);
+
+			bool isDynamic = false;
+			if (count >= 6 && args[5].IsBoolean()) args[5].AsBool(&isDynamic);
+
+			glm::vec4 col { 1.0f, 1.0f, 1.0f, 1.0f };
+			if (count >= 7 && args[6].IsString())
+			{
+				std::string hex;
+				args[6].AsString(&hex);
+				col = ParseHexColor4(hex, col);
+			}
+
+			bool isSensor = false;
+			if (count >= 8 && args[7].IsBoolean()) args[7].AsBool(&isSensor);
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			entity.AddComponent<TransformComponent>(
+				glm::vec3{ static_cast<float>(x), static_cast<float>(y), 0.0f },
+				glm::vec3{ 0.0f },
+				glm::vec3{ static_cast<float>(w), static_cast<float>(h), 1.0f });
+
+			entity.AddComponent<SpriteComponent>(col);
+
+			auto& rb = entity.AddComponent<RigidBody2DComponent>();
+			rb.Type = isDynamic ? RigidBody2DComponent::BodyType::Dynamic : RigidBody2DComponent::BodyType::Static;
+			rb.FixedRotation = isDynamic;
+
+			auto& bc = entity.AddComponent<BoxCollider2DComponent>();
+			bc.Size = { 0.5f, 0.5f };
+			bc.IsSensor = isSensor;
+
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
 		ScriptValue CreateRawEntityImpl(const ScriptValue*, std::size_t)
 		{
 			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
@@ -1808,6 +1951,33 @@ namespace World
 			{ "fov", "number", ScriptServiceArgType::Number, false, "Perspective field of view in degrees (default 45)." },
 			{ "isPrimary", "boolean", ScriptServiceArgType::Boolean, false, "Whether this camera is the active scene camera (default true)." },
 		};
+		static const ScriptServiceParam createSpriteParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, false, "Entity tag name (default 'Sprite')." },
+			{ "texturePath", "string", ScriptServiceArgType::String, false, "Optional texture path (empty = colored rectangle)." },
+			{ "x", "number", ScriptServiceArgType::Number, false, "World X position (default 0)." },
+			{ "y", "number", ScriptServiceArgType::Number, false, "World Y position (default 0)." },
+			{ "w", "number", ScriptServiceArgType::Number, false, "Width scale (default 1)." },
+			{ "h", "number", ScriptServiceArgType::Number, false, "Height scale (default 1)." },
+			{ "color", "string", ScriptServiceArgType::String, false, "Optional hex tint color (e.g. '#38BDF8FF')." },
+			{ "sortingOrder", "number", ScriptServiceArgType::Number, false, "Order in sorting layer (default 0)." },
+		};
+		static const ScriptServiceParam createCamera2DParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, false, "Entity tag name (default 'Camera2D')." },
+			{ "x", "number", ScriptServiceArgType::Number, false, "World X position (default 0)." },
+			{ "y", "number", ScriptServiceArgType::Number, false, "World Y position (default 0)." },
+			{ "zoom", "number", ScriptServiceArgType::Number, false, "Orthographic size / zoom (default 10)." },
+			{ "isPrimary", "boolean", ScriptServiceArgType::Boolean, false, "Whether this camera is active (default true)." },
+		};
+		static const ScriptServiceParam createBox2DParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, true, "Entity tag name." },
+			{ "x", "number", ScriptServiceArgType::Number, true, "World X position." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "World Y position." },
+			{ "w", "number", ScriptServiceArgType::Number, true, "Box width in world units." },
+			{ "h", "number", ScriptServiceArgType::Number, true, "Box height in world units." },
+			{ "isDynamic", "boolean", ScriptServiceArgType::Boolean, false, "True = dynamic rigidbody; false = static platform." },
+			{ "color", "string", ScriptServiceArgType::String, false, "Optional hex sprite color." },
+			{ "isSensor", "boolean", ScriptServiceArgType::Boolean, false, "True = trigger/sensor only without solid collision." },
+		};
 		static const ScriptServiceParam destroyEntityParams[] = {
 			{ "entity", "userdata", ScriptServiceArgType::None, true, "Entity to destroy; queued, committed at the next safe point." },
 		};
@@ -1857,6 +2027,12 @@ namespace World
 				"Create an entity with Transform and LightComponent ('directional', 'point', 'ambient'); returns Entity handle." },
 			{ "CreateCamera", &CreateCameraImpl, createCameraParams, 6, 6, "Entity",
 				"Create an entity with Transform, CameraComponent and AudioListenerComponent; returns Entity handle." },
+			{ "CreateSprite", &CreateSpriteImpl, createSpriteParams, 8, 8, "Entity",
+				"Create a 2D sprite entity (Transform + SpriteComponent) in one step; returns Entity handle." },
+			{ "CreateCamera2D", &CreateCamera2DImpl, createCamera2DParams, 5, 5, "Entity",
+				"Create an orthographic 2D camera entity with AudioListenerComponent; returns Entity handle." },
+			{ "CreateBox2D", &CreateBox2DImpl, createBox2DParams, 8, 8, "Entity",
+				"Create a 2D physics body + sprite + collider entity (Static/Dynamic/Sensor); returns Entity handle." },
 			{ "CreateRawEntity", &CreateRawEntityImpl, nullptr, 0, 0, "Entity",
 				"Create a lightweight anonymous entity (no Tag, no UUID) in the active scene and return its handle." },
 			{ "DestroyEntity", &DestroyEntityImpl, destroyEntityParams, 1, 1, "boolean",

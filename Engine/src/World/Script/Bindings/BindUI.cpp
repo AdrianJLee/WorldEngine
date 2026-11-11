@@ -778,6 +778,45 @@ namespace World
 			return res.ToValue();
 		}
 
+		ScriptValue UiCircleImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[21];
+			CheckArgumentCount("ui", method, count, 3);
+			const double cx = RequireNumber("ui", method, args, count, 0);
+			const double cy = RequireNumber("ui", method, args, count, 1);
+			const double r = RequireNumber("ui", method, args, count, 2);
+			std::string colorHex = "#FFFFFFFF";
+			if (count >= 4 && args[3].IsString()) args[3].AsString(&colorHex);
+
+			Wui::WuiColor fillColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+			TryParseHexColor(colorHex, fillColor);
+
+			const float radius = static_cast<float>(r);
+			const Wui::WuiRect rect{
+				static_cast<float>(cx - radius),
+				static_cast<float>(cy - radius),
+				radius * 2.0f,
+				radius * 2.0f
+			};
+
+			auto& cmds = CurrentUiContext().Commands();
+			cmds.push_back({ Wui::WuiDrawKind::Rect, rect, fillColor, radius });
+
+			if (count >= 5 && args[4].IsString())
+			{
+				std::string borderHex;
+				args[4].AsString(&borderHex);
+				Wui::WuiColor borderCol{ 0.0f, 0.0f, 0.0f, 1.0f };
+				if (TryParseHexColor(borderHex, borderCol))
+				{
+					const float borderThick = static_cast<float>(OptionalNumber("ui", method, args, count, 5, 1.0));
+					cmds.push_back({ Wui::WuiDrawKind::RectOutline, rect, borderCol, radius, borderThick });
+				}
+			}
+			return ScriptValue::Nil();
+		}
+
 		ScriptValue UiGetImpl(const ScriptValue* args, std::size_t count)
 		{
 			NormalizeArgs(args, count);
@@ -1129,6 +1168,14 @@ namespace World
 			{ "y", "number", ScriptServiceArgType::Number, true, "Y position in UI pixels." },
 			{ "options", "table", ScriptServiceArgType::Table, false, "Styling options {bgColor, textColor, fontSize, radius}." },
 		};
+		static const ScriptServiceParam circleParams[] = {
+			{ "cx", "number", ScriptServiceArgType::Number, true, "Center X in UI pixels." },
+			{ "cy", "number", ScriptServiceArgType::Number, true, "Center Y in UI pixels." },
+			{ "radius", "number", ScriptServiceArgType::Number, true, "Circle radius in UI pixels." },
+			{ "color", "string", ScriptServiceArgType::String, false, "Fill color in hex format (default '#FFFFFFFF')." },
+			{ "borderColor", "string", ScriptServiceArgType::String, false, "Optional border outline color." },
+			{ "borderThickness", "number", ScriptServiceArgType::Number, false, "Border thickness (default 1)." },
+		};
 
 		static const ScriptServiceMethod uiMethods[] = {
 			{ "panel", [](const ScriptValue* args, std::size_t count) -> ScriptValue
@@ -1237,6 +1284,11 @@ namespace World
 				return UiBadgeImpl(args, count);
 			}, badgeParams, 4, 4, "table",
 				"Draw a styled pill tag / badge for scores, streaks and combos; returns {w, h}." },
+			{ "circle", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiCircleImpl(args, count);
+			}, circleParams, 6, 6, "",
+				"Draw an antialiased filled/outlined circle; perfect for radar dots, gauges, aiming reticles." },
 		};
 		static const ScriptServiceBinding uiTables[] = {
 			{ "ui", "Immediate-mode script UI table and declarative .wui document control.",

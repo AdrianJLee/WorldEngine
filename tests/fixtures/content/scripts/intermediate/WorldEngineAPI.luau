@@ -856,6 +856,14 @@ function Audio:Play(soundPath, volume, pitch, loop) end
 ---@return number
 function Audio:PlayAt(soundPath, x, y, z, volume, pitch, loop) end
 
+---Synthesize and play an instant procedural tone (sine, square, triangle, saw, noise); returns voice handle.
+---@param waveType string Synthesizer waveform ('sine', 'square', 'triangle', 'saw', 'noise').
+---@param freqHz number Oscillator frequency in Hz.
+---@param duration number? Duration in seconds (default 0.2s).
+---@param volume number? Volume scaling factor (default 0.7).
+---@return number
+function Audio:PlayTone(waveType, freqHz, duration, volume) end
+
 -- Global service table 'Music': read-only; there is no runtime constructor.
 ---Read-only interactive music service table for playback and transitions.
 ---@class Music
@@ -987,6 +995,39 @@ function ecs:CreateLight(name, type, color, intensity, x, y, z, dx, dy, dz) end
 ---@param isPrimary boolean? Whether this camera is the active scene camera (default true).
 ---@return Entity
 function ecs:CreateCamera(name, x, y, z, fov, isPrimary) end
+
+---Create a 2D sprite entity (Transform + SpriteComponent) in one step; returns Entity handle.
+---@param name string? Entity tag name (default 'Sprite').
+---@param texturePath string? Optional texture path (empty = colored rectangle).
+---@param x number? World X position (default 0).
+---@param y number? World Y position (default 0).
+---@param w number? Width scale (default 1).
+---@param h number? Height scale (default 1).
+---@param color string? Optional hex tint color (e.g. '#38BDF8FF').
+---@param sortingOrder number? Order in sorting layer (default 0).
+---@return Entity
+function ecs:CreateSprite(name, texturePath, x, y, w, h, color, sortingOrder) end
+
+---Create an orthographic 2D camera entity with AudioListenerComponent; returns Entity handle.
+---@param name string? Entity tag name (default 'Camera2D').
+---@param x number? World X position (default 0).
+---@param y number? World Y position (default 0).
+---@param zoom number? Orthographic size / zoom (default 10).
+---@param isPrimary boolean? Whether this camera is active (default true).
+---@return Entity
+function ecs:CreateCamera2D(name, x, y, zoom, isPrimary) end
+
+---Create a 2D physics body + sprite + collider entity (Static/Dynamic/Sensor); returns Entity handle.
+---@param name string Entity tag name.
+---@param x number World X position.
+---@param y number World Y position.
+---@param w number Box width in world units.
+---@param h number Box height in world units.
+---@param isDynamic boolean? True = dynamic rigidbody; false = static platform.
+---@param color string? Optional hex sprite color.
+---@param isSensor boolean? True = trigger/sensor only without solid collision.
+---@return Entity
+function ecs:CreateBox2D(name, x, y, w, h, isDynamic, color, isSensor) end
 
 ---Create a lightweight anonymous entity (no Tag, no UUID) in the active scene and return its handle.
 ---@return Entity
@@ -1242,6 +1283,15 @@ function ui:anchor(anchor, w, h) end
 ---@param options table? Styling options {bgColor, textColor, fontSize, radius}.
 ---@return table
 function ui:badge(text, x, y, options) end
+
+---Draw an antialiased filled/outlined circle; perfect for radar dots, gauges, aiming reticles.
+---@param cx number Center X in UI pixels.
+---@param cy number Center Y in UI pixels.
+---@param radius number Circle radius in UI pixels.
+---@param color string? Fill color in hex format (default '#FFFFFFFF').
+---@param borderColor string? Optional border outline color.
+---@param borderThickness number? Border thickness (default 1).
+function ui:circle(cx, cy, radius, color, borderColor, borderThickness) end
 
 -- Component fields are exposed through Entity:GetComponent("AmbientLightComponent"); there is no runtime global named AmbientLightComponent.
 ---@class AmbientLightComponent

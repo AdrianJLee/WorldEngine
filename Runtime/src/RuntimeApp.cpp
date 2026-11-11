@@ -88,6 +88,19 @@ namespace World
 					WLD_CORE_INFO("[runtime] --project override: {0}", World::Paths::ProjectDir().string());
 					continue;
 				}
+				if (std::strncmp(argument, "--keys=", 7) == 0)
+				{
+					_putenv_s("WLD_INPUT_SCRIPT", argument + 7);
+					continue;
+				}
+				if (std::strcmp(argument, "--keys") == 0)
+				{
+					if (index + 1 < __argc && __argv[index + 1])
+					{
+						_putenv_s("WLD_INPUT_SCRIPT", __argv[++index]);
+					}
+					continue;
+				}
 			}
 
 			if (headless && GetRuntimeAiControlPort() <= 0)
