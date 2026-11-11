@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -87,6 +88,38 @@ namespace World
 			return signature + ")";
 		}
 
+		void NormalizeArgs(const ScriptValue*& args, std::size_t& count)
+		{
+			if (count > 0 && args[0].IsTable())
+			{
+				++args;
+				--count;
+			}
+		}
+
+		bool TryParseHexColor(const std::string& text, Wui::WuiColor& out)
+		{
+			std::string hex = text;
+			if (!hex.empty() && hex.front() == '#') hex.erase(0, 1);
+			if (hex.size() == 6 || hex.size() == 8)
+			{
+				unsigned int r = 0, g = 0, b = 0, a = 255;
+				if (std::sscanf(hex.substr(0, 2).c_str(), "%x", &r) == 1 &&
+				    std::sscanf(hex.substr(2, 2).c_str(), "%x", &g) == 1 &&
+				    std::sscanf(hex.substr(4, 2).c_str(), "%x", &b) == 1)
+				{
+					if (hex.size() == 8) std::sscanf(hex.substr(6, 2).c_str(), "%x", &a);
+					out = Wui::WuiColor {
+						static_cast<float>(r) / 255.0f,
+						static_cast<float>(g) / 255.0f,
+						static_cast<float>(b) / 255.0f,
+						static_cast<float>(a) / 255.0f
+					};
+					return true;
+				}
+			}
+			return false;
+		}
 		void CheckArgumentCount(const std::string& table, const ScriptServiceMethod& method,
 			std::size_t count, std::size_t minimum)
 		{
@@ -274,6 +307,7 @@ namespace World
 
 		ScriptValue UiPanelImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[0];
 			CheckArgumentCount("ui", method, count, 5);
 			const std::string title = RequireString("ui", method, args, count, 4);
@@ -284,6 +318,7 @@ namespace World
 
 		ScriptValue UiTextImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[1];
 			CheckArgumentCount("ui", method, count, 3);
 			const glm::vec2 position {
@@ -292,12 +327,20 @@ namespace World
 			};
 			const std::string text = RequireString("ui", method, args, count, 2);
 			const float fontSize = static_cast<float>(OptionalNumber("ui", method, args, count, 3, 15.0));
-			Wui::Label(CurrentUiContext(), position, text, Wui::WuiDefaultTheme().Text, fontSize);
+			Wui::WuiColor textColor = Wui::WuiDefaultTheme().Text;
+			if (count >= 5 && args[4].IsString())
+			{
+				std::string colorHex;
+				args[4].AsString(&colorHex);
+				TryParseHexColor(colorHex, textColor);
+			}
+			Wui::Label(CurrentUiContext(), position, text, textColor, fontSize);
 			return ScriptValue::Nil();
 		}
 
 		ScriptValue UiButtonImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[2];
 			CheckArgumentCount("ui", method, count, 6);
 			const std::string id = RequireId("ui", method, args, count, 0);
@@ -309,6 +352,7 @@ namespace World
 
 		ScriptValue UiCheckboxImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[3];
 			CheckArgumentCount("ui", method, count, 7);
 			const std::string id = RequireId("ui", method, args, count, 0);
@@ -321,6 +365,7 @@ namespace World
 
 		ScriptValue UiSliderImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[4];
 			CheckArgumentCount("ui", method, count, 8);
 			const std::string id = RequireId("ui", method, args, count, 0);
@@ -334,6 +379,7 @@ namespace World
 
 		ScriptValue UiImageImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[5];
 			CheckArgumentCount("ui", method, count, 5);
 			const Wui::WuiRect rect = RequireRect("ui", method, args, count, 0);
@@ -350,6 +396,7 @@ namespace World
 
 		ScriptValue UiListImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[6];
 			CheckArgumentCount("ui", method, count, 8);
 			const std::string id = RequireId("ui", method, args, count, 0);
@@ -389,6 +436,7 @@ namespace World
 
 		ScriptValue UiGridImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[7];
 			CheckArgumentCount("ui", method, count, 9);
 			const std::string id = RequireId("ui", method, args, count, 0);
@@ -426,8 +474,127 @@ namespace World
 			return ScriptValue::Nil();
 		}
 
+		ScriptValue UiRectImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[14];
+			CheckArgumentCount("ui", method, count, 5);
+			const Wui::WuiRect rect = RequireRect("ui", method, args, count, 0);
+			const std::string colorHex = RequireString("ui", method, args, count, 4);
+			Wui::WuiColor fillColor { 1.0f, 1.0f, 1.0f, 1.0f };
+			TryParseHexColor(colorHex, fillColor);
+			const float radius = static_cast<float>(OptionalNumber("ui", method, args, count, 5, 0.0));
+			CurrentUiContext().Commands().push_back({ Wui::WuiDrawKind::Rect, rect, fillColor, radius });
+			if (count >= 7 && args[6].IsString())
+			{
+				std::string borderHex;
+				args[6].AsString(&borderHex);
+				Wui::WuiColor borderColor { 0.0f, 0.0f, 0.0f, 1.0f };
+				if (TryParseHexColor(borderHex, borderColor))
+				{
+					const float borderThick = static_cast<float>(OptionalNumber("ui", method, args, count, 7, 1.0));
+					CurrentUiContext().Commands().push_back({ Wui::WuiDrawKind::RectOutline, rect, borderColor, radius, borderThick });
+				}
+			}
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue UiLineImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[15];
+			CheckArgumentCount("ui", method, count, 5);
+			const glm::vec2 from {
+				static_cast<float>(RequireNumber("ui", method, args, count, 0)),
+				static_cast<float>(RequireNumber("ui", method, args, count, 1)),
+			};
+			const glm::vec2 to {
+				static_cast<float>(RequireNumber("ui", method, args, count, 2)),
+				static_cast<float>(RequireNumber("ui", method, args, count, 3)),
+			};
+			const std::string colorHex = RequireString("ui", method, args, count, 4);
+			Wui::WuiColor color { 1.0f, 1.0f, 1.0f, 1.0f };
+			TryParseHexColor(colorHex, color);
+			const float thickness = static_cast<float>(OptionalNumber("ui", method, args, count, 5, 1.0));
+			const glm::vec2 delta = to - from;
+			const float len = glm::length(delta);
+			if (len > 0.0001f)
+			{
+				const glm::vec2 normal { -delta.y / len * thickness * 0.5f, delta.x / len * thickness * 0.5f };
+				Wui::WuiDrawCommand command;
+				command.Kind = Wui::WuiDrawKind::Quad;
+				command.Color = color;
+				command.Vertices = { from + normal, to + normal, to - normal, from - normal };
+				CurrentUiContext().Commands().push_back(std::move(command));
+			}
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue UiProgressBarImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[16];
+			CheckArgumentCount("ui", method, count, 6);
+			const Wui::WuiRect rect = RequireRect("ui", method, args, count, 0);
+			const double progressVal = RequireNumber("ui", method, args, count, 4);
+			const float progress = static_cast<float>(std::clamp(progressVal, 0.0, 1.0));
+			const std::string fillHex = RequireString("ui", method, args, count, 5);
+			Wui::WuiColor fillColor { 0.3f, 0.75f, 0.5f, 1.0f };
+			TryParseHexColor(fillHex, fillColor);
+			Wui::WuiColor trackColor { 0.12f, 0.14f, 0.18f, 0.9f };
+			if (count >= 7 && args[6].IsString())
+			{
+				std::string trackHex;
+				args[6].AsString(&trackHex);
+				TryParseHexColor(trackHex, trackColor);
+			}
+			const float radius = static_cast<float>(OptionalNumber("ui", method, args, count, 7, 3.0));
+			auto& cmds = CurrentUiContext().Commands();
+			cmds.push_back({ Wui::WuiDrawKind::Rect, rect, trackColor, radius });
+			if (progress > 0.001f)
+			{
+				const Wui::WuiRect fillRect { rect.X, rect.Y, rect.W * progress, rect.H };
+				cmds.push_back({ Wui::WuiDrawKind::Rect, fillRect, fillColor, radius });
+			}
+			return ScriptValue::Nil();
+		}
+
+		ScriptValue UiSetImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 3 || !args[0].IsString() || !args[1].IsString() || !args[2].IsString())
+				return ScriptValue::Boolean(false);
+			std::string nodeId, prop, val;
+			args[0].AsString(&nodeId);
+			args[1].AsString(&prop);
+			args[2].AsString(&val);
+			if (UiHost* host = UiHost::GetActive())
+			{
+				host->SetProperty(nodeId, prop, val);
+				return ScriptValue::Boolean(true);
+			}
+			return ScriptValue::Boolean(false);
+		}
+
+		ScriptValue UiGetImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 2 || !args[0].IsString() || !args[1].IsString())
+				return ScriptValue::Nil();
+			std::string nodeId, prop;
+			args[0].AsString(&nodeId);
+			args[1].AsString(&prop);
+			if (UiHost* host = UiHost::GetActive())
+			{
+				const std::string val = host->GetProperty(nodeId, prop);
+				if (!val.empty())
+					return ScriptValue::String(val);
+			}
+			return ScriptValue::Nil();
+		}
 		ScriptValue UiAxisSplitImpl(const ScriptValue* args, std::size_t count, bool rows)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = ScriptUiBindings(nullptr)[0].Methods[rows ? 8 : 9];
 			CheckArgumentCount("ui", method, count, 5);
 			const double x = RequireNumber("ui", method, args, count, 0);
@@ -460,11 +627,13 @@ namespace World
 
 		ScriptValue UiRowsImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			return UiAxisSplitImpl(args, count, true);
 		}
 
 		ScriptValue UiColumnsImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			return UiAxisSplitImpl(args, count, false);
 		}
 
@@ -479,6 +648,7 @@ namespace World
 		
 		ScriptValue UiOpenImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			if (count < 1 || !args[0].IsString())
 				return ScriptValue::Boolean(false);
 			std::string path;
@@ -490,6 +660,7 @@ namespace World
 
 		ScriptValue UiCloseImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args; (void)count;
 			if (UiHost* host = UiHost::GetActive())
 			{
@@ -501,6 +672,7 @@ namespace World
 
 		ScriptValue UiIsOpenImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args; (void)count;
 			if (UiHost* host = UiHost::GetActive())
 				return ScriptValue::Boolean(host->Enabled());
@@ -631,6 +803,7 @@ namespace World
 			{ "y", "number", ScriptServiceArgType::Number, true, "Top edge in UI pixels." },
 			{ "text", "string", ScriptServiceArgType::String, true, "Single-line text." },
 			{ "fontSize", "number", ScriptServiceArgType::Number, false, "Font size in pixels; defaults to 15." },
+			{ "color", "string", ScriptServiceArgType::String, false, "Text color hex (e.g. '#FFCC00' or '#FFCC00FF'); defaults to theme text color." },
 		};
 		static const ScriptServiceParam buttonParams[] = {
 			{ "id", "string", ScriptServiceArgType::String, true, "Non-empty widget id; the script path is prepended before hashing." },
@@ -706,6 +879,43 @@ namespace World
 			{ "count", "integer", ScriptServiceArgType::Number, true, "Number of cells; zero yields an empty table." },
 			{ "gap", "number", ScriptServiceArgType::Number, false, "Gap between cells in pixels; defaults to 0." },
 		};
+		static const ScriptServiceParam rectParams[] = {
+			{ "x", "number", ScriptServiceArgType::Number, true, "Left edge in UI pixels." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "Top edge in UI pixels." },
+			{ "w", "number", ScriptServiceArgType::Number, true, "Width in UI pixels." },
+			{ "h", "number", ScriptServiceArgType::Number, true, "Height in UI pixels." },
+			{ "color", "string", ScriptServiceArgType::String, true, "Fill color in hex format (#RRGGBB or #RRGGBBAA)." },
+			{ "radius", "number", ScriptServiceArgType::Number, false, "Corner radius in pixels; defaults to 0." },
+			{ "borderColor", "string", ScriptServiceArgType::String, false, "Optional border outline color in hex format." },
+			{ "borderThickness", "number", ScriptServiceArgType::Number, false, "Border outline thickness; defaults to 1." },
+		};
+		static const ScriptServiceParam lineParams[] = {
+			{ "x1", "number", ScriptServiceArgType::Number, true, "Start X in UI pixels." },
+			{ "y1", "number", ScriptServiceArgType::Number, true, "Start Y in UI pixels." },
+			{ "x2", "number", ScriptServiceArgType::Number, true, "End X in UI pixels." },
+			{ "y2", "number", ScriptServiceArgType::Number, true, "End Y in UI pixels." },
+			{ "color", "string", ScriptServiceArgType::String, true, "Line color in hex format (#RRGGBB or #RRGGBBAA)." },
+			{ "thickness", "number", ScriptServiceArgType::Number, false, "Line thickness; defaults to 1." },
+		};
+		static const ScriptServiceParam progressParams[] = {
+			{ "x", "number", ScriptServiceArgType::Number, true, "Left edge in UI pixels." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "Top edge in UI pixels." },
+			{ "w", "number", ScriptServiceArgType::Number, true, "Width in UI pixels." },
+			{ "h", "number", ScriptServiceArgType::Number, true, "Height in UI pixels." },
+			{ "progress", "number", ScriptServiceArgType::Number, true, "Progress fraction [0.0, 1.0]." },
+			{ "fillColor", "string", ScriptServiceArgType::String, true, "Progress fill color in hex format." },
+			{ "trackColor", "string", ScriptServiceArgType::String, false, "Track background color in hex format; defaults to dark." },
+			{ "radius", "number", ScriptServiceArgType::Number, false, "Corner radius in pixels; defaults to 3." },
+		};
+		static const ScriptServiceParam setPropParams[] = {
+			{ "nodeId", "string", ScriptServiceArgType::String, true, "Node ID in active .wui document." },
+			{ "prop", "string", ScriptServiceArgType::String, true, "Property name (text, value, color, bg, border, radius)." },
+			{ "value", "string", ScriptServiceArgType::String, true, "New string value." },
+		};
+		static const ScriptServiceParam getPropParams[] = {
+			{ "nodeId", "string", ScriptServiceArgType::String, true, "Node ID in active .wui document." },
+			{ "prop", "string", ScriptServiceArgType::String, true, "Property name to query." },
+		};
 		static const ScriptServiceMethod uiMethods[] = {
 			{ "panel", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -715,8 +925,8 @@ namespace World
 			{ "text", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
 				return UiTextImpl(args, count);
-			}, textParams, 4, 4, "",
-				"Draw a single line of text." },
+			}, textParams, 5, 5, "",
+				"Draw a single line of text with optional font size and hex color." },
 			{ "button", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
 				return UiButtonImpl(args, count);
@@ -778,10 +988,35 @@ namespace World
 				return UiIsOpenImpl(args, count);
 			}, nullptr, 0, 0, "boolean",
 				"Check if a .wui document is currently open." },
+			{ "rect", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiRectImpl(args, count);
+			}, rectParams, 8, 8, "",
+				"Draw a filled rounded rectangle with optional border outline." },
+			{ "line", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiLineImpl(args, count);
+			}, lineParams, 6, 6, "",
+				"Draw an antialiased line between two UI points." },
+			{ "progressBar", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiProgressBarImpl(args, count);
+			}, progressParams, 8, 8, "",
+				"Draw a smooth health/mana/progress bar." },
+			{ "set", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiSetImpl(args, count);
+			}, setPropParams, 3, 3, "boolean",
+				"Dynamically override a property on an active .wui document node." },
+			{ "get", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return UiGetImpl(args, count);
+			}, getPropParams, 2, 2, "string|nil",
+				"Get the effective property value of an active .wui document node." },
 		};
 		static const ScriptServiceBinding uiTables[] = {
 			{ "ui", "Immediate-mode script UI table and declarative .wui document control.",
-				uiMethods, 14 },
+				uiMethods, sizeof(uiMethods) / sizeof(uiMethods[0]) },
 		};
 		if (count)
 			*count = sizeof(uiTables) / sizeof(uiTables[0]);

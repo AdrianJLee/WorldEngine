@@ -80,6 +80,15 @@ namespace World
 			return signature + ")";
 		}
 
+		void NormalizeArgs(const ScriptValue*& args, std::size_t& count)
+		{
+			if (count > 0 && args[0].IsTable())
+			{
+				++args;
+				--count;
+			}
+		}
+
 		void CheckArgumentCount(const std::string& table, const ScriptServiceMethod& method,
 			std::size_t count, std::size_t minimum)
 		{
@@ -196,6 +205,7 @@ namespace World
 
 		ScriptValue InputDownImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[0];
 			const std::string action = RequireString("Input", method, args, count, 0);
 			const uint32_t player = RequirePlayer("Input", method, args, count, 1);
@@ -208,6 +218,7 @@ namespace World
 
 		ScriptValue InputPressedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[1];
 			const std::string action = RequireString("Input", method, args, count, 0);
 			const uint32_t player = RequirePlayer("Input", method, args, count, 1);
@@ -219,6 +230,7 @@ namespace World
 
 		ScriptValue InputReleasedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[2];
 			const std::string action = RequireString("Input", method, args, count, 0);
 			const uint32_t player = RequirePlayer("Input", method, args, count, 1);
@@ -230,6 +242,7 @@ namespace World
 
 		ScriptValue InputAxisImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[3];
 			const std::string axis = RequireString("Input", method, args, count, 0);
 			const uint32_t player = RequirePlayer("Input", method, args, count, 1);
@@ -241,6 +254,7 @@ namespace World
 
 		ScriptValue InputPlayerCountImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[4], count, 0);
 			uint32_t players = 0;
@@ -253,6 +267,7 @@ namespace World
 		// 读到的滚轮逐位相同,与按键/轴/鼠标的确定性口径一致。
 		ScriptValue InputScrollImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[5], count, 0);
 			float scroll = 0.0f;
 			if (Scene* scene = ScriptEngine::GetActiveScene())
@@ -262,6 +277,7 @@ namespace World
 
 		ScriptValue InputMouseDeltaImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[11], count, 0);
 			glm::vec2 delta { 0.0f };
 			if (Scene* scene = ScriptEngine::GetActiveScene())
@@ -273,6 +289,7 @@ namespace World
 		// 未知按钮/无活动场景返回 false,不抛错 —— 脚本可以把它当作能力探测。
 		ScriptValue InputMouseButtonImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[12], count, 1);
 			double number = 0.0;
 			if (!args[0].AsNumber(&number) || !std::isfinite(number) || number != std::round(number) ||
@@ -287,6 +304,7 @@ namespace World
 		// 与 MouseDelta 同源（场景快照），因此在固定步里读到的也是同一份数据。
 		ScriptValue InputMousePositionImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[13], count, 0);
 			glm::vec2 position { 0.0f };
 			if (Scene* scene = ScriptEngine::GetActiveScene())
@@ -296,6 +314,7 @@ namespace World
 
 		ScriptValue InputContentScaleImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args; (void)count;
 			float scale = 1.0f;
 			if (Application::HasInstance())
@@ -313,6 +332,7 @@ namespace World
 
 		ScriptValue InputViewportSizeImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args; (void)count;
 			glm::vec2 size { 1280.0f, 720.0f };
 			if (Application::HasInstance())
@@ -336,6 +356,7 @@ namespace World
 
 		ScriptValue InputWindowSizeImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			return InputViewportSizeImpl(args, count);
 		}
 
@@ -343,6 +364,7 @@ namespace World
 		// 第三人称/第一人称需要"隐藏光标 + 指针锁定"，菜单/HUD 需要"显示光标"。
 		ScriptValue InputSetCursorVisibleImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[14], count, 1);
 			bool visible = true;
 			if (!args[0].AsBool(&visible))
@@ -355,6 +377,7 @@ namespace World
 
 		ScriptValue InputCursorVisibleImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[15], count, 0);
 			return ScriptValue::Boolean(Application::HasInstance()
 				&& Application::Get().GetWindow().IsCursorVisible());
@@ -362,6 +385,7 @@ namespace World
 
 		ScriptValue InputSetCursorLockedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[16], count, 1);
 			bool locked = true;
 			if (!args[0].AsBool(&locked))
@@ -374,6 +398,7 @@ namespace World
 
 		ScriptValue InputCursorLockedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Input", GameplayServiceBindings(nullptr)[0].Methods[17], count, 0);
 			return ScriptValue::Boolean(Application::HasInstance()
 				&& Application::Get().GetWindow().IsCursorLocked());
@@ -394,6 +419,7 @@ namespace World
 
 		ScriptValue InputPushContextImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[7];
 			const std::string name = RequireString("Input", method, args, count, 0);
 			GameApp* app = GameApp::TryGet();
@@ -410,6 +436,7 @@ namespace World
 
 		ScriptValue InputPopContextImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[8];
 			const std::string name = RequireString("Input", method, args, count, 0);
 			GameApp* app = GameApp::TryGet();
@@ -424,6 +451,7 @@ namespace World
 
 		ScriptValue InputHasContextImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[9];
 			const std::string name = RequireString("Input", method, args, count, 0);
 			GameApp* app = GameApp::TryGet();
@@ -435,6 +463,7 @@ namespace World
 
 		ScriptValue InputRumbleImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[0].Methods[6];
 			CheckArgumentCount("Input", method, count, 2);
 			const ScriptValue& argLeft = RequireArg("Input", method, args, count, 0);
@@ -466,6 +495,7 @@ namespace World
 
 		ScriptValue TimeElapsedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[0], count, 0);
 			const Scene::FrameTimeService* time = ActiveTimeService();
 			return ScriptValue::Number(time ? time->ElapsedSeconds : 0.0);
@@ -473,6 +503,7 @@ namespace World
 
 		ScriptValue TimeDeltaImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[1], count, 0);
 			const Scene::FrameTimeService* time = ActiveTimeService();
 			return ScriptValue::Number(time ? static_cast<double>(time->DeltaSeconds) : 0.0);
@@ -480,6 +511,7 @@ namespace World
 
 		ScriptValue TimeFixedDeltaImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[2], count, 0);
 			const Scene::FrameTimeService* time = ActiveTimeService();
 			return ScriptValue::Number(time ? static_cast<double>(time->FixedDeltaSeconds) : 0.0);
@@ -487,6 +519,7 @@ namespace World
 
 		ScriptValue TimeFrameCountImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[3], count, 0);
 			const Scene::FrameTimeService* time = ActiveTimeService();
 			return ScriptValue::Number(time ? ToLuaNumber(time->FrameCount) : 0.0);
@@ -494,6 +527,7 @@ namespace World
 
 		ScriptValue TimeFixedStepCountImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[4], count, 0);
 			const Scene::FrameTimeService* time = ActiveTimeService();
 			return ScriptValue::Number(time ? ToLuaNumber(time->FixedStepCount) : 0.0);
@@ -501,6 +535,7 @@ namespace World
 
 		ScriptValue TimeScaleImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			CheckArgumentCount("Time", GameplayServiceBindings(nullptr)[3].Methods[5], count, 0);
 			const Scene::FrameTimeService* time = ActiveTimeService();
 			return ScriptValue::Number(time ? static_cast<double>(time->TimeScale) : 0.0);
@@ -508,6 +543,7 @@ namespace World
 
 		ScriptValue LevelRequestImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[0];
 			const std::string id = RequireString("Level", method, args, count, 0);
 			const bool additive = OptionalBool("Level", method, args, count, 1, false);
@@ -516,6 +552,7 @@ namespace World
 
 		ScriptValue LevelIsLoadingImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[1], count, 0);
 			return ScriptValue::Boolean(RequireGameApp().Levels().IsLoading());
@@ -523,6 +560,7 @@ namespace World
 
 		ScriptValue LevelStateImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[2], count, 0);
 			return ScriptValue::String(LevelLoadStateName(RequireGameApp().Levels().GetState()));
@@ -530,6 +568,7 @@ namespace World
 
 		ScriptValue LevelLastErrorImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[3], count, 0);
 			return ScriptValue::String(RequireGameApp().Levels().GetLastError());
@@ -537,6 +576,7 @@ namespace World
 
 		ScriptValue LevelPrimaryImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[4], count, 0);
 			return ScriptValue::String(RequireGameApp().Levels().GetPrimaryLevel());
@@ -544,6 +584,7 @@ namespace World
 
 		ScriptValue LevelActiveLevelsImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[5], count, 0);
 			const std::vector<std::string>& levels = RequireGameApp().Levels().GetActiveLevels();
@@ -555,6 +596,7 @@ namespace World
 
 		ScriptValue LevelUnloadImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[6];
 			const std::string id = RequireString("Level", method, args, count, 0);
 			RequireGameApp().Levels().Unload(id);
@@ -563,6 +605,7 @@ namespace World
 
 		ScriptValue LevelUnloadAllImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[7], count, 0);
 			RequireGameApp().Levels().UnloadAll();
@@ -571,6 +614,7 @@ namespace World
 
 		ScriptValue LevelEntriesImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[8], count, 0);
 			// 关卡集合来自内容根目录结构(assets/levels/<Id>/),没有清单文件。
@@ -589,6 +633,7 @@ namespace World
 
 		ScriptValue LevelGetDataLayersImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[9], count, 0);
 			const std::vector<Level::LevelInfo>& levels = RequireGameApp().Levels().GetLevels();
@@ -614,6 +659,7 @@ namespace World
 
 		ScriptValue LevelGetActiveDataLayersImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Level", GameplayServiceBindings(nullptr)[1].Methods[10], count, 0);
 			if (Scene* scene = ScriptEngine::GetActiveScene())
@@ -623,6 +669,7 @@ namespace World
 
 		ScriptValue LevelSetActiveDataLayersImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[11];
 			CheckArgumentCount("Level", method, count, 1);
 			if (!args[0].IsNumber())
@@ -637,6 +684,7 @@ namespace World
 
 		ScriptValue LevelSetDataLayerActiveImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[12];
 			CheckArgumentCount("Level", method, count, 2);
 			if (!args[1].IsBoolean())
@@ -692,6 +740,7 @@ namespace World
 
 		ScriptValue LevelIsDataLayerActiveImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[1].Methods[13];
 			CheckArgumentCount("Level", method, count, 1);
 			uint32_t mask = 0;
@@ -737,6 +786,7 @@ namespace World
 
 		ScriptValue SaveToSlot(const ScriptServiceMethod& method, const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const uint32_t slot = RequireSlot("Save", method, args, count, 0);
 			// 第二参数缺省 = 当前主关卡(与 LevelService::GetPrimaryLevel 同口径;空表示无活动关卡)。
 			const std::string fallback = RequireGameApp().Levels().GetPrimaryLevel();
@@ -747,6 +797,7 @@ namespace World
 
 		ScriptValue SaveLoadImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[2].Methods[1];
 			const uint32_t slot = RequireSlot("Save", method, args, count, 0);
 			SaveService& saves = RequireSaveService();
@@ -755,6 +806,7 @@ namespace World
 
 		ScriptValue SaveDeleteImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[2].Methods[2];
 			const uint32_t slot = RequireSlot("Save", method, args, count, 0);
 			SaveService& saves = RequireSaveService();
@@ -763,6 +815,7 @@ namespace World
 
 		ScriptValue SaveListImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Save", GameplayServiceBindings(nullptr)[2].Methods[3], count, 0);
 			const std::vector<SaveSlotInfo> slots = RequireSaveService().ListSaves();
@@ -784,6 +837,7 @@ namespace World
 
 		ScriptValue SaveSetGlobalImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[2].Methods[4];
 			const std::string key = RequireString("Save", method, args, count, 0);
 			const ScriptValue& value = RequireArg("Save", method, args, count, 1);
@@ -829,6 +883,7 @@ namespace World
 
 		ScriptValue SaveGetGlobalImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			const ScriptServiceMethod& method = GameplayServiceBindings(nullptr)[2].Methods[5];
 			const std::string key = RequireString("Save", method, args, count, 0);
 			GlobalValue stored;
@@ -846,6 +901,7 @@ namespace World
 
 		ScriptValue SaveLastErrorImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			CheckArgumentCount("Save", GameplayServiceBindings(nullptr)[2].Methods[6], count, 0);
 			return ScriptValue::String(RequireSaveService().GetLastError());
@@ -973,6 +1029,7 @@ namespace World
 
 		ScriptValue InputIsKeyPressedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			if (Wui::WuiTextFocus::Get().Active())
 				return ScriptValue::Boolean(false);
 
@@ -986,6 +1043,7 @@ namespace World
 
 		ScriptValue InputIsKeyJustPressedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			if (Wui::WuiTextFocus::Get().Active())
 				return ScriptValue::Boolean(false);
 
@@ -999,6 +1057,7 @@ namespace World
 
 		ScriptValue InputIsKeyJustReleasedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			if (Wui::WuiTextFocus::Get().Active())
 				return ScriptValue::Boolean(false);
 
@@ -1010,8 +1069,55 @@ namespace World
 			return ScriptValue::Boolean(false);
 		}
 
+		ScriptValue InputUiMousePositionImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			glm::vec2 position { 0.0f };
+			if (Scene* scene = ScriptEngine::GetActiveScene())
+				position = scene->GetInputSnapshot().MousePosition;
+			const float scale = Wui::UiScale() > 0.001f ? Wui::UiScale() : 1.0f;
+			position.x /= scale;
+			position.y /= scale;
+			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", position);
+		}
+
+		ScriptValue InputUiViewportSizeImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			glm::vec2 size { 1280.0f, 720.0f };
+			if (Application::HasInstance())
+			{
+				if (void* nativeWin = Application::Get().GetWindow().GetNativeWindow())
+				{
+					int w = 0, h = 0;
+					glfwGetWindowSize(static_cast<GLFWwindow*>(nativeWin), &w, &h);
+					if (w > 0 && h > 0)
+					{
+						size.x = static_cast<float>(w);
+						size.y = static_cast<float>(h);
+					}
+				}
+				else
+				{
+					size.x = static_cast<float>(Application::Get().GetWindow().GetWidth());
+					size.y = static_cast<float>(Application::Get().GetWindow().GetHeight());
+				}
+			}
+			const float scale = Wui::UiScale() > 0.001f ? Wui::UiScale() : 1.0f;
+			size.x /= scale;
+			size.y /= scale;
+			return LuaTypeDetail::NewUserdataOf(ScriptEngine::GetBindingContext(), "vec2", size);
+		}
+
+		ScriptValue InputUiScaleImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			return ScriptValue::Number(static_cast<double>(Wui::UiScale() > 0.001f ? Wui::UiScale() : 1.0f));
+		}
+
 		ScriptValue AppQuitImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			(void)count;
 			if (Application::HasInstance())
@@ -1024,6 +1130,7 @@ namespace World
 
 		ScriptValue AppIsEditorImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			(void)count;
 			return ScriptValue::Boolean(EngineEnvironment::IsEditor());
@@ -1031,6 +1138,7 @@ namespace World
 
 		ScriptValue AppIsRuntimeImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			(void)count;
 			return ScriptValue::Boolean(EngineEnvironment::IsRuntime());
@@ -1038,6 +1146,7 @@ namespace World
 
 		ScriptValue AppIsPackagedImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			(void)count;
 			return ScriptValue::Boolean(EngineEnvironment::IsPackaged());
@@ -1045,6 +1154,7 @@ namespace World
 
 		ScriptValue AppHostModeImpl(const ScriptValue* args, std::size_t count)
 		{
+			NormalizeArgs(args, count);
 			(void)args;
 			(void)count;
 			return ScriptValue::String(std::string(EngineEnvironment::GetHostModeName()));
@@ -1212,6 +1322,21 @@ const ScriptServiceBinding* GameplayServiceBindings(std::size_t* count)
 				return InputIsKeyJustReleasedImpl(args, count);
 			}, inputKeyParam, 1, 1, "boolean",
 				"Whether the key was just released this frame (falling-edge trigger)." },
+			{ "UiMousePosition", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputUiMousePositionImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Pointer position in WUI design coordinates (MousePosition / UiScale); perfectly aligns with ui.* and .wui." },
+			{ "UiViewportSize", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputUiViewportSizeImpl(args, count);
+			}, nullptr, 0, 0, "vec2",
+				"Active viewport size in WUI design coordinates (ViewportSize / UiScale)." },
+			{ "UiScale", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return InputUiScaleImpl(args, count);
+			}, nullptr, 0, 0, "number",
+				"Current WUI design scale factor (1.30 * dpi / 96)." },
 		};
 
 		// WP5:场景级只读时间服务(读数直接来自当前活动场景的 FrameTimeService)。

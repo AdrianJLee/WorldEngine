@@ -1305,6 +1305,79 @@ int main()
 			ScriptEngine::SetActiveScene(nullptr);
 		}
 
+
+		// =====================================================================
+		// 15. Genex/AI 兼容性与游戏 UI 原语强化 (冒号容错 / UiMousePosition / ui.rect / ui.progressBar / ui.line)
+		// =====================================================================
+		{
+			Scene scene(context);
+			ScriptEngine::SetActiveScene(&scene);
+
+			const std::filesystem::path systemsDir = World::Paths::AssetRoot() / "scripts/systems";
+			std::filesystem::create_directories(systemsDir);
+			std::error_code cleanEc;
+			for (const auto& entry : std::filesystem::directory_iterator(systemsDir, cleanEc))
+			{
+				if (entry.path().extension() == ".luau")
+					std::filesystem::remove(entry.path(), cleanEc);
+			}
+
+			const std::filesystem::path probeScript = systemsDir / "GenexUiColonProbe.luau";
+			{
+				std::ofstream out(probeScript, std::ios::binary | std::ios::trunc);
+				out << "local btnDot = Input.MouseButton(0)\n"
+					<< "local btnColon = Input:MouseButton(0)\n"
+					<< "assert(btnDot == btnColon)\n"
+					<< "local uiPos = Input.UiMousePosition()\n"
+					<< "local uiPosColon = Input:UiMousePosition()\n"
+					<< "local uiVp = Input.UiViewportSize()\n"
+					<< "local scale = Input.UiScale()\n"
+					<< "assert(scale > 0)\n"
+					<< "assert(uiVp.x > 0 and uiVp.y > 0)\n"
+					<< "ui.onDraw(function()\n"
+					<< "    ui:panel(10, 10, 100, 60, \"colon_panel\")\n"
+					<< "    ui.rect(20, 80, 200, 40, \"#1E232BEE\", 6, \"#3C4450FF\", 2)\n"
+					<< "    ui.line(0, 0, 100, 100, \"#38BDF8FF\", 3)\n"
+					<< "    ui.progressBar(20, 130, 200, 20, 0.75, \"#4CC38AFF\", \"#2A313AFF\", 4)\n"
+					<< "    ui.text(20, 160, \"HP: 75%\", 16, \"#FF5533FF\")\n"
+					<< "end)\n"
+					<< "ecs:AddSystem(\"GenexUiColonSystem\", function(dt) end)\n";
+			}
+
+			ScriptEngine::UnloadSystemScripts(scene);
+			const std::size_t loaded = ScriptEngine::LoadSystemScripts(scene, systemsDir);
+			CHECK(loaded == 1);
+
+			Wui::WuiContext ui;
+			Wui::WuiInputState input;
+			input.ViewportSize = glm::vec2 { 1280.0f, 720.0f };
+			ui.BeginFrame(input);
+
+			const std::size_t failures = ScriptEngine::DrawScriptUi(scene, ui);
+			CHECK(failures == 0);
+			// panel(3 cmds: rect, outline, header rect, header text = 4) + rect(2) + line(1) + progressBar(2) + text(1) = 10
+			CHECK(ui.Commands().size() >= 10);
+
+			bool foundColoredText = false;
+			bool foundQuadLine = false;
+			for (const auto& cmd : ui.Commands())
+			{
+				if (cmd.Kind == Wui::WuiDrawKind::Text && cmd.Text == "HP: 75%")
+				{
+					CHECK(cmd.Color.R > 0.99f && cmd.Color.G < 0.35f);
+					foundColoredText = true;
+				}
+				if (cmd.Kind == Wui::WuiDrawKind::Quad)
+					foundQuadLine = true;
+			}
+			CHECK(foundColoredText);
+			CHECK(foundQuadLine);
+
+			ScriptEngine::UnloadSystemScripts(scene);
+			std::filesystem::remove(probeScript, cleanEc);
+			ScriptEngine::SetActiveScene(nullptr);
+		}
+
 		ScriptEngine::Shutdown();
 		std::puts("World.LuauEcs: all tests passed!");
 		return 0;

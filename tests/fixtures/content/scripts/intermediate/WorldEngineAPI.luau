@@ -424,6 +424,18 @@ function Input:IsKeyJustPressed(key) end
 ---@return boolean
 function Input:IsKeyJustReleased(key) end
 
+---Pointer position in WUI design coordinates (MousePosition / UiScale); perfectly aligns with ui.* and .wui.
+---@return vec2
+function Input:UiMousePosition() end
+
+---Active viewport size in WUI design coordinates (ViewportSize / UiScale).
+---@return vec2
+function Input:UiViewportSize() end
+
+---Current WUI design scale factor (1.30 * dpi / 96).
+---@return number
+function Input:UiScale() end
+
 -- Global service table 'Level': read-only; there is no runtime constructor.
 ---Read-only level/flow service table; scene handles and host callbacks are not exposed.
 ---@class Level
@@ -942,12 +954,13 @@ ui = {}
 ---@param title string Panel title.
 function ui:panel(x, y, w, h, title) end
 
----Draw a single line of text.
+---Draw a single line of text with optional font size and hex color.
 ---@param x number Left edge in UI pixels.
 ---@param y number Top edge in UI pixels.
 ---@param text string Single-line text.
 ---@param fontSize number? Font size in pixels; defaults to 15.
-function ui:text(x, y, text, fontSize) end
+---@param color string? Text color hex (e.g. '#FFCC00' or '#FFCC00FF'); defaults to theme text color.
+function ui:text(x, y, text, fontSize, color) end
 
 ---Draw a button and return whether it was clicked this frame.
 ---@param id string Non-empty widget id; the script path is prepended before hashing.
@@ -1055,6 +1068,50 @@ function ui:close() end
 ---Check if a .wui document is currently open.
 ---@return boolean
 function ui:isOpen() end
+
+---Draw a filled rounded rectangle with optional border outline.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param color string Fill color in hex format (#RRGGBB or #RRGGBBAA).
+---@param radius number? Corner radius in pixels; defaults to 0.
+---@param borderColor string? Optional border outline color in hex format.
+---@param borderThickness number? Border outline thickness; defaults to 1.
+function ui:rect(x, y, w, h, color, radius, borderColor, borderThickness) end
+
+---Draw an antialiased line between two UI points.
+---@param x1 number Start X in UI pixels.
+---@param y1 number Start Y in UI pixels.
+---@param x2 number End X in UI pixels.
+---@param y2 number End Y in UI pixels.
+---@param color string Line color in hex format (#RRGGBB or #RRGGBBAA).
+---@param thickness number? Line thickness; defaults to 1.
+function ui:line(x1, y1, x2, y2, color, thickness) end
+
+---Draw a smooth health/mana/progress bar.
+---@param x number Left edge in UI pixels.
+---@param y number Top edge in UI pixels.
+---@param w number Width in UI pixels.
+---@param h number Height in UI pixels.
+---@param progress number Progress fraction [0.0, 1.0].
+---@param fillColor string Progress fill color in hex format.
+---@param trackColor string? Track background color in hex format; defaults to dark.
+---@param radius number? Corner radius in pixels; defaults to 3.
+function ui:progressBar(x, y, w, h, progress, fillColor, trackColor, radius) end
+
+---Dynamically override a property on an active .wui document node.
+---@param nodeId string Node ID in active .wui document.
+---@param prop string Property name (text, value, color, bg, border, radius).
+---@param value string New string value.
+---@return boolean
+function ui:set(nodeId, prop, value) end
+
+---Get the effective property value of an active .wui document node.
+---@param nodeId string Node ID in active .wui document.
+---@param prop string Property name to query.
+---@return string|nil
+function ui:get(nodeId, prop) end
 
 -- Component fields are exposed through Entity:GetComponent("AmbientLightComponent"); there is no runtime global named AmbientLightComponent.
 ---@class AmbientLightComponent

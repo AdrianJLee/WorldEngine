@@ -217,6 +217,11 @@ namespace World
 		// 本帧运行态属性覆盖表(绑定求值结果 → 绘制覆盖;诊断/测试用)。
 		const UI::UiPropertyOverrideTable& PropertyOverrides() const { return m_Overrides; }
 
+		// 运行时脚本属性动态覆盖(ui.set / ui.get 数据通道)
+		void SetProperty(std::string nodeId, std::string prop, std::string value);
+		std::string GetProperty(std::string_view nodeId, std::string_view prop) const;
+		void ClearScriptOverrides();
+
 		// M13:宿主预置文本框初值(如从绑定来的当前值)。转发给常驻的 `UiInputRouter`
 		// (`m_Router` 跨帧持有编辑态);编辑中调用立即替换编辑缓冲,否则作为下次进入编辑的初值。
 		void SetEditingText(std::string_view nodeId, std::string text);
@@ -299,6 +304,7 @@ namespace World
 		// M26:文档绑定表(Initialize 时 Attach)+ 运行态覆盖表(每帧 Refresh 后重建)
 		// + 宿主每帧喂的运行时数据源与变更检测版本。
 		UI::UiBindingTable m_Bindings;
+		UI::UiPropertyOverrideTable m_ScriptOverrides;
 		UI::UiPropertyOverrideTable m_Overrides;
 		UI::UiBindingContext m_BindingRuntime;
 		uint64_t m_BindingVersion = 0;

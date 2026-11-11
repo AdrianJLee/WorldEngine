@@ -226,6 +226,7 @@ namespace World
 		m_DocumentStamp = DocumentStamp {};
 		m_Bindings.Reset();
 		m_Overrides.Clear();
+		m_ScriptOverrides.Clear();
 		WLD_CORE_INFO("[ui] game UI document closed");
 	}
 
@@ -333,6 +334,10 @@ namespace World
 				if (m_Bindings.Value(binding.NodeId, binding.Target, value))
 					m_Overrides.Set(binding.NodeId, binding.Target, std::move(value));
 			}
+			for (const auto& entry : m_ScriptOverrides.Entries())
+			{
+				m_Overrides.Set(entry.NodeId, entry.Property, entry.Value);
+			}
 			if (!m_Bindings.Warnings().empty() && !m_BindingProblemReported)
 			{
 				// 解析器缺失 / 实体或字段缺失:一条可读警告(只报一次,不每帧刷屏)。
@@ -341,6 +346,11 @@ namespace World
 				WLD_CORE_WARN("[ui] binding '{0}' (node '{1}', target '{2}') not resolved: {3}",
 					first.Source, first.NodeId, first.Target, first.Message);
 			}
+		}
+		else if (!m_ScriptOverrides.Empty())
+		{
+			for (const auto& entry : m_ScriptOverrides.Entries())
+				m_Overrides.Set(entry.NodeId, entry.Property, entry.Value);
 		}
 
 		// OwnChannel(Runtime):每帧重建本窗口的无障碍节点:绘制前清上一帧,绘制后节点与画面同源。
@@ -750,6 +760,28 @@ namespace World
 		const UI::UiInputFrame& frame = m_Router.LastFrame();
 		// 指针(含滚轮)被 UI 消费 ⇒ 玩法本帧不得再收到(contract.ui-runtime §5)。
 		return frame.PointerConsumed || frame.WheelConsumed;
+	}
+
+	void UiHost::SetProperty(std::string nodeId, std::string prop, std::string value)
+	{
+		m_Overrides.Set(nodeId, prop, value);
+		m_ScriptOverrides.Set(std::move(nodeId), std::move(prop), std::move(value));
+	}
+
+	std::string UiHost::GetProperty(std::string_view nodeId, std::string_view prop) const
+	{
+		if (const std::string* over = m_Overrides.Find(nodeId, prop))
+			return *over;
+		if (const UI::UiNodeInstance* node = m_Screen.Find(nodeId))
+			if (node->Source)
+				if (const UI::UiProp* p = node->Source->FindProp(prop))
+					return p->Value;
+		return {};
+	}
+
+	void UiHost::ClearScriptOverrides()
+	{
+		m_ScriptOverrides.Clear();
 	}
 
 	void UiHost::SetEditingText(std::string_view nodeId, std::string text)
