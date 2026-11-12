@@ -80,6 +80,7 @@ namespace World
 
 		static std::shared_ptr<Tilemap> LoadFromFile(const std::string& filepath);
 		static std::shared_ptr<Tilemap> GetOrLoad(const std::string& filepath);
+		static void RegisterInCache(const std::string& filepath, std::shared_ptr<Tilemap> tilemap);
 		static void ClearCache();
 		bool SaveToFile(const std::string& filepath) const;
 

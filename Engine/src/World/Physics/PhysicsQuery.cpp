@@ -4,6 +4,7 @@
 #include "World/Asset/ProjectManifest.h"
 #include "World/Core/StringPool.h"
 #include "World/Scene/Components.h"
+#include "World/Renderer/Tilemap.h"
 #include "World/Terrain/Terrain.h"
 #include "World/Terrain/TerrainRenderer.h"
 
@@ -230,6 +231,7 @@ namespace World::Physics
 			entt::entity Entity = entt::null;
 			ColliderType Type = ColliderType::Box;
 			uint32_t Layer = 1;
+			bool IsSensor = false;
 			glm::vec3 Center { 0.0f };
 			glm::quat Orientation { 1.0f, 0.0f, 0.0f, 0.0f };
 			glm::vec3 HalfExtents { 0.5f };
@@ -309,6 +311,7 @@ namespace World::Physics
 				info.Entity = entity;
 				info.Type = ColliderType::Box;
 				info.Layer = layer;
+				info.IsSensor = box2d.IsSensor;
 				info.Center = glm::vec3(loc.x + box2d.Offset.x, loc.y + box2d.Offset.y, loc.z);
 				info.Orientation = rot;
 				info.HalfExtents = glm::vec3(box2d.Size.x * std::abs(scale.x), box2d.Size.y * std::abs(scale.y), 1.0f);
@@ -327,6 +330,7 @@ namespace World::Physics
 				info.Entity = entity;
 				info.Type = ColliderType::Sphere;
 				info.Layer = layer;
+				info.IsSensor = circle2d.IsSensor;
 				info.Center = glm::vec3(loc.x + circle2d.Offset.x, loc.y + circle2d.Offset.y, loc.z);
 				info.Orientation = rot;
 				info.Radius = circle2d.Radius * std::max(std::abs(scale.x), std::abs(scale.y));
@@ -345,6 +349,7 @@ namespace World::Physics
 				info.Entity = entity;
 				info.Type = ColliderType::Capsule;
 				info.Layer = layer;
+				info.IsSensor = cap2d.IsSensor;
 				info.Center = glm::vec3(loc.x + cap2d.Offset.x, loc.y + cap2d.Offset.y, loc.z);
 				if (cap2d.Direction == 0)
 				{
@@ -359,6 +364,47 @@ namespace World::Physics
 					info.Radius = cap2d.Radius * std::abs(scale.y);
 				}
 				colliders.push_back(info);
+			}
+
+			for (auto entity : reg.view<TilemapComponent>())
+			{
+				const auto& tmc = reg.get<TilemapComponent>(entity);
+				if (!tmc.GenerateCollision || !tmc.Tilemap.HasPath()) continue;
+				const std::string& tmPath = StringPool::Get().PathOf(tmc.Tilemap.Path);
+				if (tmPath.empty()) continue;
+				auto tm = Tilemap::GetOrLoad(tmPath);
+				if (!tm) continue;
+
+				uint32_t layer = GetEntityLayer(reg, entity);
+				if ((layer & layerMask) == 0) continue;
+
+				glm::vec3 loc, scale; glm::quat rot;
+				GetEntityTransform(reg, entity, loc, rot, scale);
+
+				const float cellW = (tmc.CellSize.x > 0.0f ? tmc.CellSize.x : tm->GetCellSize().x) * std::abs(scale.x);
+				const float cellH = (tmc.CellSize.y > 0.0f ? tmc.CellSize.y : tm->GetCellSize().y) * std::abs(scale.y);
+				const float mapW = static_cast<float>(tm->GetWidth()) * cellW;
+				const float mapH = static_cast<float>(tm->GetHeight()) * cellH;
+
+				const auto rects = tm->ComputeMergedColliderRects();
+				for (const auto& r : rects)
+				{
+					const float cx = -mapW * 0.5f + (r.X + r.Width * 0.5f) * cellW;
+					const float cy = +mapH * 0.5f - (r.Y + r.Height * 0.5f) * cellH;
+					const float hx = (r.Width * cellW) * 0.5f;
+					const float hy = (r.Height * cellH) * 0.5f;
+					if (hx > 1e-5f && hy > 1e-5f)
+					{
+						ColliderInfo info;
+						info.Entity = entity;
+						info.Type = ColliderType::Box;
+						info.Layer = layer;
+						info.Center = loc + glm::vec3(cx, cy, 0.0f);
+						info.Orientation = rot;
+						info.HalfExtents = glm::vec3(hx, hy, 1.0f);
+						colliders.push_back(info);
+					}
+				}
 			}
 
 			return colliders;
@@ -858,5 +904,148 @@ namespace World::Physics
 			}
 		}
 		return results;
+	}
+
+	PhysicsQuerySystem::MoveAndSlide2DResult PhysicsQuerySystem::MoveAndSlide2D(Scene& scene, entt::entity entity, const glm::vec2& velocity, float dt)
+	{
+		MoveAndSlide2DResult res;
+		auto& reg = scene.GetRegistry();
+		if (!reg.valid(entity))
+			return res;
+
+		auto* tc = reg.try_get<TransformComponent>(entity);
+		if (!tc)
+			return res;
+
+		glm::vec2 curPos(tc->Location.x, tc->Location.y);
+		glm::vec2 curVel = velocity;
+		res.FinalPosition = curPos;
+		res.FinalVelocity = curVel;
+
+		if (dt <= 0.0f)
+			return res;
+
+		float halfX = 0.4f, halfY = 0.4f;
+		if (const auto* bc = reg.try_get<BoxCollider2DComponent>(entity))
+		{
+			halfX = std::max(0.05f, bc->Size.x * std::abs(tc->Scale.x));
+			halfY = std::max(0.05f, bc->Size.y * std::abs(tc->Scale.y));
+		}
+		else if (const auto* cc = reg.try_get<CircleCollider2DComponent>(entity))
+		{
+			float r = std::max(0.05f, cc->Radius * std::max(std::abs(tc->Scale.x), std::abs(tc->Scale.y)));
+			halfX = r;
+			halfY = r;
+		}
+		else
+		{
+			halfX = std::max(0.05f, 0.5f * std::abs(tc->Scale.x));
+			halfY = std::max(0.05f, 0.5f * std::abs(tc->Scale.y));
+		}
+
+		auto colliders = CollectColliders(scene, 0xFFFFFFFF);
+
+		for (const auto& col : colliders)
+		{
+			if (col.Entity == entity || col.IsSensor) continue;
+			if (col.Type == ColliderType::Box)
+			{
+				float dx = curPos.x - col.Center.x;
+				float px = (halfX + col.HalfExtents.x) - std::abs(dx);
+				if (px <= 0.0f) continue;
+
+				float dy = curPos.y - col.Center.y;
+				float py = (halfY + col.HalfExtents.y) - std::abs(dy);
+				if (py <= 0.0f) continue;
+
+				if (px < py)
+				{
+					curPos.x += (dx < 0.0f ? -px : px);
+				}
+				else
+				{
+					curPos.y += (dy < 0.0f ? -py : py);
+				}
+				res.Collided = true;
+			}
+		}
+
+		glm::vec2 remainingDisp = curVel * dt;
+		const int maxIterations = 3;
+
+		for (int iter = 0; iter < maxIterations; ++iter)
+		{
+			float dispLen = glm::length(remainingDisp);
+			if (dispLen < 1e-5f)
+				break;
+
+			glm::vec2 dir = remainingDisp / dispLen;
+			float earliestT = dispLen;
+			glm::vec2 hitNormal(0.0f);
+			bool hitOccurred = false;
+
+			for (const auto& col : colliders)
+			{
+				if (col.Entity == entity || col.IsSensor) continue;
+				if (col.Type == ColliderType::Box)
+				{
+					glm::vec2 boxMin(col.Center.x - col.HalfExtents.x - halfX, col.Center.y - col.HalfExtents.y - halfY);
+					glm::vec2 boxMax(col.Center.x + col.HalfExtents.x + halfX, col.Center.y + col.HalfExtents.y + halfY);
+
+					float nearX = (dir.x != 0.0f) ? ((dir.x > 0.0f ? boxMin.x : boxMax.x) - curPos.x) / dir.x : -1e9f;
+					float farX  = (dir.x != 0.0f) ? ((dir.x > 0.0f ? boxMax.x : boxMin.x) - curPos.x) / dir.x : 1e9f;
+					float nearY = (dir.y != 0.0f) ? ((dir.y > 0.0f ? boxMin.y : boxMax.y) - curPos.y) / dir.y : -1e9f;
+					float farY  = (dir.y != 0.0f) ? ((dir.y > 0.0f ? boxMax.y : boxMin.y) - curPos.y) / dir.y : 1e9f;
+
+					if (nearX > farX) std::swap(nearX, farX);
+					if (nearY > farY) std::swap(nearY, farY);
+
+					float tEnter = std::max(nearX, nearY);
+					float tExit  = std::min(farX, farY);
+
+					if (tExit >= 0.0f && tEnter <= tExit && tEnter < earliestT && tEnter >= -0.01f)
+					{
+						earliestT = std::max(0.0f, tEnter);
+						hitOccurred = true;
+						if (nearX > nearY)
+						{
+							hitNormal = glm::vec2(dir.x > 0.0f ? -1.0f : 1.0f, 0.0f);
+						}
+						else
+						{
+							hitNormal = glm::vec2(0.0f, dir.y > 0.0f ? -1.0f : 1.0f);
+						}
+					}
+				}
+			}
+
+			if (hitOccurred)
+			{
+				res.Collided = true;
+				float moveDist = std::max(0.0f, earliestT - 0.001f);
+				curPos += dir * moveDist;
+				remainingDisp -= dir * moveDist;
+
+				float dotDisp = glm::dot(remainingDisp, hitNormal);
+				if (dotDisp < 0.0f)
+					remainingDisp -= dotDisp * hitNormal;
+
+				float dotVel = glm::dot(curVel, hitNormal);
+				if (dotVel < 0.0f)
+					curVel -= dotVel * hitNormal;
+			}
+			else
+			{
+				curPos += remainingDisp;
+				remainingDisp = glm::vec2(0.0f);
+				break;
+			}
+		}
+
+		tc->Location.x = curPos.x;
+		tc->Location.y = curPos.y;
+		res.FinalPosition = curPos;
+		res.FinalVelocity = curVel;
+		return res;
 	}
 }

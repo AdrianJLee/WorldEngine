@@ -9,6 +9,9 @@
 #include "World/Physics/PhysicsEvents.h"
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
+#include "World/Renderer/Tilemap.h"
+#include "World/Core/StringPool.h"
+#include "World/Utils/Paths.h"
 #include "World/Script/LuaType/LuaTypeHelpers.h"
 #include "World/Scene/Scene.h"
 #include "World/Script/Runtime/ScriptEngine.h"
@@ -1242,6 +1245,253 @@ namespace World
 			return NewUserdataOf(bindings, "Entity", entity);
 		}
 
+		ScriptValue CreateTilemapImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateTilemap requires an active scene");
+
+			std::string name = "Tilemap";
+			if (count >= 1 && args[0].IsString()) args[0].AsString(&name);
+
+			float cellW = 1.0f, cellH = 1.0f;
+			if (count >= 2 && args[1].IsNumber()) { double v; args[1].AsNumber(&v); cellW = static_cast<float>(v); }
+			if (count >= 3 && args[2].IsNumber()) { double v; args[2].AsNumber(&v); cellH = static_cast<float>(v); }
+
+			uint32_t cols = 16, rows = 16;
+			if (count >= 4 && args[3].IsNumber()) { double v; args[3].AsNumber(&v); cols = static_cast<uint32_t>(v); }
+			if (count >= 5 && args[4].IsNumber()) { double v; args[4].AsNumber(&v); rows = static_cast<uint32_t>(v); }
+
+			std::string atlasPath = "";
+			if (count >= 6 && args[5].IsString()) args[5].AsString(&atlasPath);
+
+			bool generateCollision = true;
+			if (count >= 7 && args[6].IsBoolean()) args[6].AsBool(&generateCollision);
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			entity.AddComponent<TransformComponent>(glm::vec3{ 0.0f });
+
+			auto& tmc = entity.AddComponent<TilemapComponent>();
+			tmc.CellSize = glm::vec2(cellW, cellH);
+			tmc.GenerateCollision = generateCollision;
+
+			std::string tmVirtualPath = "tilemaps/" + name + ".wtilemap";
+			auto tm = std::make_shared<Tilemap>(name, cols, rows, atlasPath);
+			tm->SetCellSize(glm::vec2(cellW, cellH));
+			Tilemap::RegisterInCache(tmVirtualPath, tm);
+			tmc.Tilemap = AssetRef::FromPath(tmVirtualPath);
+
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
+		ScriptValue CreateLight2DImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			Scene* activeScene = ScriptEngine::GetActiveScene();
+			if (!activeScene)
+				throw std::logic_error("ecs:CreateLight2D requires an active scene");
+
+			std::string name = "Light2D";
+			if (count >= 1 && args[0].IsString()) args[0].AsString(&name);
+
+			std::string typeStr = "point";
+			if (count >= 2 && args[1].IsString()) args[1].AsString(&typeStr);
+
+			glm::vec4 col { 1.0f, 1.0f, 1.0f, 1.0f };
+			if (count >= 3 && args[2].IsString())
+			{
+				std::string hex;
+				args[2].AsString(&hex);
+				col = ParseHexColor4(hex, col);
+			}
+
+			float intensity = 1.0f;
+			if (count >= 4 && args[3].IsNumber()) { double v; args[3].AsNumber(&v); intensity = static_cast<float>(v); }
+
+			float radius = 5.0f;
+			if (count >= 5 && args[4].IsNumber()) { double v; args[4].AsNumber(&v); radius = static_cast<float>(v); }
+
+			float x = 0.0f, y = 0.0f;
+			if (count >= 6 && args[5].IsNumber()) { double v; args[5].AsNumber(&v); x = static_cast<float>(v); }
+			if (count >= 7 && args[6].IsNumber()) { double v; args[6].AsNumber(&v); y = static_cast<float>(v); }
+
+			Entity entity = Entity::CreateEntity(activeScene, name);
+			entity.AddComponent<TransformComponent>(glm::vec3{ x, y, 0.0f });
+
+			if (typeStr == "global")
+			{
+				auto& gl = entity.AddComponent<GlobalLight2DComponent>();
+				gl.Color = glm::vec3(col.r, col.g, col.b);
+				gl.Intensity = intensity;
+			}
+			else
+			{
+				auto& pl = entity.AddComponent<PointLight2DComponent>();
+				pl.Color = glm::vec3(col.r, col.g, col.b);
+				pl.Intensity = intensity;
+				pl.OuterRadius = radius;
+				pl.InnerRadius = radius * 0.1f;
+			}
+
+			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
+			return NewUserdataOf(bindings, "Entity", entity);
+		}
+
+		static std::shared_ptr<Tilemap> GetTilemapFromEntityArg(const ScriptValue& val, TilemapComponent** outComp = nullptr)
+		{
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene) return nullptr;
+
+			entt::entity ent = entt::null;
+			if (val.IsNumber())
+			{
+				double num = 0.0;
+				val.AsNumber(&num);
+				ent = static_cast<entt::entity>(static_cast<uint32_t>(num));
+			}
+			else
+			{
+				ScriptBindingContext& context = ScriptEngine::GetBindingContext();
+				Entity* entityPtr = nullptr;
+				if (context.Unwrap<Entity>("Entity", val, &entityPtr) && entityPtr && entityPtr->IsValid())
+				{
+					ent = static_cast<entt::entity>(*entityPtr);
+				}
+			}
+
+			if (ent == entt::null) return nullptr;
+			auto& reg = const_cast<entt::registry&>(static_cast<const Scene*>(scene)->GetRegistry());
+			if (!reg.valid(ent)) return nullptr;
+
+			auto* tmc = reg.try_get<TilemapComponent>(ent);
+			if (!tmc) return nullptr;
+			if (outComp) *outComp = tmc;
+
+			if (!tmc->Tilemap.HasPath()) return nullptr;
+			const std::string& path = StringPool::Get().PathOf(tmc->Tilemap.Path);
+			if (path.empty()) return nullptr;
+
+			return Tilemap::GetOrLoad(path);
+		}
+
+		ScriptValue TilemapSetTileImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 4) throw std::logic_error("Tilemap.SetTile expects (entity, x, y, tileId, solid?)");
+			auto tm = GetTilemapFromEntityArg(args[0]);
+			if (!tm) return ScriptValue::Boolean(false);
+
+			double x = 0, y = 0, tid = 0;
+			args[1].AsNumber(&x);
+			args[2].AsNumber(&y);
+			args[3].AsNumber(&tid);
+			tm->SetTile(static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint16_t>(tid));
+
+			if (count >= 5 && args[4].IsBoolean())
+			{
+				bool solid = false;
+				args[4].AsBool(&solid);
+				tm->SetSolid(static_cast<uint32_t>(x), static_cast<uint32_t>(y), solid);
+			}
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue TilemapFillImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 6) throw std::logic_error("Tilemap.Fill expects (entity, x0, y0, x1, y1, tileId, solid?)");
+			auto tm = GetTilemapFromEntityArg(args[0]);
+			if (!tm) return ScriptValue::Boolean(false);
+
+			double x0 = 0, y0 = 0, x1 = 0, y1 = 0, tid = 0;
+			args[1].AsNumber(&x0);
+			args[2].AsNumber(&y0);
+			args[3].AsNumber(&x1);
+			args[4].AsNumber(&y1);
+			args[5].AsNumber(&tid);
+
+			bool solid = false;
+			if (count >= 7 && args[6].IsBoolean()) args[6].AsBool(&solid);
+
+			tm->FillRect(static_cast<uint32_t>(x0), static_cast<uint32_t>(y0),
+				static_cast<uint32_t>(x1), static_cast<uint32_t>(y1),
+				static_cast<uint16_t>(tid), solid);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue TilemapClearImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 1) throw std::logic_error("Tilemap.Clear expects (entity)");
+			auto tm = GetTilemapFromEntityArg(args[0]);
+			if (!tm) return ScriptValue::Boolean(false);
+			tm->Clear();
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue TilemapGetTileImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 3) throw std::logic_error("Tilemap.GetTile expects (entity, x, y)");
+			auto tm = GetTilemapFromEntityArg(args[0]);
+			if (!tm) return ScriptValue::Number(0.0);
+			double x = 0, y = 0;
+			args[1].AsNumber(&x);
+			args[2].AsNumber(&y);
+			return ScriptValue::Number(static_cast<double>(tm->GetTile(static_cast<uint32_t>(x), static_cast<uint32_t>(y))));
+		}
+
+		ScriptValue TilemapSetSolidImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 4) throw std::logic_error("Tilemap.SetSolid expects (entity, x, y, solid)");
+			auto tm = GetTilemapFromEntityArg(args[0]);
+			if (!tm) return ScriptValue::Boolean(false);
+			double x = 0, y = 0;
+			args[1].AsNumber(&x);
+			args[2].AsNumber(&y);
+			bool solid = false;
+			args[3].AsBool(&solid);
+			tm->SetSolid(static_cast<uint32_t>(x), static_cast<uint32_t>(y), solid);
+			return ScriptValue::Boolean(true);
+		}
+
+		ScriptValue TilemapIsSolidImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 3) throw std::logic_error("Tilemap.IsSolid expects (entity, x, y)");
+			auto tm = GetTilemapFromEntityArg(args[0]);
+			if (!tm) return ScriptValue::Boolean(false);
+			double x = 0, y = 0;
+			args[1].AsNumber(&x);
+			args[2].AsNumber(&y);
+			return ScriptValue::Boolean(tm->IsSolid(static_cast<uint32_t>(x), static_cast<uint32_t>(y)));
+		}
+
+		ScriptValue TilemapSaveAssetImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			if (count < 2) throw std::logic_error("Tilemap.SaveAsset expects (entity, filepath)");
+			TilemapComponent* comp = nullptr;
+			auto tm = GetTilemapFromEntityArg(args[0], &comp);
+			if (!tm || !comp) return ScriptValue::Boolean(false);
+			std::string savePath;
+			args[1].AsString(&savePath);
+			if (savePath.empty()) return ScriptValue::Boolean(false);
+
+			std::filesystem::path fullPath = savePath;
+			if (!fullPath.is_absolute()) fullPath = World::Paths::AssetRoot() / savePath;
+			bool ok = tm->SaveToFile(fullPath.string());
+			if (ok)
+			{
+				Tilemap::RegisterInCache(savePath, tm);
+				comp->Tilemap = AssetRef::FromPath(savePath);
+			}
+			return ScriptValue::Boolean(ok);
+		}
+
 		ScriptValue CreateRawEntityImpl(const ScriptValue*, std::size_t)
 		{
 			ScriptBindingContext& bindings = ScriptEngine::GetBindingContext();
@@ -1978,6 +2228,79 @@ namespace World
 			{ "color", "string", ScriptServiceArgType::String, false, "Optional hex sprite color." },
 			{ "isSensor", "boolean", ScriptServiceArgType::Boolean, false, "True = trigger/sensor only without solid collision." },
 		};
+		static const ScriptServiceParam createTilemapParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, false, "Entity tag name (default 'Tilemap')." },
+			{ "cellW", "number", ScriptServiceArgType::Number, false, "Cell width in world units (default 1.0)." },
+			{ "cellH", "number", ScriptServiceArgType::Number, false, "Cell height in world units (default 1.0)." },
+			{ "cols", "number", ScriptServiceArgType::Number, false, "Grid column count (default 16)." },
+			{ "rows", "number", ScriptServiceArgType::Number, false, "Grid row count (default 16)." },
+			{ "atlasOrTexPath", "string", ScriptServiceArgType::String, false, "Texture or Atlas path." },
+			{ "generateCollision", "boolean", ScriptServiceArgType::Boolean, false, "Generate merged Box2D collision (default true)." },
+		};
+		static const ScriptServiceParam createLight2DParams[] = {
+			{ "name", "string", ScriptServiceArgType::String, false, "Entity tag name (default 'Light2D')." },
+			{ "type", "string", ScriptServiceArgType::String, false, "'point' or 'global' (default 'point')." },
+			{ "colorHex", "string", ScriptServiceArgType::String, false, "RGBA hex color (default '#FFFFFFFF')." },
+			{ "intensity", "number", ScriptServiceArgType::Number, false, "Light intensity (default 1.0)." },
+			{ "radius", "number", ScriptServiceArgType::Number, false, "Point light radius (default 5.0)." },
+			{ "x", "number", ScriptServiceArgType::Number, false, "World X position (default 0.0)." },
+			{ "y", "number", ScriptServiceArgType::Number, false, "World Y position (default 0.0)." },
+		};
+		static const ScriptServiceParam tilemapSetTileParams[] = {
+			{ "entity", "number|Entity", ScriptServiceArgType::Number, true, "Tilemap entity ID or handle." },
+			{ "x", "number", ScriptServiceArgType::Number, true, "Grid column X." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "Grid row Y." },
+			{ "tileId", "number", ScriptServiceArgType::Number, true, "Tile index (0 = empty, 1..N = sub-texture)." },
+			{ "solid", "boolean", ScriptServiceArgType::Boolean, false, "Whether cell has static Box2D collision." },
+		};
+		static const ScriptServiceParam tilemapFillParams[] = {
+			{ "entity", "number|Entity", ScriptServiceArgType::Number, true, "Tilemap entity ID or handle." },
+			{ "x0", "number", ScriptServiceArgType::Number, true, "Start column X." },
+			{ "y0", "number", ScriptServiceArgType::Number, true, "Start row Y." },
+			{ "x1", "number", ScriptServiceArgType::Number, true, "End column X." },
+			{ "y1", "number", ScriptServiceArgType::Number, true, "End row Y." },
+			{ "tileId", "number", ScriptServiceArgType::Number, true, "Tile index." },
+			{ "solid", "boolean", ScriptServiceArgType::Boolean, false, "Whether region has static Box2D collision." },
+		};
+		static const ScriptServiceParam tilemapClearParams[] = {
+			{ "entity", "number|Entity", ScriptServiceArgType::Number, true, "Tilemap entity ID or handle." },
+		};
+		static const ScriptServiceParam tilemapGetTileParams[] = {
+			{ "entity", "number|Entity", ScriptServiceArgType::Number, true, "Tilemap entity ID or handle." },
+			{ "x", "number", ScriptServiceArgType::Number, true, "Grid column X." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "Grid row Y." },
+		};
+		static const ScriptServiceParam tilemapSetSolidParams[] = {
+			{ "entity", "number|Entity", ScriptServiceArgType::Number, true, "Tilemap entity ID or handle." },
+			{ "x", "number", ScriptServiceArgType::Number, true, "Grid column X." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "Grid row Y." },
+			{ "solid", "boolean", ScriptServiceArgType::Boolean, true, "Whether cell is solid/impassable." },
+		};
+		static const ScriptServiceParam tilemapIsSolidParams[] = {
+			{ "entity", "number|Entity", ScriptServiceArgType::Number, true, "Tilemap entity ID or handle." },
+			{ "x", "number", ScriptServiceArgType::Number, true, "Grid column X." },
+			{ "y", "number", ScriptServiceArgType::Number, true, "Grid row Y." },
+		};
+		static const ScriptServiceParam tilemapSaveAssetParams[] = {
+			{ "entity", "number|Entity", ScriptServiceArgType::Number, true, "Tilemap entity ID or handle." },
+			{ "filepath", "string", ScriptServiceArgType::String, true, "Relative asset path (e.g. 'tilemaps/level1.wtilemap')." },
+		};
+		static const ScriptServiceMethod tilemapMethods[] = {
+			{ "SetTile", &TilemapSetTileImpl, tilemapSetTileParams, 5, 5, "boolean",
+				"Set tile index and optional solid collision flag at grid cell (x, y)." },
+			{ "Fill", &TilemapFillImpl, tilemapFillParams, 7, 7, "boolean",
+				"Fill rectangular grid region [x0, y0] to [x1, y1] with tileId and optional solid collision." },
+			{ "Clear", &TilemapClearImpl, tilemapClearParams, 1, 1, "boolean",
+				"Clear all tiles and collision masks from tilemap." },
+			{ "GetTile", &TilemapGetTileImpl, tilemapGetTileParams, 3, 3, "number",
+				"Get tile index at grid cell (x, y)." },
+			{ "SetSolid", &TilemapSetSolidImpl, tilemapSetSolidParams, 4, 4, "boolean",
+				"Set solid collision flag at grid cell (x, y)." },
+			{ "IsSolid", &TilemapIsSolidImpl, tilemapIsSolidParams, 3, 3, "boolean",
+				"Query solid collision flag at grid cell (x, y)." },
+			{ "SaveAsset", &TilemapSaveAssetImpl, tilemapSaveAssetParams, 2, 2, "boolean",
+				"Serialize and save tilemap grid into .wtilemap asset file." },
+		};
 		static const ScriptServiceParam destroyEntityParams[] = {
 			{ "entity", "userdata", ScriptServiceArgType::None, true, "Entity to destroy; queued, committed at the next safe point." },
 		};
@@ -2033,6 +2356,10 @@ namespace World
 				"Create an orthographic 2D camera entity with AudioListenerComponent; returns Entity handle." },
 			{ "CreateBox2D", &CreateBox2DImpl, createBox2DParams, 8, 8, "Entity",
 				"Create a 2D physics body + sprite + collider entity (Static/Dynamic/Sensor); returns Entity handle." },
+			{ "CreateTilemap", &CreateTilemapImpl, createTilemapParams, 7, 7, "Entity",
+				"Create a 2D tilemap entity (Transform + TilemapComponent) with cached Tilemap grid in one step; returns Entity handle." },
+			{ "CreateLight2D", &CreateLight2DImpl, createLight2DParams, 7, 7, "Entity",
+				"Create a 2D lighting entity (Transform + PointLight2DComponent or GlobalLight2DComponent); returns Entity handle." },
 			{ "CreateRawEntity", &CreateRawEntityImpl, nullptr, 0, 0, "Entity",
 				"Create a lightweight anonymous entity (no Tag, no UUID) in the active scene and return its handle." },
 			{ "DestroyEntity", &DestroyEntityImpl, destroyEntityParams, 1, 1, "boolean",
@@ -2063,6 +2390,8 @@ namespace World
 		static const ScriptServiceBinding tables[] = {
 			{ "ecs", "Read-only pure-ECS table (also exposed as \"world\"): queries, systems, entity lifecycle, component observers and physics events.",
 				methods, sizeof(methods) / sizeof(methods[0]) },
+			{ "Tilemap", "Read-only 2D tilemap manipulation service: set tiles, fill rectangles, query cells, and update collision.",
+				tilemapMethods, sizeof(tilemapMethods) / sizeof(tilemapMethods[0]) },
 		};
 		if (count)
 			*count = sizeof(tables) / sizeof(tables[0]);
@@ -2142,6 +2471,26 @@ namespace World
 		{
 			if (error) *error = "failed to set global 'world'";
 			return false;
+		}
+
+		if (methodCount >= 2)
+		{
+			const ScriptServiceBinding& tmDesc = ecsDescriptor[1];
+			ScriptTableRef tilemapTable = vm->CreateTable();
+			if (tilemapTable.IsValid())
+			{
+				for (std::size_t index = 0; index < tmDesc.MethodCount; ++index)
+				{
+					const ScriptServiceMethod& method = tmDesc.Methods[index];
+					tilemapTable.SetField(method.Name, bindings.CreateFunction(method.Name, method.Function));
+				}
+				tilemapTable.SetMetaField("__newindex", bindings.CreateFunction("Tilemap",
+					[](const ScriptValue*, std::size_t) -> ScriptValue
+					{
+						throw std::logic_error("Tilemap service table is read-only");
+					}));
+				vm->SetGlobal("Tilemap", tilemapTable.ToValue());
+			}
 		}
 
 		// Comp & Components: 组件名常量表 (Comp.Transform -> "TransformComponent")

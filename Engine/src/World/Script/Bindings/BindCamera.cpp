@@ -6,6 +6,9 @@
 #include "World/Scene/Components.h"
 #include "World/Scene/Entity.h"
 #include "World/Scene/Scene.h"
+#include "World/Core/Application.h"
+#include "World/Scene/Systems/CameraSystem.h"
+#include <GLFW/glfw3.h>
 #include "World/Script/Bindings/BindServices.h"
 #include "World/Script/Runtime/ScriptEngine.h"
 #include "World/Script/Vm/LuauVm.h"
@@ -337,6 +340,160 @@ namespace World
 			return table.ToValue();
 		}
 
+		static void GetCameraViewportDimensions(Scene& scene, float& outW, float& outH)
+		{
+			outW = 1280.0f;
+			outH = 720.0f;
+			if (Application::HasInstance())
+			{
+				if (void* nativeWin = Application::Get().GetWindow().GetNativeWindow())
+				{
+					int w = 0, h = 0;
+					glfwGetWindowSize(static_cast<GLFWwindow*>(nativeWin), &w, &h);
+					if (w > 0 && h > 0)
+					{
+						outW = static_cast<float>(w);
+						outH = static_cast<float>(h);
+						return;
+					}
+				}
+				outW = static_cast<float>(Application::Get().GetWindow().GetWidth());
+				outH = static_cast<float>(Application::Get().GetWindow().GetHeight());
+			}
+		}
+
+		static bool FindPrimary2DCameraInfo(Scene& scene, float vpW, float vpH, glm::vec2& outCamPos, float& outZoom, float& outAspect)
+		{
+			const auto& reg = static_cast<const Scene&>(scene).GetRegistry();
+			auto view = reg.view<CameraComponent, TransformComponent>();
+			for (auto ent : view)
+			{
+				const auto& cc = view.get<CameraComponent>(ent);
+				if (cc.Primary)
+				{
+					const auto& tc = view.get<TransformComponent>(ent);
+					outCamPos = glm::vec2(tc.Location.x, tc.Location.y);
+					outZoom = cc.Camera.m_OrthographicZoom > 0.001f ? cc.Camera.m_OrthographicZoom : 5.0f;
+					outAspect = cc.Camera.m_AspectRatio > 0.001f ? cc.Camera.m_AspectRatio : (vpW / std::max(1.0f, vpH));
+					return true;
+				}
+			}
+			for (auto ent : view)
+			{
+				const auto& cc = view.get<CameraComponent>(ent);
+				const auto& tc = view.get<TransformComponent>(ent);
+				outCamPos = glm::vec2(tc.Location.x, tc.Location.y);
+				outZoom = cc.Camera.m_OrthographicZoom > 0.001f ? cc.Camera.m_OrthographicZoom : 5.0f;
+				outAspect = cc.Camera.m_AspectRatio > 0.001f ? cc.Camera.m_AspectRatio : (vpW / std::max(1.0f, vpH));
+				return true;
+			}
+			outCamPos = glm::vec2(0.0f);
+			outZoom = 5.0f;
+			outAspect = vpW / std::max(1.0f, vpH);
+			return false;
+		}
+
+		ScriptValue CameraScreenToWorld2DImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = CameraServiceBindings(nullptr)[0].Methods[5];
+			CheckArgumentCount("Camera", method, count, 2);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene)
+				throw std::logic_error("Camera.ScreenToWorld2D requires an active scene");
+
+			const float screenX = static_cast<float>(RequireNumber("Camera", method, args, count, 0));
+			const float screenY = static_cast<float>(RequireNumber("Camera", method, args, count, 1));
+
+			float vpW = 1280.0f, vpH = 720.0f;
+			GetCameraViewportDimensions(*scene, vpW, vpH);
+
+			glm::vec2 camPos(0.0f);
+			float zoom = 5.0f;
+			float aspect = 16.0f / 9.0f;
+			FindPrimary2DCameraInfo(*scene, vpW, vpH, camPos, zoom, aspect);
+
+			const float ndcX = (screenX / vpW) * 2.0f - 1.0f;
+			const float ndcY = 1.0f - (screenY / vpH) * 2.0f;
+
+			const float worldX = camPos.x + ndcX * (aspect * zoom);
+			const float worldY = camPos.y + ndcY * zoom;
+
+			ScriptTableRef result = ScriptEngine::GetState().CreateTable();
+			result.SetField("x", ScriptValue::Number(static_cast<double>(worldX)));
+			result.SetField("y", ScriptValue::Number(static_cast<double>(worldY)));
+			result.SetArrayElement(1, ScriptValue::Number(static_cast<double>(worldX)));
+			result.SetArrayElement(2, ScriptValue::Number(static_cast<double>(worldY)));
+			return result.ToValue();
+		}
+
+		ScriptValue CameraWorldToScreen2DImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = CameraServiceBindings(nullptr)[0].Methods[6];
+			CheckArgumentCount("Camera", method, count, 2);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene)
+				throw std::logic_error("Camera.WorldToScreen2D requires an active scene");
+
+			const float worldX = static_cast<float>(RequireNumber("Camera", method, args, count, 0));
+			const float worldY = static_cast<float>(RequireNumber("Camera", method, args, count, 1));
+
+			float vpW = 1280.0f, vpH = 720.0f;
+			GetCameraViewportDimensions(*scene, vpW, vpH);
+
+			glm::vec2 camPos(0.0f);
+			float zoom = 5.0f;
+			float aspect = 16.0f / 9.0f;
+			FindPrimary2DCameraInfo(*scene, vpW, vpH, camPos, zoom, aspect);
+
+			const float ndcX = (worldX - camPos.x) / (aspect * zoom);
+			const float ndcY = (worldY - camPos.y) / zoom;
+
+			const float screenX = (ndcX + 1.0f) * 0.5f * vpW;
+			const float screenY = (1.0f - ndcY) * 0.5f * vpH;
+
+			ScriptTableRef result = ScriptEngine::GetState().CreateTable();
+			result.SetField("x", ScriptValue::Number(static_cast<double>(screenX)));
+			result.SetField("y", ScriptValue::Number(static_cast<double>(screenY)));
+			result.SetArrayElement(1, ScriptValue::Number(static_cast<double>(screenX)));
+			result.SetArrayElement(2, ScriptValue::Number(static_cast<double>(screenY)));
+			return result.ToValue();
+		}
+
+		ScriptValue CameraGetMouseWorld2DImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = CameraServiceBindings(nullptr)[0].Methods[7];
+			CheckArgumentCount("Camera", method, count, 0);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene)
+				throw std::logic_error("Camera.GetMouseWorld2D requires an active scene");
+
+			glm::vec2 mousePos = scene->GetInputSnapshot().MousePosition;
+
+			float vpW = 1280.0f, vpH = 720.0f;
+			GetCameraViewportDimensions(*scene, vpW, vpH);
+
+			glm::vec2 camPos(0.0f);
+			float zoom = 5.0f;
+			float aspect = 16.0f / 9.0f;
+			FindPrimary2DCameraInfo(*scene, vpW, vpH, camPos, zoom, aspect);
+
+			const float ndcX = (mousePos.x / vpW) * 2.0f - 1.0f;
+			const float ndcY = 1.0f - (mousePos.y / vpH) * 2.0f;
+
+			const float worldX = camPos.x + ndcX * (aspect * zoom);
+			const float worldY = camPos.y + ndcY * zoom;
+
+			ScriptTableRef result = ScriptEngine::GetState().CreateTable();
+			result.SetField("x", ScriptValue::Number(static_cast<double>(worldX)));
+			result.SetField("y", ScriptValue::Number(static_cast<double>(worldY)));
+			result.SetArrayElement(1, ScriptValue::Number(static_cast<double>(worldX)));
+			result.SetArrayElement(2, ScriptValue::Number(static_cast<double>(worldY)));
+			return result.ToValue();
+		}
+
 		// ---- PostProcess 方法实现 ----
 
 		ScriptValue PostProcessFlashWhiteImpl(const ScriptValue* args, std::size_t count)
@@ -466,6 +623,16 @@ namespace World
 			{ "h", "number", ScriptServiceArgType::Number, true, "Normalized dead zone half-height [0, 1]." },
 		};
 
+		static const ScriptServiceParam cameraScreenToWorld2DParams[] = {
+			{ "screenX", "number", ScriptServiceArgType::Number, true, "X pixel coordinate on screen or viewport." },
+			{ "screenY", "number", ScriptServiceArgType::Number, true, "Y pixel coordinate on screen or viewport." },
+		};
+
+		static const ScriptServiceParam cameraWorldToScreen2DParams[] = {
+			{ "worldX", "number", ScriptServiceArgType::Number, true, "X coordinate in 2D world units." },
+			{ "worldY", "number", ScriptServiceArgType::Number, true, "Y coordinate in 2D world units." },
+		};
+
 		static const ScriptServiceMethod cameraMethods[] = {
 			{ "Shake", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -496,6 +663,24 @@ namespace World
 				return CameraGetPositionImpl(args, count);
 			}, nullptr, 0, 0, "table",
 				"Get current primary camera world position as a { x, y, z } table." },
+
+			{ "ScreenToWorld2D", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return CameraScreenToWorld2DImpl(args, count);
+			}, cameraScreenToWorld2DParams, 2, 2, "table",
+				"Transform screen/viewport pixel coordinates into 2D world coordinates. Returns { x, y }." },
+
+			{ "WorldToScreen2D", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return CameraWorldToScreen2DImpl(args, count);
+			}, cameraWorldToScreen2DParams, 2, 2, "table",
+				"Transform 2D world coordinates into screen/viewport pixel coordinates. Returns { x, y }." },
+
+			{ "GetMouseWorld2D", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return CameraGetMouseWorld2DImpl(args, count);
+			}, nullptr, 0, 0, "table",
+				"Get the current mouse pointer location projected onto the 2D world plane. Returns { x, y }." },
 		};
 
 		// PostProcess

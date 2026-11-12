@@ -1029,6 +1029,28 @@ function ecs:CreateCamera2D(name, x, y, zoom, isPrimary) end
 ---@return Entity
 function ecs:CreateBox2D(name, x, y, w, h, isDynamic, color, isSensor) end
 
+---Create a 2D tilemap entity (Transform + TilemapComponent) with cached Tilemap grid in one step; returns Entity handle.
+---@param name string? Entity tag name (default 'Tilemap').
+---@param cellW number? Cell width in world units (default 1.0).
+---@param cellH number? Cell height in world units (default 1.0).
+---@param cols number? Grid column count (default 16).
+---@param rows number? Grid row count (default 16).
+---@param atlasOrTexPath string? Texture or Atlas path.
+---@param generateCollision boolean? Generate merged Box2D collision (default true).
+---@return Entity
+function ecs:CreateTilemap(name, cellW, cellH, cols, rows, atlasOrTexPath, generateCollision) end
+
+---Create a 2D lighting entity (Transform + PointLight2DComponent or GlobalLight2DComponent); returns Entity handle.
+---@param name string? Entity tag name (default 'Light2D').
+---@param type string? 'point' or 'global' (default 'point').
+---@param colorHex string? RGBA hex color (default '#FFFFFFFF').
+---@param intensity number? Light intensity (default 1.0).
+---@param radius number? Point light radius (default 5.0).
+---@param x number? World X position (default 0.0).
+---@param y number? World Y position (default 0.0).
+---@return Entity
+function ecs:CreateLight2D(name, type, colorHex, intensity, radius, x, y) end
+
 ---Create a lightweight anonymous entity (no Tag, no UUID) in the active scene and return its handle.
 ---@return Entity
 function ecs:CreateRawEntity() end
@@ -1096,6 +1118,64 @@ function ecs:Off(handle) end
 ---@param name string Library path relative to the content root's scripts/lib/, without extension and using '/' separators (e.g. "util/math"); .luau is preferred and .lua is the fallback.
 ---@return any
 function ecs:RequireLib(name) end
+
+-- Global service table 'Tilemap': read-only; there is no runtime constructor.
+---Read-only 2D tilemap manipulation service: set tiles, fill rectangles, query cells, and update collision.
+---@class Tilemap
+Tilemap = {}
+
+---Set tile index and optional solid collision flag at grid cell (x, y).
+---@param entity number|Entity Tilemap entity ID or handle.
+---@param x number Grid column X.
+---@param y number Grid row Y.
+---@param tileId number Tile index (0 = empty, 1..N = sub-texture).
+---@param solid boolean? Whether cell has static Box2D collision.
+---@return boolean
+function Tilemap:SetTile(entity, x, y, tileId, solid) end
+
+---Fill rectangular grid region [x0, y0] to [x1, y1] with tileId and optional solid collision.
+---@param entity number|Entity Tilemap entity ID or handle.
+---@param x0 number Start column X.
+---@param y0 number Start row Y.
+---@param x1 number End column X.
+---@param y1 number End row Y.
+---@param tileId number Tile index.
+---@param solid boolean? Whether region has static Box2D collision.
+---@return boolean
+function Tilemap:Fill(entity, x0, y0, x1, y1, tileId, solid) end
+
+---Clear all tiles and collision masks from tilemap.
+---@param entity number|Entity Tilemap entity ID or handle.
+---@return boolean
+function Tilemap:Clear(entity) end
+
+---Get tile index at grid cell (x, y).
+---@param entity number|Entity Tilemap entity ID or handle.
+---@param x number Grid column X.
+---@param y number Grid row Y.
+---@return number
+function Tilemap:GetTile(entity, x, y) end
+
+---Set solid collision flag at grid cell (x, y).
+---@param entity number|Entity Tilemap entity ID or handle.
+---@param x number Grid column X.
+---@param y number Grid row Y.
+---@param solid boolean Whether cell is solid/impassable.
+---@return boolean
+function Tilemap:SetSolid(entity, x, y, solid) end
+
+---Query solid collision flag at grid cell (x, y).
+---@param entity number|Entity Tilemap entity ID or handle.
+---@param x number Grid column X.
+---@param y number Grid row Y.
+---@return boolean
+function Tilemap:IsSolid(entity, x, y) end
+
+---Serialize and save tilemap grid into .wtilemap asset file.
+---@param entity number|Entity Tilemap entity ID or handle.
+---@param filepath string Relative asset path (e.g. 'tilemaps/level1.wtilemap').
+---@return boolean
+function Tilemap:SaveAsset(entity, filepath) end
 
 -- Global script UI table 'ui': read-only; there is no runtime constructor.
 ---Immediate-mode script UI table and declarative .wui document control.

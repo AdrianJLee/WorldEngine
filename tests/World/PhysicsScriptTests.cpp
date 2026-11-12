@@ -201,6 +201,60 @@ assert(math.abs(hit.Distance - 4.0) < 0.05, "Raycast distance mismatch")
 			assert(type(disp.z) == "number", "MoveAndSlide result z must be number")
 		)", "MoveAndSlideScriptTest");
 
+		// 8.1. MoveAndSlide2D 角色物理滑动碰撞不变量测试 (对标 Godot move_and_slide)
+		RUN_OK(R"(
+			-- 静态墙壁放在 x=5.0 处, 宽度 1.0 (左表面在 x=4.5)
+			local wall = ecs.CreateBox2D("Wall", 5.0, 0.0, 1.0, 10.0, false)
+			-- 玩家放在 x=0.0, 0.0, 尺寸 1.0 (半宽 0.5)
+			local player = ecs.CreateBox2D("Player", 0.0, 0.0, 1.0, 1.0, true)
+
+			-- 角色斜向冲撞右侧墙体: vx=10.0 (按无阻挡 0.6 秒将到达 x=6.0 穿透墙壁), vy=5.0 (垂直切向滑动)
+			local move = Physics.MoveAndSlide2D(player, 10.0, 5.0, 0.6)
+			assert(type(move) == "table", "MoveAndSlide2D must return table")
+			assert(move.collided == true, "MoveAndSlide2D must report collision with wall")
+			-- 不变量 1: 绝对阻挡防穿模: 玩家右边缘不得穿过 x=4.5 墙壁表面 (玩家中心不得超过 4.01)
+			assert(move.x <= 4.05, string.format("Player penetrated wall! move.x=%.3f, expected <= 4.05", move.x))
+			-- 不变量 2: 冲向法线垂直分量被消除 (vx 归零或不再向右加速)
+			assert(move.vx <= 0.001, string.format("Normal velocity not eliminated! move.vx=%.3f", move.vx))
+			-- 不变量 3: 切线滑动保持: Y 轴分量保持并产生正向位移
+			assert(move.y > 0.5, string.format("Tangential slide failed! move.y=%.3f", move.y))
+		)", "MoveAndSlide2DInvariantTest");
+
+		// 8.2. Tilemap 瓦片地图脚本服务测试 (ecs.CreateTilemap & Tilemap.*)
+		RUN_OK(R"(
+			local map = ecs.CreateTilemap("TestDungeonMap", 1.0, 1.0, 20, 10, "", true)
+			assert(map ~= nil, "CreateTilemap must return entity handle")
+
+			local setOk = Tilemap.SetTile(map, 3, 4, 7, true)
+			assert(setOk == true, "Tilemap.SetTile should succeed")
+			assert(Tilemap.GetTile(map, 3, 4) == 7, "Tilemap.GetTile should return 7")
+			assert(Tilemap.IsSolid(map, 3, 4) == true, "Tilemap.IsSolid should return true")
+
+			local fillOk = Tilemap.Fill(map, 0, 0, 5, 5, 2, false)
+			assert(fillOk == true, "Tilemap.Fill should succeed")
+			assert(Tilemap.GetTile(map, 2, 2) == 2, "Tilemap.GetTile in fill region should be 2")
+			assert(Tilemap.IsSolid(map, 2, 2) == false, "Tilemap.IsSolid in fill region should be false")
+		)", "TilemapServiceTest");
+
+		// 8.3. 2D 摄像机屏幕与世界坐标双向对齐不变量测试 (Camera.ScreenToWorld2D / WorldToScreen2D)
+		RUN_OK(R"(
+			local cam2d = ecs.CreateCamera2D("MainCam2D", 0.0, 0.0, 5.0, true)
+			assert(cam2d ~= nil, "CreateCamera2D must return entity")
+
+			-- 屏幕中心 (640, 360) 必须精确对齐世界坐标 (0.0, 0.0)
+			local centerWorld = Camera.ScreenToWorld2D(640.0, 360.0)
+			assert(math.abs(centerWorld.x) < 0.001, string.format("Center World X mismatch: %.4f", centerWorld.x))
+			assert(math.abs(centerWorld.y) < 0.001, string.format("Center World Y mismatch: %.4f", centerWorld.y))
+
+			-- 任意 2D 世界点往返一致性测试: World -> Screen -> World 误差 < 0.001
+			local testWorldX = 2.5
+			local testWorldY = -1.8
+			local screenPos = Camera.WorldToScreen2D(testWorldX, testWorldY)
+			local roundTrip = Camera.ScreenToWorld2D(screenPos.x, screenPos.y)
+			assert(math.abs(roundTrip.x - testWorldX) < 0.001, "RoundTrip X mismatch")
+			assert(math.abs(roundTrip.y - testWorldY) < 0.001, "RoundTrip Y mismatch")
+		)", "Camera2DCoordinateParityTest");
+
 		// 8.5. 物理材质加载与应用测试
 		RunOk(R"lua(
 			local mat = Physics.LoadMaterial("test_script_material.wphysmat")

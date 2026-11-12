@@ -771,6 +771,33 @@ namespace World
 			return ScriptValue::Boolean(true);
 		}
 
+		ScriptValue PhysicsMoveAndSlide2DImpl(const ScriptValue* args, std::size_t count)
+		{
+			NormalizeArgs(args, count);
+			const ScriptServiceMethod& method = PhysicsServiceBindings(nullptr)[0].Methods[20];
+			CheckArgumentCount("Physics", method, count, 4);
+			Scene* scene = ScriptEngine::GetActiveScene();
+			if (!scene)
+				throw std::logic_error("Physics.MoveAndSlide2D requires an active scene");
+
+			entt::entity ent = RequireEntityId("Physics", method, args, count, 0);
+			const float vx = static_cast<float>(RequireNumber("Physics", method, args, count, 1));
+			const float vy = static_cast<float>(RequireNumber("Physics", method, args, count, 2));
+			const float dt = static_cast<float>(RequireNumber("Physics", method, args, count, 3));
+
+			Physics::PhysicsQuerySystem::MoveAndSlide2DResult r = Physics::PhysicsQuerySystem::MoveAndSlide2D(*scene, ent, glm::vec2(vx, vy), dt);
+
+			ScriptTableRef result = ScriptEngine::GetState().CreateTable();
+			result.SetField("x", ScriptValue::Number(static_cast<double>(r.FinalPosition.x)));
+			result.SetField("y", ScriptValue::Number(static_cast<double>(r.FinalPosition.y)));
+			result.SetField("vx", ScriptValue::Number(static_cast<double>(r.FinalVelocity.x)));
+			result.SetField("vy", ScriptValue::Number(static_cast<double>(r.FinalVelocity.y)));
+			result.SetField("collided", ScriptValue::Boolean(r.Collided));
+			result.SetArrayElement(1, ScriptValue::Number(static_cast<double>(r.FinalPosition.x)));
+			result.SetArrayElement(2, ScriptValue::Number(static_cast<double>(r.FinalPosition.y)));
+			return result.ToValue();
+		}
+
 		// ---- 参数与方法描述 ----
 
 		static const ScriptServiceParam physicsRaycastParams[] = {
@@ -900,6 +927,13 @@ namespace World
 			{ "material", "string|table", ScriptServiceArgType::String | ScriptServiceArgType::Table, true, "Path to .wphysmat file or table { Friction, Restitution, ... }." },
 		};
 
+		static const ScriptServiceParam physicsMoveAndSlide2DParams[] = {
+			{ "entity", "number|Entity", ScriptServiceArgType::Number, true, "Target 2D entity ID or handle." },
+			{ "vx", "number", ScriptServiceArgType::Number, true, "Velocity X in units/sec." },
+			{ "vy", "number", ScriptServiceArgType::Number, true, "Velocity Y in units/sec." },
+			{ "dt", "number", ScriptServiceArgType::Number, true, "Delta time in seconds." },
+		};
+
 		static const ScriptServiceMethod physicsMethods[] = {
 			{ "Raycast", [](const ScriptValue* args, std::size_t count) -> ScriptValue
 			{
@@ -1020,6 +1054,12 @@ namespace World
 				return PhysicsApplyMaterialImpl(args, count);
 			}, physicsApplyMaterialParams, 2, 2, "boolean",
 				"Apply physical material (.wphysmat path or table) to entity's PhysicsMaterialComponent. Returns boolean success." },
+
+			{ "MoveAndSlide2D", [](const ScriptValue* args, std::size_t count) -> ScriptValue
+			{
+				return PhysicsMoveAndSlide2DImpl(args, count);
+			}, physicsMoveAndSlide2DParams, 4, 4, "table",
+				"Execute 2D kinematic move-and-slide projection with wall sliding and collision resolution. Returns { x, y, vx, vy, collided }." },
 		};
 
 		static const ScriptServiceBinding physicsServiceBindingsTable[] = {

@@ -73,5 +73,15 @@ namespace World::Physics
 		// 区域重叠检测: 盒体
 		static std::vector<entt::entity> OverlapBox(Scene& scene, const glm::vec3& center, const glm::vec3& halfExtents,
 		                                            uint32_t layerMask = 0xFFFFFFFF);
+
+		struct MoveAndSlide2DResult
+		{
+			glm::vec2 FinalPosition { 0.0f };
+			glm::vec2 FinalVelocity { 0.0f };
+			bool Collided { false };
+		};
+
+		// 2D 角色物理滑动控制器 (对标 Godot move_and_slide)
+		static MoveAndSlide2DResult MoveAndSlide2D(Scene& scene, entt::entity entity, const glm::vec2& velocity, float dt);
 	};
 }

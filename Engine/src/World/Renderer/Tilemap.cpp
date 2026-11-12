@@ -592,6 +592,12 @@ namespace World
 		return tm;
 	}
 
+	void Tilemap::RegisterInCache(const std::string& filepath, std::shared_ptr<Tilemap> tilemap)
+	{
+		std::lock_guard<std::mutex> lock(s_TilemapCacheMutex);
+		s_TilemapCache[filepath] = std::move(tilemap);
+	}
+
 	void Tilemap::ClearCache()
 	{
 		std::lock_guard<std::mutex> lock(s_TilemapCacheMutex);
